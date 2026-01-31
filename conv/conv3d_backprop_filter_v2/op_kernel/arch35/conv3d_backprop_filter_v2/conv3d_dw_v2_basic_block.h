@@ -227,8 +227,8 @@ protected:
             this->mCnt_ > 1 ? this->singleShapeM_ : this->mCoreTail_, this->dw_.ctx.tiling_->baseM);
         uint64_t maxNIter = Ceil(this->nCnt_ > 1 ? this->singleShapeN_ : nCoreTailAlign, this->dw_.ctx.tiling_->baseN);
 
-        uint32_t barrierTriggerCnt = 0;
-        constexpr uint32_t barrierThreshold = 14;
+        uint64_t barrierTriggerCnt = 0;
+        constexpr uint64_t barrierThreshold = 14;
         for (uint64_t i = 0; i < maxMIter; i++) {
             for (uint64_t j = 0; j < maxNIter; j++) {
                 bool isCurIter = (i < this->dw_.ctx.mIter_) && (j < this->dw_.ctx.nIter_);
