@@ -101,6 +101,23 @@ struct Conv3DBackpropFilterV2TilingData {
     TConv3DDwTiling dwTiling;
     TConv3DDwBasicBlockTiling basicBlockTiling;
 };
+
+struct Conv2DBackpropFilterWinogradTilingData {
+    uint32_t batch = 1;
+    uint32_t cin = 1;
+    uint32_t cout = 1;
+    uint32_t ho = 1;
+    uint32_t wo = 1;
+    uint32_t hi = 1;
+    uint32_t wi = 1;
+    uint32_t hk = 1;
+    uint32_t wk = 1;
+    uint16_t padH = 1;
+    uint16_t padW = 1;
+    uint16_t singleShapeCin = 1;
+    uint16_t singleShapeK = 1;
+    uint32_t hf32Flag = 1;
+};
 }  // namespace conv_bp_v2_kernel
 }
 #endif  // CONV3D_BACKPROP_FILTER_V2_TILING_DATA_H
