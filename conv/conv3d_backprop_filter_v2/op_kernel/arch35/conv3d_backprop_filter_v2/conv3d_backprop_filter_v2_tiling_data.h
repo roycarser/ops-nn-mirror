@@ -115,7 +115,8 @@ struct Conv2DBackpropFilterWinogradTilingData {
     uint16_t padH = 1;
     uint16_t padW = 1;
     uint16_t singleShapeCin = 1;
-    uint16_t singleShapeK = 1;
+    uint16_t singleShapeTilesH = 1;
+    uint16_t singleShapeTilesW =1;
     uint32_t hf32Flag = 1;
 };
 }  // namespace conv_bp_v2_kernel
