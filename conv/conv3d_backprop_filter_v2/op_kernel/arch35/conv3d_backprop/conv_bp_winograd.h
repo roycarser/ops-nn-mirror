@@ -866,12 +866,12 @@ private:
     }
 
 
-    //        wElementsInPadHBlock(fmapW+wLeft+wRight)
+    //        wElementsInPadHBlock(fmapW+wLeft+wRight)*c0
     //       +---------------------------------+
     //   hTop|             Padding             |
     //       +--wLeft--+-------------+---------+
     //       |         |  NoPadding  |         |
-    //       | Padding |fmapH x      | Padding |hElementsInPadWBlock(fmapH)
+    //       | Padding |fmapH x      | Padding |hElementsInPadWBlock(fmapH)*c0
     //       |         |    fmapW    |         |
     //       +---------+-------------+--wRight-+
     //       |             Padding             |hButton
@@ -962,12 +962,11 @@ private:
         }
     }
 
-    // 不写成泛型本地不知道为什么编译不过
-    template <typename S, typename M>
+
     static __simd_callee__ inline void TransformVf(
-        S& s0, S& s1, S& s2, S& s3,
-        S& d0, S& d1, S& d2, S& d3,
-        M& mask)
+        MicroAPI::RegTensor<T>& s0, MicroAPI::RegTensor<T>& s1, MicroAPI::RegTensor<T>& s2, MicroAPI::RegTensor<T>& s3,
+        MicroAPI::RegTensor<T>& d0, MicroAPI::RegTensor<T>& d1, MicroAPI::RegTensor<T>& d2, MicroAPI::RegTensor<T>& d3,
+        MicroAPI::MaskReg& mask)
     {
         MicroAPI::Sub(d0, s0, s2, mask);
         MicroAPI::Add(d1, s1, s2, mask);
