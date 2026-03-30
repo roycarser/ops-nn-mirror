@@ -24,389 +24,95 @@
 using namespace AscendC;
 
 //winograd在f23下单个tile长宽为4,元素数为16,fmap上stride为2
-static constexpr uint8_t F23_WINO_TILE_SIZE_4 = 4;
-static constexpr uint8_t F23_WINO_TILE_ELEMENTS_16 = 16;
-static constexpr uint8_t F23_WINO_TILE_FMAP_STRIDE_2 = 2;
+static constexpr uint32_t F23_WINO_TILE_SIZE_4 = 4;
+static constexpr uint32_t F23_WINO_TILE_ELEMENTS_16 = 16;
+static constexpr uint32_t F23_WINO_TILE_FMAP_STRIDE_2 = 2;
 
 template <typename T>
-static constexpr __aicore__ inline uint8_t C0()
+static constexpr __aicore__ inline uint32_t C0()
 {
     return DEFAULT_C0_SIZE / sizeof(T);
 }
 
 template <typename T>
-static constexpr __aicore__ inline uint8_t VL()
+static constexpr __aicore__ inline uint32_t VL()
 {
     return VECTOR_REG_WIDTH / sizeof(T);
 }
 
-//一个位宽能包含几个C0
-static constexpr uint8_t BLK_COUNT_IN_VL = VECTOR_REG_WIDTH / DEFAULT_C0_SIZE;
+template <typename T, typename U>
+static __aicore__ inline U C1(U c)
+{
+    constexpr uint32_t c0 = C0<T>();
+    if constexpr (c0 == 16) {
+        return (c + 15) >> 4;
+    } else if constexpr (c0 == 8) {
+        return (c + 7) >> 3;
+    } else {
+        static_assert(!(c0 == 16 || c0 == 8), "unsupported c0 size");
+        return 0;
+    }
+}
+
+template <typename T, typename U>
+static __aicore__ inline U AlignC0(U c)
+{
+    if constexpr (constexpr uint32_t c0 = C0<T>(); c0 == 16) {
+        return (c + 15) & ~15;
+    } else if constexpr (c0 == 8) {
+        return (c + 7) & ~7;
+    } else {
+        static_assert(!(c0 == 16 || c0 == 8), "unsupported c0 size");
+        return 0;
+    }
+}
+
+//一个位宽能包含几个DataBlock(c0)
+static constexpr uint32_t BLK_COUNT_IN_VL = VECTOR_REG_WIDTH / DEFAULT_C0_SIZE;
+//fmap在搬运时hw轴按照16元素对齐
+//这里主要是为了方便Transpose5HD在float32做转置
+static constexpr uint32_t FMAP_HW_ALIGNED_16 = 16;
 
 
-template <typename DType>
-class WinoFmapTransformer {
+struct HWBox {
+    uint32_t hIdx;
+    uint32_t wIdx;
+    uint32_t hLength;
+    uint32_t wLength;
+    uint32_t elements;
+};
+
+struct HWPad {
+    uint16_t hTop;
+    uint16_t hBottom;
+    uint16_t wLeft;
+    uint16_t wRight;
+
+    static __aicore__ inline bool exists(const HWPad& expansion)
+    {
+        return expansion.hTop != 0
+               || expansion.hBottom != 0
+               || expansion.wLeft != 0
+               || expansion.wRight != 0;
+    }
+};
+
+struct TileBox {
+    HWBox tile;
+    HWBox fmap;
+    HWPad pad;
+};
+
+class F23FmapTileCalculator {
 public:
-    __aicore__ inline WinoFmapTransformer(
-        TPipe* pipe,
-        GM_ADDR gm,
-        const uint32_t cin,
-        const uint32_t hi,
-        const uint32_t wi,
-        const uint16_t padH,
-        const uint16_t padW,
-        const uint16_t singleShapeCin,
-        const uint16_t singleShapeK)
-        : cin_(cin),
-          cin1cin0_(Ops::Base::CeilAlign(cin_, C0<DType>())),
-          hi_(hi),
-          wi_(wi),
-          padH_(padH),
-          padW_(padW),
-          tilesH_(CalculateF23Tiles(hi_ + 2 * padH_)),
-          tilesW_(CalculateF23Tiles(wi_ + 2 * padW_)),
-          singleShapeCin_(singleShapeCin),
-          singleShapeK_(singleShapeK),
-          //单次变换需要的buf为c1c0*tiles*16
-          singleShapeBufLength_(
-              Ops::Base::CeilAlign(singleShapeCin_, C0<DType>())
-              * F23_WINO_TILE_ELEMENTS_16
-              * singleShapeK_)
-    {
-        fmapGm_.SetGlobalBuffer(gm);
-        uint32_t doubleBufferLength = singleShapeBufLength_ * 2 * sizeof(DType);
-        //gm->vec->l1这条路这TQue里配置的同步事件不符合实际场景,所以自己用TBuf管理同步
-        pipe->InitBuffer(vBuf_, doubleBufferLength);
-    }
-
-    struct TileKIter {
-        uint32_t kIdx = 0;
-        bool end = false;
-    };
-
-    __aicore__ inline void Transform(
-        uint32_t batchIdx,
-        uint32_t cIdx,
-        TileKIter& iter)
-    {
-        //上层控制
-        ascendc_assert(iter.end==false);
-
-        uint32_t totalTiles = tilesH_ * tilesW_;
-        uint16_t cLength = Std::min(singleShapeCin_, cin_ - cIdx);
-        uint16_t tileKLength = Std::min(singleShapeK_, totalTiles - iter.kIdx);
-
-        if ASCEND_IS_AIV {
-            LocalTensor<DType> vBuf = GetPingPongBuffer();
-            const TileBox box = CalculateF23TileBox(iter.kIdx, tileKLength);
-            CopyInC1HTileWC0(vBuf, batchIdx, cIdx, cLength, box);
-            //TODO setFlag/waitFlag
-            // PipeBarrier<PIPE_ALL>();
-            Compute(vBuf, cLength, box);
-            // PipeBarrier<PIPE_ALL>();
-        }
-
-        iter.kIdx += tileKLength;
-        iter.end = iter.kIdx >= totalTiles;
-    }
-
-private:
-    struct HWBox {
-        uint32_t hIdx;
-        uint32_t wIdx;
-        uint32_t hLength;
-        uint32_t wLength;
-
-        static __aicore__ inline uint32_t elements(const HWBox& box)
-        {
-            return box.wLength * box.hLength;
-        }
-    };
-
-    struct HWPad {
-        uint16_t hTop;
-        uint16_t hBottom;
-        uint16_t wLeft;
-        uint16_t wRight;
-    };
-
-    struct TileBox {
-        HWBox bodyTile;
-        HWBox bodyFmap;
-        HWPad bodyPad;
-
-        HWBox tailTile;
-        HWBox tailFmap;
-        HWPad tailPad;
-
-        HWBox headTile;
-        HWBox headFmap;
-        HWPad headPad;
-    };
-
-    //根据K将涉及的连续tile切分成body,head,tail3个矩形逐个处理
-    //
-    //   tileH=4,tileW=3,tileKIdx=2,tileKLength=8
-    //        w0     w1     w2
-    //     +------+------+------+
-    //  h0 |      |      | head |
-    //     +------+------+------+
-    //  h1 | body | body | body |
-    //     +------+------+------+
-    //  h2 | body | body | body |
-    //     +------+------+------+
-    //  h3 | tail |      |      |
-    //     +------+------+------+
-    //
-    __aicore__ inline TileBox CalculateF23TileBox(uint32_t tileKIdx, uint16_t tileKLength)
-    {
-        uint32_t tileKEndIdx = tileKIdx + tileKLength - 1;
-        uint32_t startTileH = tileKIdx / tilesW_;
-        uint32_t startTileW = tileKIdx - startTileH * tilesW_; // startTileH % tilesW_;
-        uint32_t endTileH = tileKEndIdx / tilesW_;
-        uint32_t endTileW = tileKEndIdx - endTileH * tilesW_; // tileKEndIdx % tilesW_;
-
-        bool hasHead = startTileW > 0 && startTileH != endTileH;
-
-        TileBox box;
-
-        //
-        //考虑让body始终存在,应该能减少一些处理body时的if/jump开销,
-        //所以在移除head只有1行的情况下,[h1w0,h1w1]这种要判定为body而非tail
-        //因此tail必须在bodyTileHIdx小于endTileH才存在,
-        //        w0     w1    w2
-        //     +------+------+------+
-        //  h0 |      |      | head |
-        //     +------+------+------+
-        //  h1 | body | body |      |
-        //     +------+------+------+
-        //
-        box.bodyTile.hIdx = hasHead ? startTileH + 1 : startTileH;
-        box.bodyTile.wIdx = hasHead ? 0 : startTileW;
-
-        bool hasTail = endTileW < (tilesW_ - 1) && box.bodyTile.hIdx != endTileH;
-        uint32_t bodyTileHEndIdx = hasTail ? endTileH - 1 : endTileH;
-        uint32_t bodyTileWEndIdx = hasTail ? tilesW_ - 1 : endTileW;
-
-        box.bodyTile.hLength = bodyTileHEndIdx - box.bodyTile.hIdx + 1;
-        box.bodyTile.wLength = bodyTileWEndIdx - box.bodyTile.wIdx + 1;
-        F23TileBox2FmapBox(box.bodyTile, box.bodyFmap, box.bodyPad);
-
-        box.headTile.hIdx = startTileH;
-        box.headTile.wIdx = startTileW;
-        box.headTile.wLength = hasHead ? tilesW_ - startTileW : 0;
-        box.headTile.hLength = 1;
-        F23TileBox2FmapBox(box.headTile, box.headFmap, box.headPad);
-
-        box.tailTile.hIdx = endTileH;
-        box.tailTile.wIdx = 0;
-        box.tailTile.wLength = hasTail ? endTileW : 0;
-        box.tailTile.hLength = 1;
-        F23TileBox2FmapBox(box.tailTile, box.tailFmap, box.tailPad);
-
-        return box;
-    }
-
-    //
-    // 在[tileH,tileW]的区域中搬入fmap
-    // 假设fmap大小为[6,6],那最终会生成2x2个tile,tile所占空间为[8,8]
-    // 当前就在该[8,8]空间的左上角按照[fmapH,fmapW]搬入[6,6]的数据
-    // 可以看到w方向并非连续,而是存在tileW-fmapW=8-6=2个空隙
-    // 所以连续内存里实际搬入格式为[fmapH,tileW],一个tileW里只有fmapW个有效数据
-    //
-    //      w0 w1 w2 w3 w4 w5 w6 w7
-    //     +--+--+--+--+--+--+--+--+
-    //  h0 |xx|xx|xx|xx|xx|xx|  |  |
-    //     +--+--+--+--+--+--+--+--+
-    //  h1 |xx|xx|xx|xx|xx|xx|  |  |
-    //     +--+--+--+--+--+--+--+--+
-    //  h2 |xx|xx|xx|xx|xx|xx|  |  |
-    //     +--+--+--+--+--+--+--+--+
-    //  h3 |xx|xx|xx|xx|xx|xx|  |  |
-    //     +--+--+--+--+--+--+--+--+
-    //  h4 |xx|xx|xx|xx|xx|xx|  |  |
-    //     +--+--+--+--+--+--+--+--+
-    //  h5 |xx|xx|xx|xx|xx|xx|  |  |
-    //     +--+--+--+--+--+--+--+--+
-    //  h6 |  |  |  |  |  |  |  |  |
-    //     +--+--+--+--+--+--+--+--+
-    //  h7 |  |  |  |  |  |  |  |  |
-    //     +--+--+--+--+--+--+--+--+
-    //
-    // 若存在pad,则只搬入fmap数据,但是位置按照fmap调整
-    // 如下为padTop为1,padLeft为2的情况,当前tile所需要
-    // 的[6,6]fmap区域中非padding区域大小只有[5,4],仅在
-    // 这[5,4]对应的区域搬入
-    //
-    //      w0 w1 w2 w3 w4 w5 w6 w7
-    //     +--+--+--+--+--+--+--+--+
-    //  h0 |p |p |p |p |p |p |  |  |
-    //     +--+--+--+--+--+--+--+--+
-    //  h1 |p |p |xx|xx|xx|xx|  |  |
-    //     +--+--+--+--+--+--+--+--+
-    //  h2 |p |p |xx|xx|xx|xx|  |  |
-    //     +--+--+--+--+--+--+--+--+
-    //  h3 |p |p |xx|xx|xx|xx|  |  |
-    //     +--+--+--+--+--+--+--+--+
-    //  h4 |p |p |xx|xx|xx|xx|  |  |
-    //     +--+--+--+--+--+--+--+--+
-    //  h5 |p |p |xx|xx|xx|xx|  |  |
-    //     +--+--+--+--+--+--+--+--+
-    //  h6 |  |  |  |  |  |  |  |  |
-    //     +--+--+--+--+--+--+--+--+
-    //  h7 |  |  |  |  |  |  |  |  |
-    //     +--+--+--+--+--+--+--+--+
-    //
-    __aicore__ inline void CopyInC1HTileWC0(
-        LocalTensor<DType>& vBuf,
-        uint32_t batchIdx,
-        uint32_t cIdx,
-        uint16_t cLength,
-        const TileBox& box)
-    {
-        uint32_t fmapBatchCinOffset = (batchIdx * cin_ + cIdx) * hi_ * wi_;
-        constexpr uint32_t tileElements = F23_WINO_TILE_ELEMENTS_16 * cin1cin0_;
-
-        //按照head/body/tail的顺序分配ub
-        uint32_t vBufBodyOffset = tileElements * HWBox::elements(box.headTile);
-        uint32_t vBufTailOffset = tileElements * HWBox::elements(box.bodyTile) + vBufBodyOffset;
-
-        CopyInTileBlockC1HTileWC0(
-            vBuf[vBufBodyOffset],
-            fmapBatchCinOffset, cLength,
-            box.bodyTile, box.bodyFmap, box.bodyPad);
-
-        if (HWBox::elements(box.headFmap) != 0) {
-            CopyInTileBlockC1HTileWC0(
-                vBuf,
-                fmapBatchCinOffset, cLength,
-                box.headTile, box.headFmap, box.headPad);
-        }
-
-        if (HWBox::elements(box.tailFmap) != 0) {
-            CopyInTileBlockC1HTileWC0(
-                vBuf[vBufTailOffset],
-                fmapBatchCinOffset, cLength,
-                box.tailTile, box.tailFmap, box.tailPad);
-        }
-    }
-
-    __aicore__ inline void CopyInTileBlockC1HTileWC0(
-        LocalTensor<DType>& vBuf,
-        uint32_t fmapBatchCinOffset,
-        uint16_t cLength,
+    static __aicore__ inline TileBox CalculateTileBox(
         const HWBox& tile,
-        const HWBox& fmap,
-        const HWPad& pad)
+        uint32_t hi,
+        uint32_t wi,
+        uint32_t padH,
+        uint32_t padW)
     {
-        //
-        //          startFmapH=0,fmapHLength=2
-        //          startFmapW=1,fmapWLength=3
-        //
-        //          n:  h0w0   h0w1   h0w2   h0w3   h1w0   h1w1   h1w2   h1w3
-        //            +------+------+------+------+------+------+------+------+
-        // d: cLength |      | xxxx DnBlock1 xxxx |      | xxxx DnBlock2 xxxx |
-        //            +------+------+------+------+------+------+------+------+
-        //
-
-        uint32_t tileWLength = tile.wLength * F23_WINO_TILE_SIZE_4;
-        Dn2NzParams dn2nz;
-        dn2nz.dnNum = fmap.hLength;
-        dn2nz.nValue = fmap.wLength;
-        dn2nz.dValue = cLength;
-        dn2nz.srcDnMatrixStride = wi_;
-        dn2nz.srcDValue = hi_ * wi_;
-        dn2nz.dstNzC0Stride = tileWLength * tile.hLength;
-        dn2nz.dstNzNStride = 1;
-        dn2nz.dstNzMatrixStride = tileWLength * C0<DType>();
-
-        DataCopy(
-            vBuf[(pad.hTop * tileWLength + pad.wLeft) * C0<DType>()],
-            fmapGm_[fmapBatchCinOffset + fmap.hIdx * wi_ + fmap.wIdx], dn2nz);
-    }
-
-
-    __aicore__ inline void Compute(LocalTensor<DType>& vBuf, uint16_t cLength, const TileBox& box)
-    {
-        uint32_t headBufLen = HWBox::elements(box.headTile) * F23_WINO_TILE_ELEMENTS_16 * cin1cin0_;
-        uint32_t bodyBufLen = HWBox::elements(box.bodyTile) * F23_WINO_TILE_ELEMENTS_16 * cin1cin0_;
-        uint32_t tailBufLen = HWBox::elements(box.tailTile) * F23_WINO_TILE_ELEMENTS_16 * cin1cin0_;
-
-        TransformToC1Th4Tw4C0(vBuf[headBufLen], cLength, box.bodyTile, box.bodyFmap, box.bodyPad);
-
-        if (headBufLen != 0) {
-            TransformToC1Th4Tw4C0(vBuf, cLength, box.headTile, box.headFmap, box.headPad);
-        }
-
-        if (tailBufLen != 0) {
-            TransformToC1Th4Tw4C0(vBuf[headBufLen + bodyBufLen], cLength, box.tailTile, box.tailFmap, box.tailPad);
-        }
-    }
-
-
-    __aicore__ inline void TransformToC1Th4Tw4C0(
-       LocalTensor<DType>& vBuf,
-        uint16_t cLength,
-        const HWBox& tile,
-        const HWBox& fmap,
-        const HWPad& pad)
-    {
-        if (HWBox::elements(fmap) != 0) {
-            UnfoldParams params;
-            params.cLength = cLength;
-            params.fmapH = fmap.hLength;
-            params.fmapW = fmap.wLength;
-            params.tileH = tile.hLength;
-            params.tileW = tile.wLength;
-            params.hElementsInUnfoldRows = tile.hLength * F23_WINO_TILE_SIZE_4;
-            params.wElementsInUnfoldCols = fmap.wLength * C0<DType>();
-            params.hRepeatTimesInUnfoldRows = Ops::Base::CeilDiv(
-                params.hElementsInUnfoldRows, static_cast<uint32_t>(BLK_COUNT_IN_VL));
-            params.wRepeatTimesInUnfoldCols = Ops::Base::CeilDiv(
-                params.wElementsInUnfoldCols, static_cast<uint32_t>(VL<DType>()));
-
-            params.pad = pad;
-            params.wElementsInPadHBlock = (fmap.wLength + pad.wLeft + pad.wRight) * C0<DType>();
-            params.hElementsInPadWBlock = fmap.hLength;
-            params.wRepeatTimesInPadHBlock = Ops::Base::CeilDiv(params.wElementsInPadHBlock, VL<DType>());
-            params.hRepeatTimesInPadWBlock = Ops::Base::CeilDiv(
-                params.hElementsInPadWBlock, static_cast<uint32_t>(BLK_COUNT_IN_VL));
-
-            VF_CALL<UnfoldFmapVf>(vBuf.GetPhyAddr(), params);
-
-        } else {
-            //整个tile都由padding区域产生,不做计算直接置0,
-            Duplicate(vBuf, 0, HWBox::elements(tile) * F23_WINO_TILE_ELEMENTS_16 * cLength * C0<DType>());
-        }
-    }
-
-    __aicore__ inline LocalTensor<DType> GetPingPongBuffer()
-    {
-        uint32_t offset = static_cast<uint32_t>(pingFlag_) * singleShapeBufLength_;
-        pingFlag_ = !pingFlag_;
-        return vBuf_.GetWithOffset<DType>(singleShapeBufLength_, offset);
-    }
-
-    TBuf<TPosition::VECIN> vBuf_;
-    GlobalTensor<DType> fmapGm_;
-    const uint32_t cin_;
-    const uint32_t cin1cin0_;
-    const uint32_t hi_;
-    const uint32_t wi_;
-    const uint16_t padH_;
-    const uint16_t padW_;
-    const uint32_t tilesH_;
-    const uint32_t tilesW_;
-    const uint16_t singleShapeCin_;
-    const uint16_t singleShapeK_;
-    const uint32_t singleShapeBufLength_;
-    bool pingFlag_ = true;
-
-    __aicore__ inline void F23TileBox2FmapBox(
-        const HWBox& tile,
-        HWBox& fmapBox,
-        HWPad& padBox)
-    {
+        // F23TileBox2FmapBox(box.tile, box.fmap, box.pad);
         //将tile转换成(fmap+pad)中坐标[start,end)
         uint32_t startH = tile.hIdx * F23_WINO_TILE_FMAP_STRIDE_2;
         uint32_t startW = tile.wIdx * F23_WINO_TILE_FMAP_STRIDE_2;
@@ -414,10 +120,10 @@ private:
         uint32_t endW = (tile.wIdx + tile.wLength - 1) * F23_WINO_TILE_FMAP_STRIDE_2 + F23_WINO_TILE_SIZE_4;
 
         //(fmap+pad)中实际非pad区域的坐标[start,end)
-        uint32_t startValidH = padH_;
-        uint32_t startValidW = padW_;
-        uint32_t endValidH = padH_ + hi_;
-        uint32_t endValidW = padW_ + wi_;
+        uint32_t startValidH = padH;
+        uint32_t startValidW = padW;
+        uint32_t endValidH = padH + hi;
+        uint32_t endValidW = padW + wi;
 
         //计算两个区域的相交矩形[start,end)
         uint32_t startFmapH = Std::max(startValidH, startH);
@@ -427,151 +133,403 @@ private:
 
         //tile区域和非padding区域不相交,整个tile都是在padding区域内
         bool allTilesInPadding = startFmapH >= endFmapH || startFmapW >= endFmapW;
-        //tile根本不存在,所有数据直接设置成0,endH,endW这时候应该由于产生-1直接溢出了,不能用了
-        bool emptyTiles = HWBox::elements(tile) == 0;
 
-        if (allTilesInPadding || emptyTiles) {
-            fmapBox.hIdx = 0;
-            fmapBox.wIdx = 0;
-            fmapBox.hLength = 0;
-            fmapBox.wLength = 0;
-            padBox.padHTop = 0;
-            padBox.padHBottom = emptyTiles ? 0 : endH - startH;
-            padBox.padWLeft = 0;
-            padBox.padWRight = emptyTiles ? 0 : endW - startW;
+        TileBox box = {};
+        box.tile = tile;
+        if (allTilesInPadding) {
+            box.fmap.hIdx = 0;
+            box.fmap.wIdx = 0;
+            box.fmap.hLength = 0;
+            box.fmap.wLength = 0;
+            box.fmap.elements = 0;
+            box.pad.hTop = 0;
+            box.pad.hBottom = endH - startH;
+            box.pad.wLeft = 0;
+            box.pad.wRight = endW - startW;
         } else {
-            fmapBox.hIdx = startFmapH - padH_;
-            fmapBox.wIdx = startFmapW - padW_;
-            fmapBox.hLength = endFmapH - startFmapH;
-            fmapBox.wLength = endFmapW - startFmapW;
-            padBox.padHTop = startFmapH - startH;
-            padBox.padHBottom = endH - endFmapH;
-            padBox.padWLeft = startFmapW - startW;
-            padBox.padWRight = endW - endFmapW;
+            box.fmap.hIdx = startFmapH - padH;
+            box.fmap.wIdx = startFmapW - padW;
+            box.fmap.hLength = endFmapH - startFmapH;
+            box.fmap.wLength = endFmapW - startFmapW;
+            box.fmap.elements = box.fmap.hLength * box.fmap.wLength;
+            box.pad.hTop = startFmapH - startH;
+            box.pad.hBottom = endH - endFmapH;
+            box.pad.wLeft = startFmapW - startW;
+            box.pad.wRight = endW - endFmapW;
+        }
+
+        return box;
+    }
+
+
+    static __aicore__ inline uint32_t Tiles(uint32_t dim)
+    {
+        //F23下,Fmap正变换是一个4*4的滑窗在Fmap上按stride为2滑动
+        //所以dim至少pad到4
+        return Ops::Base::CeilDiv(
+                   dim > F23_WINO_TILE_SIZE_4 ? dim - F23_WINO_TILE_SIZE_4 : 0,
+                   F23_WINO_TILE_FMAP_STRIDE_2) + 1;
+    }
+
+    static __aicore__ inline uint32_t FmapLength(uint32_t tiles)
+    {
+        //tile长度转换成fmap长度
+        return tiles == 0 ? 0 : (tiles - 1) * F23_WINO_TILE_FMAP_STRIDE_2 + F23_WINO_TILE_SIZE_4;
+    }
+};
+
+
+template <typename T>
+class WinoFmapTransformer {
+public:
+    __aicore__ inline WinoFmapTransformer(
+        TPipe* pipe,
+        __gm__ T* gm,
+        const uint32_t cin,
+        const uint32_t hi,
+        const uint32_t wi,
+        const uint16_t padH,
+        const uint16_t padW,
+        const uint16_t singleShapeCin,
+        const uint16_t singleShapeTilesH,
+        const uint16_t singleShapeTilesW,
+        const uint16_t transposeBufCnt)
+        : cin_(cin),
+          hi_(hi),
+          wi_(wi),
+          padH_(padH),
+          padW_(padW),
+          tilesH_(F23FmapTileCalculator::Tiles(hi_ + 2 * padH_)),
+          tilesW_(F23FmapTileCalculator::Tiles(wi_ + 2 * padW_)),
+          singleShapeCin_(singleShapeCin),
+          singleShapeTilesH_(singleShapeTilesH),
+          singleShapeTilesW_(singleShapeTilesW),
+          //额外提供的transposeBuf的数量,多的话或许能提高一些并行度减少同步，但是会占用更多空间
+          transposeBufCnt_(transposeBufCnt),
+          //额外申请[c0,align16(hw)]的空间给fmap做c1hwc0转置
+          transposeBufLength_(
+              CalculateTransposeBufLength(
+                  singleShapeTilesH, singleShapeTilesW)),
+          singleShapeBufLength_(
+              CalculateSingleShapeBufLength(
+                  singleShapeCin, singleShapeTilesH, singleShapeTilesW))
+    {
+        fmapGm_.SetGlobalBuffer(gm);
+
+        //transposeBuf全局只需要一份就行
+        uint32_t doubleBufferLength = singleShapeBufLength_ * 2 + transposeBufCnt * transposeBufLength_;
+        //gm->vec->l1这条路这TQue里配置的同步事件不符合实际场景,所以自己用TBuf管理同步
+        pipe->InitBuffer(vBuf_, doubleBufferLength * sizeof(T));
+    }
+
+    static inline uint32_t __aicore__ CalculateTransposeBufLength(uint32_t th, uint32_t tw)
+    {
+        uint32_t fmapH = F23FmapTileCalculator::FmapLength(th);
+        uint32_t fmapW = F23FmapTileCalculator::FmapLength(tw);
+        return Ops::Base::CeilAlign(fmapH * fmapW, FMAP_HW_ALIGNED_16) * C0<T>();
+    }
+
+    static inline uint32_t __aicore__ CalculateSingleShapeBufLength(
+        uint32_t cin, uint32_t tw, uint32_t th)
+    {
+        //单次变换需要的buf为c1c0*tiles*16
+        uint32_t c1c0 = AlignC0<T>(cin);
+        uint32_t tiles = tw * th;
+        uint32_t tileBuf = c1c0 * tiles * F23_WINO_TILE_ELEMENTS_16;
+        return tileBuf;
+    }
+
+    struct TileKIter {
+        uint32_t tileHIdx = 0;
+        uint32_t tileWIdx = 0;
+        bool end = false;
+    };
+
+    __aicore__ inline void Transform(
+        uint32_t batchIdx,
+        uint32_t cIdx,
+        TileKIter& iter,
+        GlobalTensor<T>& out)
+    {
+        //上层控制
+        ascendc_assert(iter.end==false);
+
+        uint32_t cLength = Std::min(static_cast<uint32_t>(singleShapeCin_), cin_ - cIdx);
+        uint32_t tileHLength = Std::min(static_cast<uint32_t>(singleShapeTilesH_), tilesH_ - iter.tileHIdx);
+        uint32_t tileWLength = Std::min(static_cast<uint32_t>(singleShapeTilesW_), tilesW_ - iter.tileWIdx);
+
+        if ASCEND_IS_AIV {
+            LocalTensor<T> mainBuf = GetPingPongBuffer();
+            LocalTensor<T> transposeBuf = GetTransposeBuffer();
+
+            const TileBox box = F23FmapTileCalculator::CalculateTileBox(
+                {iter.tileHIdx, iter.tileWIdx,
+                 tileHLength, tileWLength,
+                 tileHLength * tileWLength},
+                hi_, wi_, padH_, padW_);
+
+            CopyIn(mainBuf, batchIdx, cIdx, cLength, box);
+            // TODO setFlag/waitFlag
+            PipeBarrier<PIPE_ALL>();
+            Compute(mainBuf, transposeBuf, cLength, box);
+            PipeBarrier<PIPE_ALL>();
+            CopyOut(mainBuf, transposeBuf, box, cLength, out);
+        }
+
+        iter.tileWIdx += singleShapeTilesW_;
+        if (iter.tileWIdx >= tilesW_) {
+            iter.tileWIdx = 0;
+            iter.tileHIdx += singleShapeTilesH_;
+            iter.end = iter.tileHIdx >= tilesH_;
+        }
+    }
+
+private:
+    __aicore__ inline void CopyOut(
+        LocalTensor<T>& buf,
+        LocalTensor<T>& transposeBuf,
+        const TileBox& box,
+        uint16_t cLength,
+        GlobalTensor<T>& out)
+    {
+        DataCopy(out, buf, buf.GetSize());
+        // DataCopy(out, transposeBuf, transposeBuf.GetSize());
+    }
+
+
+    __aicore__ inline void CopyIn(
+        LocalTensor<T>& buf,
+        uint32_t batchIdx,
+        uint32_t cIdx,
+        uint32_t cLength,
+        const TileBox& box)
+    {
+        if (const HWBox& fmap = box.fmap; fmap.elements != 0) {
+            DataCopyExtParams params;
+            params.blockCount = fmap.hLength;
+            params.blockLen = fmap.wLength * sizeof(T);
+            params.srcStride = wi_ * sizeof(T);
+            params.dstStride = 0;
+
+            uint32_t fmapHWAligned16 = Ops::Base::CeilAlign(fmap.elements, FMAP_HW_ALIGNED_16);
+
+            LoopModeParams loop;
+            loop.loop1Size = cLength;
+            loop.loop1SrcStride = wi_ * hi_ * sizeof(T);
+            loop.loop1DstStride = fmapHWAligned16 * sizeof(T);
+            loop.loop2Size = 1;
+            loop.loop1SrcStride = 0;
+            loop.loop2DstStride = 0;
+
+            SetLoopModePara(loop, DataCopyMVType::OUT_TO_UB);
+
+            // 在大小为[c1,th4,tw4,c0]的buf里面从搬入大小为[c,aligned16(hw)]大小的fmap
+            // 由于c1c0 >= c
+            // 且根据数学推到[th4,tw4] >= align16(hw)
+            // 所以当前buf一定能放得下所有数据
+
+            DataCopyPad<T, PaddingMode::Compact>(
+                buf,
+                fmapGm_[(batchIdx * cin_ + cIdx) * hi_ * wi_ + fmap.hIdx * wi_ + fmap.wIdx],
+                params,
+                {false, 0, 0, 0});
+            ResetLoopModePara(DataCopyMVType::OUT_TO_UB);
         }
     }
 
 
-    struct UnfoldParams {
-        uint32_t fmapH;
-        uint32_t fmapW;
-        uint32_t tileH;
-        uint32_t tileW;
-        uint16_t hRepeatTimesInUnfoldRows;
-        uint16_t wRepeatTimesInUnfoldCols;
-        uint32_t hElementsInUnfoldRows;
-        uint32_t wElementsInUnfoldCols;
-        HWPad pad;
-        uint32_t wElementsInPadHBlock;
-        uint32_t hElementsInPadWBlock;
-        uint16_t wRepeatTimesInPadHBlock;
-        uint16_t hRepeatTimesInPadWBlock;
-        uint16_t cLength;
-    };
-
-    //
-    // 将[c1,h,w,c0]格式的fmap展开成[c1,tileH*4,tileW*4,c0]格式的tile
-    // 本质就是拿4x4的滑窗在fmap上滑出tileH*tileW个4x4的块
-    //
-
-    static __simd_vf__ inline void UnfoldFmapVf(
-        __ubuf__ DType* buf,
-        const UnfoldParams params)
+    __aicore__ inline void Compute(
+        LocalTensor<T>& mainBuf,
+        LocalTensor<T>& transposeBuf,
+        uint32_t cLength,
+        const TileBox& box)
     {
-        const uint32_t tileBufWidthC0 = params.tileW * F23_WINO_TILE_SIZE_4;
-        const uint32_t tileBufWidth = tileBufWidthC0 * C0<DType>();
-        const uint32_t offsetC = tileBufWidth * params.tileH * F23_WINO_TILE_SIZE_4;
-        const HWPad& pad = params.pad;
-        const bool hasPadding = pad.wLeft != 0 || pad.wRight != 0 || pad.hTop != 0 || pad.hBottom != 0;
-        const bool noHPadding = pad.hTop == 0 && pad.hBottom == 0;
+        if (const HWBox& fmap = box.fmap; fmap.elements != 0) {
+            uint32_t fmapHWAligned16 = Ops::Base::CeilAlign(fmap.elements, FMAP_HW_ALIGNED_16);
+            uint32_t c1 = C1<T>(cLength);
 
-        //用for(bool) 模拟if
-        for (uint16_t i = 0; i < static_cast<uint16_t>(hasPadding); i++) {
-            //变换前给padding区域补0,不一定是最高效的做法
-            //但主要网络padding通常较小,预期这块开销占用不大,而且逻辑相对简单
-            MicroAPI::MaskReg<DType> zero;
-            MicroAPI::Duplicate(zero, 0);
-            for (uint16_t c = 0; c < params.cLength; c++) {
-                PadFmap(
-                    buf + c * offsetC,
-                    zero,
-                    tileBufWidthC0,
-                    tileBufWidth,
-                    params.hElementsInPadWBlock,
-                    params.wElementsInPadHBlock,
-                    params.hRepeatTimesInPadHBlock,
-                    params.wRepeatTimesInPadWBlock,
-                    params.fmapH,
-                    params.fmapW,
-                    params.pad);
+            if (uint32_t tailC0 = c1 * C0<T>() - cLength; tailC0 != 0) {
+                //cLength不是c0对齐的,给他补0补到c0对齐
+                Duplicate(
+                    mainBuf[cLength * fmapHWAligned16],
+                    static_cast<T>(0),
+                    tailC0 * fmapHWAligned16);
+                PipeBarrier<PIPE_V>();
             }
 
-            //只有左右pad时不需要加同步，因为接下来的列变换会跳过左右pad区域,两者处理不存在冲突
-            //等列变换结束后统一的同步即可
-            for (uint16_t p = 0; p < static_cast<uint16_t>(noHPadding); p++) {
-                MicroAPI::LocalMemBar<MicroAPI::MemType::VEC_STORE, MicroAPI::MemType::VEC_LOAD>();
+            //TODO 行变换时基于这些信息减少pad开销
+            //
+            //H方向上完全不在padding区域的tile
+            // uint32_t hCoreStart = Ops::Base::CeilDiv(
+            //     static_cast<uint32_t>(box.pad.hTop),
+            //     F23_WINO_TILE_FMAP_STRIDE_2);
+            //
+            // uint32_t hCoreEnd =
+            //     (Std::max(box.pad.hTop + fmap.hLength, F23_WINO_TILE_SIZE_4) - F23_WINO_TILE_SIZE_4) /
+            //     F23_WINO_TILE_FMAP_STRIDE_2;
+            //
+            // uint32_t hCoreLength = hCoreStart > hCoreEnd ?
+            //                            0 :
+            //                            hCoreEnd - hCoreStart + 1;
+
+            uint32_t tileBufWidthC0Blocks = box.tile.wLength * F23_WINO_TILE_SIZE_4;
+            uint32_t tileBufWidth = tileBufWidthC0Blocks * C0<T>();
+            uint32_t tileBufC1Stride = box.tile.elements * F23_WINO_TILE_ELEMENTS_16 * C0<T>();
+            uint32_t fmapAligned16C1Stride = fmapHWAligned16 * C0<T>();
+
+            UnfoldRowParams urp = {};
+            urp.tileBufC1Stride = tileBufC1Stride;
+            urp.fmapBufC1Stride = fmapAligned16C1Stride;
+            urp.fmapWidth = fmap.wLength * C0<T>();
+            urp.tileH = box.tile.hLength;
+            urp.tileBufWidth = tileBufWidth;
+            //行展开后放在tileBuf的右侧,
+            urp.wStoreOffset = tileBufWidth - (fmap.wLength + box.pad.wRight) * C0<T>();
+            urp.wRepeatTimes = Ops::Base::CeilDiv(urp.fmapWidth, VL<T>());
+            urp.tileHTailRepeatTimes = box.tile.hLength & 1;
+            urp.tileHMainRepeatTimes = box.tile.hLength >> 1;
+            urp.validRowOffsetStart = box.pad.hTop * urp.fmapWidth;
+            urp.validRowOffsetEnd = urp.validRowOffsetStart + fmap.hLength * urp.fmapWidth;
+
+            uint32_t fmapLeftBoundOffset = (box.tile.wLength * 2 - 2) * C0<T>();
+
+            UnfoldColParams ucp = {};
+            ucp.tileBufC1Stride = tileBufC1Stride;
+            ucp.tileBufWidthC0Blocks = tileBufWidthC0Blocks;
+            ucp.tileBufWidth = tileBufWidth;
+            ucp.hValidElements = box.tile.hLength * F23_WINO_TILE_SIZE_4 * C0<T>();
+            ucp.tileW = box.tile.wLength;
+            ucp.hRepeatTimes = Ops::Base::CeilDiv(ucp.hValidElements, VL<T>());
+            ucp.tileWTailRepeatTimes = box.tile.wLength & 1;
+            ucp.tileWMainRepeatTimes = box.tile.wLength >> 1;
+            ucp.fmapLeftBoundOffset = fmapLeftBoundOffset;
+
+            PadParams lrp = {};
+            lrp.tileBufC1Stride = tileBufC1Stride;
+            lrp.bufWidth = tileBufWidth;
+            lrp.bufWidthC0Blocks = tileBufWidthC0Blocks;
+            lrp.fmapH = box.tile.hLength * F23_WINO_TILE_SIZE_4;
+            lrp.fmapW = fmap.wLength;
+            lrp.hElementsInPadWBlock = lrp.fmapH * C0<T>();
+            lrp.hRepeatTimesInPadWBlock = Ops::Base::CeilDiv(lrp.hElementsInPadWBlock, VL<T>());
+            lrp.wElementsInPadHBlock = 0;
+            lrp.wRepeatTimesInPadHBlock = 0;
+            lrp.pad = {0, 0, box.pad.wLeft, box.pad.wRight};
+
+            //每次处理最多transposeBufCnt条c1
+            uint32_t cnt = Ops::Base::CeilDiv(c1, static_cast<uint32_t>(transposeBufCnt_));
+            for (uint32_t i = 0; i < cnt; i++) {
+                //从末端开始处理，由于mainBuf的头部搬入了整块fmap
+                //如果顺序处理,那可能在变换第一个c1的fmap时,污染了第二个c1的fmap
+                //逆序处理就没这个问题,因为尾部不会连着其他fmap
+                uint32_t c1Idx = (cnt - i - 1) * transposeBufCnt_;
+                uint32_t c1Length = Std::min(c1 - c1Idx, static_cast<uint32_t>(transposeBufCnt_));
+
+                TransposeCHW2C1HWC0(
+                    mainBuf[c1Idx * fmapAligned16C1Stride],
+                    transposeBuf, c1Length,
+                    fmapHWAligned16);
+                PipeBarrier<PIPE_V>();
+
+                LocalTensor<T> tileBuf = mainBuf[c1Idx * tileBufC1Stride];
+
+                //行变换
+                UnfoldRowsFromFmapBufVf(
+                    reinterpret_cast<__ubuf__ T*>(tileBuf.GetPhyAddr()),
+                    reinterpret_cast<__ubuf__ T*>(transposeBuf.GetPhyAddr()),
+                    c1Length,
+                    urp);
+
+                //左右pad区域补0,行展开时不会操作左右pad区域,不需要加额外同步
+                if (box.pad.wLeft != 0 || box.pad.wRight != 0) {
+                    PadFmap<false, false, true, true>(
+                        reinterpret_cast<__ubuf__ T*>(tileBuf[fmapLeftBoundOffset].GetPhyAddr()),
+                        c1Length,
+                        lrp);
+                }
+
+                PipeBarrier<PIPE_V>();
+                //列展开
+                UnfoldColsVf(
+                    reinterpret_cast<__ubuf__ T*>(tileBuf.GetPhyAddr()),
+                    cLength,
+                    ucp);
             }
-
+        } else {
+            //整个tile都由padding区域产生,不做计算直接置0,
+            Duplicate(
+                mainBuf,
+                static_cast<T>(0),
+                box.tile.elements * AlignC0<T>(cLength) * F23_WINO_TILE_ELEMENTS_16);
         }
+    }
 
-        const bool tileHTailRepeatTimes = params.tileH & 1;
-        const uint16_t tileHMainRepeatTimes = (params.tileH - tileHTailRepeatTimes) >> 1;
-        const uint32_t wLeftPadOffset = pad.wLeft * C0<DType>();
 
-        for (uint16_t c = 0; c < params.cLength; c++) {
-            //行变换
-            UnfoldColsVf(
-                buf + c * offsetC,
-                tileBufWidth,
-                params.wElementsInUnfoldCols,
-                params.tileH,
-                wLeftPadOffset,
-                params.wRepeatTimesInUnfoldCols,
-                tileHMainRepeatTimes,
-                tileHTailRepeatTimes);
-        }
+    __aicore__ static inline void TransposeCHW2C1HWC0(
+        const LocalTensor<T>& srcBuf,
+        const LocalTensor<T>& dstBuf,
+        uint32_t c1Length,
+        uint32_t fmapHWAligned16)
+    {
+        constexpr uint32_t c0 = C0<T>();
 
-        MicroAPI::LocalMemBar<MicroAPI::MemType::VEC_STORE, MicroAPI::MemType::VEC_LOAD>();
+        uint64_t srcList[16];
+        uint64_t dstList[16];
 
-        const bool tileWTailRepeatTimes = params.tileW & 1;
-        const uint16_t tileWMainRepeatTimes = (params.tileW - tileHTailRepeatTimes) >> 1;
+        for (uint32_t c = 0; c < c1Length; c++) {
+            uint32_t offset = c * c0 * fmapHWAligned16;
 
-        for (uint16_t c = 0; c < params.cLength; c++) {
-            //列变换
-            UnfoldRowsVf(
-                buf + c * offsetC,
-                tileBufWidthC0,
-                tileBufWidth,
-                params.hElementsInUnfoldRows,
-                params.tileW,
-                params.hRepeatTimesInUnfoldRows,
-                tileWMainRepeatTimes,
-                tileWTailRepeatTimes);
+            if constexpr (sizeof(T) == 2) {
+#pragma unroll
+                for (uint32_t i = 0; i < 16; i++) {
+                    uint32_t s = offset + i * fmapHWAligned16;
+                    uint32_t d = offset + i * 16;
+                    srcList[i] = reinterpret_cast<uint64_t>(srcBuf[s].GetPhyAddr());
+                    dstList[i] = reinterpret_cast<uint64_t>(dstBuf[d].GetPhyAddr());
+                }
+                TransDataTo5HDParams params;
+                params.repeatTimes = fmapHWAligned16 / 16;
+                params.srcRepStride = params.repeatTimes == 1 ? 0 : 1;
+                params.dstRepStride = params.repeatTimes == 1 ? 0 : 16;
+                TransDataTo5HD<T>(dstList, srcList, params);
+            } else if constexpr (sizeof(T) == 4) {
+#pragma unroll
+                for (uint32_t i = 0; i < 8; i++) {
+                    uint32_t s = offset + i * fmapHWAligned16;
+                    uint32_t d = offset + i * 8;
+                    srcList[i] = reinterpret_cast<uint64_t>(srcBuf[s].GetPhyAddr());
+                    srcList[i + 8] = reinterpret_cast<uint64_t>(srcBuf[s + 8].GetPhyAddr());
+                    dstList[i * 2] = reinterpret_cast<uint64_t>(dstBuf[d].GetPhyAddr());
+                    dstList[i * 2 + 1] = reinterpret_cast<uint64_t>(dstBuf[offset + 8 * 8].GetPhyAddr());
+                }
+
+                TransDataTo5HDParams params;
+                params.repeatTimes = fmapHWAligned16 / 16;
+                params.srcRepStride = params.repeatTimes == 1 ? 0 : 2;
+                params.dstRepStride = params.repeatTimes == 1 ? 0 : 16;
+                TransDataTo5HD<T>(dstList, srcList, params);
+            }
         }
     }
 
 
     // 执行行变换
-    // 原始布局S:
+    // 原始数据:
     //
-    //      w0 w1 w2 w3 w4 w5 w6 w7
-    //     +--+--+--+--+--+--+--+--+
-    //  h0 |xx|xx|xx|xx|xx|xx|  |  |
-    //     +--+--+--+--+--+--+--+--+
-    //  h1 |xx|xx|xx|xx|xx|xx|  |  |
-    //     +--+--+--+--+--+--+--+--+
-    //  h2 |xx|xx|xx|xx|xx|xx|  |  |
-    //     +--+--+--+--+--+--+--+--+
-    //  h3 |xx|xx|xx|xx|xx|xx|  |  |
-    //     +--+--+--+--+--+--+--+--+
-    //  h4 |xx|xx|xx|xx|xx|xx|  |  |
-    //     +--+--+--+--+--+--+--+--+
-    //  h5 |xx|xx|xx|xx|xx|xx|  |  |
-    //     +--+--+--+--+--+--+--+--+
-    //  h6 |  |  |  |  |  |  |  |  |
-    //     +--+--+--+--+--+--+--+--+
-    //  h7 |  |  |  |  |  |  |  |  |
-    //     +--+--+--+--+--+--+--+--+
+    //      w0 w1 w2 w3 w4 w5
+    //     +--+--+--+--+--+--+
+    //  h0 |xx|xx|xx|xx|xx|xx|
+    //     +--+--+--+--+--+--+
+    //  h1 |xx|xx|xx|xx|xx|xx|
+    //     +--+--+--+--+--+--+
+    //  h2 |xx|xx|xx|xx|xx|xx|
+    //     +--+--+--+--+--+--+
+    //  h3 |xx|xx|xx|xx|xx|xx|
+    //     +--+--+--+--+--+--+
+    //  h4 |xx|xx|xx|xx|xx|xx|
+    //     +--+--+--+--+--+--+
+    //  h5 |xx|xx|xx|xx|xx|xx|
+    //     +--+--+--+--+--+--+
     //
     // 变换后内存:
     //
@@ -593,85 +551,160 @@ private:
     //      +---------+---------+-------+---------+--+--+
     //  Th7 |h3w0-h5w0|h3w1-h5w1|.......|h3w5-h5w5|  |  |
     //      +---------+---------+-------+---------+--+--+
+    // 数据在H方向上展开后写入
     //
-    // 由于fmap数据在原始内存左上角,所以需要从最下方的tile开始执行滑窗
-    // 即先在h2-h5上滑窗后将结果写入h4-h7,在从h0-h3上处理并将结果写入h0-h3
-    //
+    struct UnfoldRowParams {
+        uint32_t tileBufC1Stride;
+        uint32_t fmapBufC1Stride;
+        uint32_t fmapWidth;
+        uint32_t tileH;
+        uint32_t tileBufWidth;
+        uint32_t wStoreOffset;
+        uint32_t wRepeatTimes;
+        uint32_t validRowOffsetStart;
+        uint32_t validRowOffsetEnd;
+        uint16_t tileHMainRepeatTimes;
+        uint16_t tileHTailRepeatTimes;
+    };
 
-    static __simd_callee__ inline void UnfoldColsVf(
-        __ubuf__ DType* buf,
-        const uint32_t tileBufWidth,
-        const uint32_t wValidElements,
-        const uint32_t tileH,
-        const uint32_t wLeftPaddingOffset,
-        const uint16_t wRepeatTimes,
-        const uint16_t tileHMainRepeatTimes,
-        const bool tileHTailRepeatTimes)
+    static __simd_vf__ inline void UnfoldRowsFromFmapBufVf(
+        __ubuf__ T* __restrict__ buf,
+        __ubuf__ T* __restrict__ fmapBuf,
+        const uint16_t c1Length,
+        const UnfoldRowParams params)
     {
-        MicroAPI::RegTensor<DType> s0;
-        MicroAPI::RegTensor<DType> s1;
-        MicroAPI::RegTensor<DType> s2;
-        MicroAPI::RegTensor<DType> s3;
+        const uint32_t fmapWidth = params.fmapWidth;
+        const uint32_t tileH = params.tileH;
+        const uint16_t tileHMainRepeatTimes = params.tileHMainRepeatTimes;
+        const uint16_t tileHTailRepeatTimes = params.tileHTailRepeatTimes;
+        const uint32_t tileBufWidth = params.tileBufWidth;
+        const uint32_t wStoreOffset = params.wStoreOffset;
+        const uint16_t wRepeatTimes = params.wRepeatTimes;
+        const uint32_t validOffsetStart = params.validRowOffsetStart;
+        const uint32_t validOffsetEnd = params.validRowOffsetEnd;
 
-        MicroAPI::RegTensor<DType> d0;
-        MicroAPI::RegTensor<DType> d1;
-        MicroAPI::RegTensor<DType> d2;
-        MicroAPI::RegTensor<DType> d3;
+        MicroAPI::MaskReg maskAll = MicroAPI::CreateMask<T, MicroAPI::MaskPattern::ALL>();
+        uint32_t maskValue = fmapWidth;
 
-        constexpr uint16_t vLen = VL<DType>();
+        for (uint16_t c1 = 0; c1 < c1Length; c1++) {
+            for (uint16_t i = 0; i < wRepeatTimes; i++) {
+                MicroAPI::MaskReg mask = MicroAPI::UpdateMask<T>(maskValue);
+                //循环fmapW
+                const uint32_t wOffset = i * VL<T>();
 
-        uint32_t maskValue = wValidElements;
-        for (uint16_t i = 0; i < wRepeatTimes; i++) {
-            MicroAPI::MaskReg mask = MicroAPI::UpdateMask<DType>(maskValue);
-            //循环fmapW,同时要跳过最左侧的padding区域
-            const uint32_t wOffset = i * vLen + wLeftPaddingOffset;
+                MicroAPI::RegTensor<T> s0;
+                MicroAPI::RegTensor<T> s1;
+                MicroAPI::RegTensor<T> s2;
+                MicroAPI::RegTensor<T> s3;
 
-            //
-            // 从最下方的tile开始滑窗
-            // 先读取fmap最底下2行,每次循环往上读2行凑成4行执行变换
-            // 但若一个滑窗在fmap的1-4行分别读入s0,s1,s2,s3
-            // 在下一个滑窗s0,s1就变成2-3行,不考虑重新读取的话1-2行就只能读入s2,s3,滑窗1-4行就变成s2,s3,s0,s1
-            // 如果将s0,s1的数据拷贝到s2,s3可能会产生多余的指令并且产生数据依赖降低性能
-            // vf内scalar能力较弱也不一定能用指针引用之类的方法处理,而且也会让编译器难以优化
-            // 所以这里展开循环,一个循环内处理2个连续滑窗,如果滑窗为奇数,则通过tileHTailRepeatTimes额外执行一次滑窗
-            //
-            const uint32_t lastFmapTileOffset = wOffset + tileBufWidth * tileH * F23_WINO_TILE_FMAP_STRIDE_2;
-            MicroAPI::LoadAlign(s2, buf + lastFmapTileOffset + 2 * tileBufWidth);
-            MicroAPI::LoadAlign(s3, buf + lastFmapTileOffset + 3 * tileBufWidth);
+                MicroAPI::RegTensor<T> d0;
+                MicroAPI::RegTensor<T> d1;
+                MicroAPI::RegTensor<T> d2;
+                MicroAPI::RegTensor<T> d3;
 
-            for (uint16_t th = 0; th < tileHMainRepeatTimes; th++) {
-                const uint16_t thIdx = tileH - th * 2 - 1;
-                const uint32_t fmapOffset = wOffset + tileBufWidth * thIdx * F23_WINO_TILE_FMAP_STRIDE_2;
-                MicroAPI::LoadAlign(s0, buf + fmapOffset);
-                MicroAPI::LoadAlign(s1, buf + fmapOffset + tileBufWidth);
+                // 从最上方的tile开始滑窗
+                // 先读取fmap首2行,每次循环往下读2行凑成4行执行变换
+                // 但若一个滑窗在fmap的1-4行分别读入s0,s1,s2,s3
+                // 在下一个滑窗s2,s3就变成1-2行,不考虑重新读取的话2-3行就只能读入s0,s1,滑窗1-4行就变成s2,s3,s0,s1
+                // 如果将s0,s1的数据拷贝到s2,s3可能会产生多余的指令并且产生数据依赖降低性能
+                // vf内scalar能力较弱不确定怎么样的代码编译器能正常优化
+                // 所以这里按照最朴素的方式展开循环一个循环内处理2个连续滑窗,
+                // 如果滑窗为奇数,则通过tileHTailRepeatTimes额外执行一次滑窗
 
-                TransformVf(s0, s1, s2, s3, d0, d1, d2, d3, mask);
+                //TODO 非padding区域不做valid校验
+                LoadAlignIfValid<true>(
+                    s0, fmapBuf, wOffset,
+                    validOffsetStart, validOffsetEnd, mask, maskAll);
+                LoadAlignIfValid<true>(
+                    s1, fmapBuf, wOffset + fmapWidth,
+                    validOffsetStart, validOffsetEnd, mask, maskAll);
 
-                const uint32_t tileOffset = wOffset + tileBufWidth * thIdx * F23_WINO_TILE_SIZE_4;
-                MicroAPI::StoreAlign(tileOffset, d0, mask);
-                MicroAPI::StoreAlign(tileOffset + tileBufWidth, d1, mask);
-                MicroAPI::StoreAlign(tileOffset + tileBufWidth * 2, d2, mask);
-                MicroAPI::StoreAlign(tileOffset + tileBufWidth * 3, d3, mask);
+                for (uint16_t th = 0; th < tileHMainRepeatTimes; th++) {
+                    const uint16_t thIdx = th * 2;
+                    const uint32_t fmapOffset = wOffset + fmapWidth * thIdx * F23_WINO_TILE_FMAP_STRIDE_2;
 
-                MicroAPI::LoadAlign(s2, buf + fmapOffset - tileBufWidth * 2);
-                MicroAPI::LoadAlign(s3, buf + fmapOffset - tileBufWidth);
+                    LoadAlignIfValid<true>(
+                        s2, fmapBuf, fmapOffset + 2 * fmapWidth,
+                        validOffsetStart, validOffsetEnd, mask, maskAll);
+                    LoadAlignIfValid<true>(
+                        s3, fmapBuf, fmapOffset + 3 * fmapWidth,
+                        validOffsetStart, validOffsetEnd, mask, maskAll);
 
-                TransformVf(s2, s3, s0, s1, d0, d1, d2, d3, mask);
-                MicroAPI::StoreAlign(tileOffset - tileBufWidth * 4, d0, mask);
-                MicroAPI::StoreAlign(tileOffset - tileBufWidth * 3, d1, mask);
-                MicroAPI::StoreAlign(tileOffset - tileBufWidth * 2, d2, mask);
-                MicroAPI::StoreAlign(tileOffset - tileBufWidth, d3, mask);
+                    TransformVf(s0, s1, s2, s3, d0, d1, d2, d3, mask);
+
+                    const uint32_t tileOffset = wOffset + wStoreOffset + tileBufWidth * thIdx * F23_WINO_TILE_SIZE_4;
+                    MicroAPI::StoreAlign(buf + tileOffset, d0, mask);
+                    MicroAPI::StoreAlign(buf + tileOffset + tileBufWidth, d1, mask);
+                    MicroAPI::StoreAlign(buf + tileOffset + tileBufWidth * 2, d2, mask);
+                    MicroAPI::StoreAlign(buf + tileOffset + tileBufWidth * 3, d3, mask);
+
+                    LoadAlignIfValid<true>(
+                        s0, fmapBuf, fmapOffset + 4 * fmapWidth,
+                        validOffsetStart, validOffsetEnd, mask, maskAll);
+
+                    LoadAlignIfValid<true>(
+                        s1, fmapBuf, fmapOffset + 5 * fmapWidth,
+                        validOffsetStart, validOffsetEnd, mask, maskAll);
+
+                    TransformVf(s2, s3, s0, s1, d0, d1, d2, d3, mask);
+                    MicroAPI::StoreAlign(buf + tileOffset + tileBufWidth * 4, d0, mask);
+                    MicroAPI::StoreAlign(buf + tileOffset + tileBufWidth * 5, d1, mask);
+                    MicroAPI::StoreAlign(buf + tileOffset + tileBufWidth * 6, d2, mask);
+                    MicroAPI::StoreAlign(buf + tileOffset + tileBufWidth * 7, d3, mask);
+                }
+
+                for (uint16_t th = 0; th < tileHTailRepeatTimes; th++) {
+                    const uint16_t thIdx = tileH - 1;
+                    const uint32_t fmapOffset = wOffset + fmapWidth * thIdx * F23_WINO_TILE_FMAP_STRIDE_2;
+
+                    LoadAlignIfValid<true>(
+                        s2, fmapBuf, fmapOffset + 2 * fmapWidth,
+                        validOffsetStart, validOffsetEnd, mask, maskAll);
+
+                    LoadAlignIfValid<true>(
+                        s3, fmapBuf, fmapOffset + 3 * fmapWidth,
+                        validOffsetStart, validOffsetEnd, mask, maskAll);
+
+                    TransformVf(s0, s1, s2, s3, d0, d1, d2, d3, mask);
+
+                    const uint32_t tileOffset = wOffset + wStoreOffset + tileBufWidth * thIdx * F23_WINO_TILE_SIZE_4;
+                    MicroAPI::StoreAlign(buf + tileOffset, d0, mask);
+                    MicroAPI::StoreAlign(buf + tileOffset + tileBufWidth, d1, mask);
+                    MicroAPI::StoreAlign(buf + tileOffset + tileBufWidth * 2, d2, mask);
+                    MicroAPI::StoreAlign(buf + tileOffset + tileBufWidth * 3, d3, mask);
+                }
             }
 
-            for (uint16_t th = 0; th < static_cast<uint16_t>(tileHTailRepeatTimes); th++) {
-                MicroAPI::LoadAlign(s0, buf + wOffset);
-                MicroAPI::LoadAlign(s1, buf + wOffset + tileBufWidth);
-                TransformVf(s0, s1, s2, s3, d0, d1, d2, d3, mask);
-                MicroAPI::StoreAlign(buf, d0, mask);
-                MicroAPI::StoreAlign(buf + tileBufWidth, d1, mask);
-                MicroAPI::StoreAlign(buf + tileBufWidth * 2, d2, mask);
-                MicroAPI::StoreAlign(buf + tileBufWidth * 3, d3, mask);
-            }
+            buf += params.tileBufC1Stride;
+            fmapBuf += params.fmapBufC1Stride;
+        }
+    }
+
+
+    template <bool enable, typename S, typename M>
+    static __simd_callee__ inline void LoadAlignIfValid(
+        S& reg,
+        __ubuf__ T* buf,
+        uint32_t offset,
+        uint32_t validOffsetStart,
+        uint32_t validOffsetEnd,
+        M& mask,
+        M& allowAll)
+    {
+        //当offset处于valid区域时读取数据
+        if constexpr (enable) {
+            bool valid = offset >= validOffsetStart && offset < validOffsetEnd;
+            uint32_t allowMask = valid * VL<T>();
+            MicroAPI::MaskReg r0 = MicroAPI::UpdateMask<T>(allowMask);
+            MicroAPI::MaskReg r1;
+            //非有效区域时,r0为0,通过and操作将mask置空
+            MicroAPI::And(r1, mask, r0, allowAll);
+            //当offset在valid区域外时,r1全为0,所以即使offset-validOffsetStart溢出也无所谓
+            //因为根据文档datablock所对应的mask为0时,硬件不会读取block而是直接置0,所以越界也不用管
+            MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY>(
+                reg, buf + offset - validOffsetStart, 1, r1);
+        } else {
+            MicroAPI::LoadAlign(reg, buf + offset);
         }
     }
 
@@ -680,187 +713,261 @@ private:
     //
     //      w0 w1 w2 w3 w4 w5 w6 w7
     //     +--+--+--+--+--+--+--+--+
-    //  h0 |xx|xx|xx|xx|xx|xx|  |  |
+    //  h0 |  |  |xx|xx|xx|xx|xx|xx|
     //     +--+--+--+--+--+--+--+--+
-    //  h1 |xx|xx|xx|xx|xx|xx|  |  |
+    //  h1 |  |  |xx|xx|xx|xx|xx|xx|
     //     +--+--+--+--+--+--+--+--+
-    //  h2 |xx|xx|xx|xx|xx|xx|  |  |
+    //  h2 |  |  |xx|xx|xx|xx|xx|xx|
     //     +--+--+--+--+--+--+--+--+
-    //  h3 |xx|xx|xx|xx|xx|xx|  |  |
+    //  h3 |  |  |xx|xx|xx|xx|xx|xx|
     //     +--+--+--+--+--+--+--+--+
-    //  h4 |xx|xx|xx|xx|xx|xx|  |  |
+    //  h4 |  |  |xx|xx|xx|xx|xx|xx|
     //     +--+--+--+--+--+--+--+--+
-    //  h5 |xx|xx|xx|xx|xx|xx|  |  |
+    //  h5 |  |  |xx|xx|xx|xx|xx|xx|
     //     +--+--+--+--+--+--+--+--+
-    //  h6 |xx|xx|xx|xx|xx|xx|  |  |
+    //  h6 |  |  |xx|xx|xx|xx|xx|xx|
     //     +--+--+--+--+--+--+--+--+
-    //  h7 |xx|xx|xx|xx|xx|xx|  |  |
+    //  h7 |  |  |xx|xx|xx|xx|xx|xx|
     //     +--+--+--+--+--+--+--+--+
     //
     // 变换后内存:
     //
     //           w0        w1     w2-w6     w7
     //      +---------+---------+-------+---------+
-    //  Th0 |h0w0-h0w2|h0w0+h0w2|.......|h0w3-h0w5|
+    //  Th0 |h0w2-h0w4|h0w3+h0w4|.......|h0w5-h0w7|
     //      +---------+---------+-------+---------+
-    //  Th1 |h1w0-h1w2|h1w0+h1w2|.......|h1w3-h1w5|
+    //  Th1 |h1w2-h1w4|h1w3+h1w4|.......|h1w5-h1w7|
     //      +---------+---------+-------+---------+
-    //  Th2 |h2w0-h2w2|h2w0+h2w2|.......|h2w3-h2w5|
+    //  Th2 |h2w2-h2w4|h2w3+h2w4|.......|h2w5-h2w7|
     //      +---------+---------+-------+---------+
-    //  Th3 |h3w0-h3w2|h3w0+h3w2|.......|h3w3-h3w5|
+    //  Th3 |h3w2-h3w4|h3w3+h3w4|.......|h3w5-h3w7|
     //      +---------+---------+-------+---------+
-    //  Th4 |h4w0-h4w2|h4w0+h4w2|.......|h4w3-h4w5|
+    //  Th4 |h4w2-h4w4|h4w3+h4w4|.......|h4w5-h4w7|
     //      +---------+---------+-------+---------+
-    //  Th5 |h5w0-h5w2|h5w0+h5w2|.......|h5w3-h5w5|
+    //  Th5 |h5w2-h5w4|h5w3+h5w4|.......|h5w5-h5w7|
     //      +---------+---------+-------+---------+
-    //  Th6 |h6w0-h6w2|h6w0+h6w2|.......|h6w3-h6w5|
+    //  Th6 |h6w2-h6w4|h6w3+h6w4|.......|h6w5-h6w7|
     //      +---------+---------+-------+---------+
-    //  Th7 |h7w0-h7w2|h7w0+h7w2|.......|h7w3-h7w5|
+    //  Th7 |h7w2-h7w4|h7w3+h7w4|.......|h7w5-h7w7|
     //      +---------+---------+-------+---------+
     //
-    // 和列变换一样,从最右侧的tile开始执行变换
-    //
-    static __simd_callee__ inline void UnfoldRowsVf(
-        __ubuf__ DType* buf,
-        const uint32_t tileBufWidthC0,
-        const uint32_t tileBufWidth,
-        const uint32_t hValidElements,
-        const uint32_t tileW,
-        const uint16_t hRepeatTimes,
-        const uint16_t tileWMainRepeatTimes,
-        const bool tileWTailRepeatTimes)
+
+    struct UnfoldColParams {
+        uint32_t tileBufC1Stride;
+        uint32_t tileBufWidthC0Blocks;
+        uint32_t tileBufWidth;
+        uint32_t hValidElements;
+        uint32_t tileW;
+        uint32_t fmapLeftBoundOffset;
+        uint16_t hRepeatTimes;
+        uint16_t tileWMainRepeatTimes;
+        uint16_t tileWTailRepeatTimes;
+    };
+
+    static __simd_vf__ inline void UnfoldColsVf(
+        __ubuf__ T* buf,
+        const uint16_t c1Length,
+        const UnfoldColParams params)
     {
-        MicroAPI::RegTensor<DType> s0;
-        MicroAPI::RegTensor<DType> s1;
-        MicroAPI::RegTensor<DType> s2;
-        MicroAPI::RegTensor<DType> s3;
+        const uint32_t tileBufWidthC0Blocks = params.tileBufWidthC0Blocks;
+        const uint32_t tileBufWidth = params.tileBufWidth;
+        const uint32_t hValidElements = params.hValidElements;
+        const uint32_t tileW = params.tileW;
+        const uint16_t hRepeatTimes = params.hRepeatTimes;
+        const uint16_t tileWMainRepeatTimes = params.tileWMainRepeatTimes;
+        const uint16_t tileWTailRepeatTimes = params.tileWTailRepeatTimes;
+        //fmap靠在整块buf的右侧,所以读取时需要加个左边的偏移
+        const uint32_t fmapLeftBoundOffset =params.fmapLeftBoundOffset;
 
-        MicroAPI::RegTensor<DType> d0;
-        MicroAPI::RegTensor<DType> d1;
-        MicroAPI::RegTensor<DType> d2;
-        MicroAPI::RegTensor<DType> d3;
+        for (uint16_t c1 = 0; c1 < c1Length; c1++) {
+            MicroAPI::RegTensor<T> s0;
+            MicroAPI::RegTensor<T> s1;
+            MicroAPI::RegTensor<T> s2;
+            MicroAPI::RegTensor<T> s3;
 
-        constexpr uint16_t c0 = C0<DType>();
+            MicroAPI::RegTensor<T> d0;
+            MicroAPI::RegTensor<T> d1;
+            MicroAPI::RegTensor<T> d2;
+            MicroAPI::RegTensor<T> d3;
 
-        uint32_t maskValue = hValidElements;
-        for (uint16_t i = 0; i < hRepeatTimes; i++) {
-            MicroAPI::MaskReg mask = MicroAPI::UpdateMask<DType>(maskValue);
-            const uint32_t hOffset = i * BLK_COUNT_IN_VL * tileBufWidth;
+            constexpr uint32_t c0 = C0<T>();
 
-            const uint32_t lastFmapTileOffset = hOffset + tileW * F23_WINO_TILE_FMAP_STRIDE_2 * c0;
-            MicroAPI::LoadAlign(s2, buf + lastFmapTileOffset + 2 * c0, tileBufWidthC0, mask);
-            MicroAPI::LoadAlign(s3, buf + lastFmapTileOffset + 3 * c0, tileBufWidthC0, mask);
+            uint32_t maskValue = hValidElements;
+            for (uint16_t i = 0; i < hRepeatTimes; i++) {
+                MicroAPI::MaskReg mask = MicroAPI::UpdateMask<T>(maskValue);
 
-            for (uint16_t tw = 0; tw < tileWMainRepeatTimes; tw++) {
-                const uint16_t twIdx = tileW - tw * 2 - 1;
-                const uint32_t fmapOffset = hOffset + twIdx * F23_WINO_TILE_FMAP_STRIDE_2 * c0;
-                MicroAPI::LoadAlign(s0, buf + fmapOffset, tileBufWidthC0, mask);
-                MicroAPI::LoadAlign(s1, buf + fmapOffset + c0, tileBufWidthC0, mask);
+                const uint32_t hOffset = tileBufWidth * i * BLK_COUNT_IN_VL;
+                const uint32_t fmapInitOffset = hOffset + fmapLeftBoundOffset;
 
-                TransformVf(s0, s1, s2, s3, d0, d1, d2, d3, mask);
+                MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY>(
+                    s0, buf + fmapInitOffset, tileBufWidthC0Blocks, mask);
+                MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY>(
+                    s1, buf + fmapInitOffset + c0, tileBufWidthC0Blocks, mask);
 
-                const uint32_t tileOffset = hOffset + twIdx * F23_WINO_TILE_SIZE_4 * c0;
-                MicroAPI::StoreAlign(tileOffset, d0, tileBufWidthC0, mask);
-                MicroAPI::StoreAlign(tileOffset + c0, d1, tileBufWidthC0, mask);
-                MicroAPI::StoreAlign(tileOffset + c0 * 2, d2, tileBufWidthC0, mask);
-                MicroAPI::StoreAlign(tileOffset + c0 * 3, d3, tileBufWidthC0, mask);
+                for (uint16_t tw = 0; tw < tileWMainRepeatTimes; tw++) {
+                    const uint32_t twIdx = tw * 2;
+                    const uint32_t fmapOffset = fmapInitOffset + twIdx * F23_WINO_TILE_FMAP_STRIDE_2 * c0;
+                    MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY>(
+                        s2, buf + fmapOffset + 2 * c0, tileBufWidthC0Blocks, mask);
+                    MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY>(
+                        s3, buf + fmapOffset + 3 * c0, tileBufWidthC0Blocks, mask);
 
-                MicroAPI::LoadAlign(s2, buf + fmapOffset - c0 * 2, tileBufWidthC0, mask);
-                MicroAPI::LoadAlign(s3, buf + fmapOffset - c0, tileBufWidthC0, mask);
+                    TransformVf(s0, s1, s2, s3, d0, d1, d2, d3, mask);
 
-                TransformVf(s2, s3, s0, s1, d0, d1, d2, d3, mask);
-                MicroAPI::StoreAlign(tileOffset - c0 * 4, d0, mask);
-                MicroAPI::StoreAlign(tileOffset - c0 * 3, d1, mask);
-                MicroAPI::StoreAlign(tileOffset - c0 * 2, d2, mask);
-                MicroAPI::StoreAlign(tileOffset - c0, d3, mask);
+                    const uint32_t tileOffset = hOffset + twIdx * F23_WINO_TILE_SIZE_4 * c0;
+                    MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY>(
+                        buf + tileOffset, d0, tileBufWidthC0Blocks, mask);
+                    MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY>(
+                        buf + tileOffset + c0, d1, tileBufWidthC0Blocks, mask);
+                    MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY>(
+                        buf + tileOffset + c0 * 2, d2, tileBufWidthC0Blocks, mask);
+                    MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY>(
+                        buf + tileOffset + c0 * 3, d3, tileBufWidthC0Blocks, mask);
+
+                    MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY>(
+                        s2, buf + fmapOffset + c0 * 4, tileBufWidthC0Blocks, mask);
+                    MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY>(
+                        s3, buf + fmapOffset + c0 * 5, tileBufWidthC0Blocks, mask);
+
+                    TransformVf(s2, s3, s0, s1, d0, d1, d2, d3, mask);
+                    MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY>(
+                        buf + tileOffset + c0 * 4, d0, tileBufWidthC0Blocks, mask);
+                    MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY>(
+                        buf + tileOffset + c0 * 5, d1, tileBufWidthC0Blocks, mask);
+                    MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY>(
+                        buf + tileOffset + c0 * 6, d2, tileBufWidthC0Blocks, mask);
+                    MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY>(
+                        buf + tileOffset + c0 * 7, d3, tileBufWidthC0Blocks, mask);
+                }
+
+                for (uint16_t th = 0; th < tileWTailRepeatTimes; th++) {
+                    const uint32_t twIdx = tileW - 1;
+                    const uint32_t fmapOffset = fmapInitOffset + twIdx * F23_WINO_TILE_FMAP_STRIDE_2 * c0;
+                    MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY>(
+                        s2, buf + fmapOffset + 2 * c0, tileBufWidthC0Blocks, mask);
+                    MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY>(
+                        s3, buf + fmapOffset + 3 * c0, tileBufWidthC0Blocks, mask);
+
+                    TransformVf(s0, s1, s2, s3, d0, d1, d2, d3, mask);
+                    const uint32_t tileOffset = hOffset + twIdx * F23_WINO_TILE_SIZE_4 * c0;
+                    MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY>(
+                        buf + tileOffset, d0, tileBufWidthC0Blocks, mask);
+                    MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY>(
+                        buf + tileOffset + c0, d1, tileBufWidthC0Blocks, mask);
+                    MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY>(
+                        buf + tileOffset + c0 * 2, d2, tileBufWidthC0Blocks, mask);
+                    MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY>(
+                        buf + tileOffset + c0 * 3, d3, tileBufWidthC0Blocks, mask);
+                }
             }
 
-            for (uint16_t th = 0; th < static_cast<uint16_t>(tileWTailRepeatTimes); th++) {
-                MicroAPI::LoadAlign(s0, buf + hOffset, tileBufWidthC0, mask);
-                MicroAPI::LoadAlign(s1, buf + hOffset + c0, tileBufWidthC0, mask);
-                TransformVf(s0, s1, s2, s3, d0, d1, d2, d3, mask);
-                MicroAPI::StoreAlign(buf, d0, mask);
-                MicroAPI::StoreAlign(buf + c0, d1, mask);
-                MicroAPI::StoreAlign(buf + c0 * 2, d2, mask);
-                MicroAPI::StoreAlign(buf + c0 * 3, d3, mask);
-            }
+            buf += params.tileBufC1Stride;
         }
     }
+
 
     //        wElementsInPadHBlock(fmapW+wLeft+wRight)
     //       +---------------------------------+
     //   hTop|             Padding             |
     //       +--wLeft--+-------------+---------+
     //       |         |  NoPadding  |         |
-    //       | Padding |fmapH x fmapW| Padding |hElementsInPadWBlock(fmapH)
-    //       |         |             |         |
+    //       | Padding |fmapH x      | Padding |hElementsInPadWBlock(fmapH)
+    //       |         |    fmapW    |         |
     //       +---------+-------------+--wRight-+
     //       |             Padding             |hButton
     //       +---------------------------------+
 
-    static __simd_callee__ inline void PadFmap(
-        __ubuf__ DType* buf,
-        MicroAPI::RegTensor<DType>& value,
-        uint32_t tileBufWidthC0,
-        uint32_t tileBufWidth,
-        uint32_t hElementsInPadWBlock,
-        uint32_t wElementsInPadHBlock,
-        uint16_t hRepeatTimesInPadWBlock,
-        uint16_t wRepeatTimesInPadHBlock,
-        uint32_t fmapH,
-        uint32_t fmapW,
-        const HWPad& pad)
+    struct PadParams {
+        uint32_t tileBufC1Stride;
+        uint32_t bufWidth;
+        uint32_t bufWidthC0Blocks;
+        uint32_t hElementsInPadWBlock;
+        uint32_t wElementsInPadHBlock;
+        uint32_t fmapH;
+        uint32_t fmapW;
+        uint16_t hRepeatTimesInPadWBlock;
+        uint16_t wRepeatTimesInPadHBlock;
+        HWPad pad;
+    };
+
+    template <bool hTop, bool hBottom, bool wLeft, bool wRight>
+    static __simd_vf__ inline void PadFmap(
+        __ubuf__ T* buf,
+        const uint16_t c1Length,
+        const PadParams params)
     {
-        constexpr uint16_t vLen = VL<DType>();
-        constexpr uint16_t c0 = C0<DType>();
+        const uint32_t bufWidth = params.bufWidth;
+        const uint32_t bufWidthC0Blocks = params.bufWidthC0Blocks;
+        const uint32_t hElementsInPadWBlock = params.hElementsInPadWBlock;
+        const uint32_t wElementsInPadHBlock = params.wElementsInPadHBlock;
+        const uint32_t fmapH = params.fmapH;
+        const uint32_t fmapW = params.fmapW;
+        const uint16_t hRepeatTimesInPadWBlock = params.hRepeatTimesInPadWBlock;
+        const uint16_t wRepeatTimesInPadHBlock = params.wRepeatTimesInPadHBlock;
+        const HWPad& pad = params.pad;
 
-        for (uint16_t i = 0; i < pad.hTop; i++) {
-            uint32_t maskValue = wElementsInPadHBlock;
-            uint32_t offset = i * tileBufWidth;
-            for (uint16_t w = 0; w < wRepeatTimesInPadHBlock; w++) {
-                MicroAPI::MaskReg<DType> mask = MicroAPI::UpdateMask<DType>(maskValue);
-                MicroAPI::StoreAlign(buf + offset + w * vLen, value, mask);
-            }
-        }
+        MicroAPI::RegTensor<T> value;
+        MicroAPI::Duplicate(value, static_cast<T>(0));
 
-        for (uint16_t i = 0; i < pad.hBottom; i++) {
-            uint32_t maskValue = wElementsInPadHBlock;
-            uint32_t offset = (i + pad.hTop + fmapH) * tileBufWidth;
-            for (uint16_t w = 0; w < wRepeatTimesInPadHBlock; w++) {
-                MicroAPI::MaskReg<DType> mask = MicroAPI::UpdateMask<DType>(maskValue);
-                MicroAPI::StoreAlign(buf + offset +  w * vLen, value, mask);
+        for (uint16_t c1 = 0; c1 < c1Length; c1++) {
+            if constexpr (hTop) {
+                for (uint16_t i = 0; i < pad.hTop; i++) {
+                    uint32_t maskValue = wElementsInPadHBlock;
+                    uint32_t offset = i * bufWidth;
+                    for (uint16_t w = 0; w < wRepeatTimesInPadHBlock; w++) {
+                        MicroAPI::MaskReg mask = MicroAPI::UpdateMask<T>(maskValue);
+                        MicroAPI::StoreAlign(buf + offset + w * VL<T>(), value, mask);
+                    }
+                }
             }
-        }
 
-        for (uint16_t i = 0; i < pad.wLeft; i++) {
-            uint32_t maskValue = hElementsInPadWBlock;
-            uint32_t offset = pad.hTop * tileBufWidth + i * c0;
-            for (uint16_t w = 0; w < hRepeatTimesInPadWBlock; w++) {
-                MicroAPI::MaskReg<DType> mask = MicroAPI::UpdateMask<DType>(maskValue);
-                MicroAPI::StoreAlign(buf + offset + w * BLK_COUNT_IN_VL * tileBufWidth, value, tileBufWidthC0, mask);
+            if constexpr (hBottom) {
+                for (uint16_t i = 0; i < pad.hBottom; i++) {
+                    uint32_t maskValue = wElementsInPadHBlock;
+                    uint32_t offset = (i + pad.hTop + fmapH) * bufWidth;
+                    for (uint16_t w = 0; w < wRepeatTimesInPadHBlock; w++) {
+                        MicroAPI::MaskReg mask = MicroAPI::UpdateMask<T>(maskValue);
+                        MicroAPI::StoreAlign(buf + offset + w * VL<T>(), value, mask);
+                    }
+                }
             }
-        }
 
-        for (uint16_t i = 0; i < pad.wRight; i++) {
-            uint32_t maskValue = hElementsInPadWBlock;
-            uint32_t offset = pad.hTop * tileBufWidth + (i + pad.wLeft + fmapW) * c0;
-            for (uint16_t w = 0; w < hRepeatTimesInPadWBlock; w++) {
-                MicroAPI::MaskReg<DType> mask = MicroAPI::UpdateMask<DType>(maskValue);
-                MicroAPI::StoreAlign(buf + offset + w * BLK_COUNT_IN_VL * tileBufWidth, value, tileBufWidthC0, mask);
+            if constexpr (wLeft) {
+                for (uint16_t i = 0; i < pad.wLeft; i++) {
+                    uint32_t maskValue = hElementsInPadWBlock;
+                    uint32_t offset = pad.hTop * bufWidth + i * C0<T>();
+                    for (uint16_t w = 0; w < hRepeatTimesInPadWBlock; w++) {
+                        MicroAPI::MaskReg mask = MicroAPI::UpdateMask<T>(maskValue);
+                        MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY>(
+                            buf + offset + w * BLK_COUNT_IN_VL * bufWidth, value,
+                            bufWidthC0Blocks, mask);
+                    }
+                }
             }
+
+            if constexpr (wRight) {
+                for (uint16_t i = 0; i < pad.wRight; i++) {
+                    uint32_t maskValue = hElementsInPadWBlock;
+                    uint32_t offset = pad.hTop * bufWidth + (i + pad.wLeft + fmapW) * C0<T>();
+                    for (uint16_t w = 0; w < hRepeatTimesInPadWBlock; w++) {
+                        MicroAPI::MaskReg mask = MicroAPI::UpdateMask<T>(maskValue);
+                        MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY>(
+                            buf + offset + w * BLK_COUNT_IN_VL * bufWidth, value,
+                            bufWidthC0Blocks, mask);
+                    }
+                }
+            }
+
+            buf += params.tileBufC1Stride;
         }
     }
 
+    // 不写成泛型本地不知道为什么编译不过
+    template <typename S, typename M>
     static __simd_callee__ inline void TransformVf(
-        MicroAPI::RegTensor<DType>& s0,
-        MicroAPI::RegTensor<DType>& s1,
-        MicroAPI::RegTensor<DType>& s2,
-        MicroAPI::RegTensor<DType>& s3,
-        MicroAPI::RegTensor<DType>& d0,
-        MicroAPI::RegTensor<DType>& d1,
-        MicroAPI::RegTensor<DType>& d2,
-        MicroAPI::RegTensor<DType>& d3,
-        MicroAPI::MaskReg& mask)
+        S& s0, S& s1, S& s2, S& s3,
+        S& d0, S& d1, S& d2, S& d3,
+        M& mask)
     {
         MicroAPI::Sub(d0, s0, s2, mask);
         MicroAPI::Add(d1, s1, s2, mask);
@@ -868,14 +975,36 @@ private:
         MicroAPI::Sub(d3, s1, s3, mask);
     }
 
-
-    static __aicore__ inline uint32_t CalculateF23Tiles(uint32_t dim)
+    __aicore__ inline LocalTensor<T> GetPingPongBuffer()
     {
-        //F23下,Fmap正变换是一个4*4的滑窗在Fmap上按stride为2滑动
-        //所以dim至少pad到4且是2的倍数
-        uint32_t d = Ops::Base::CeilAlign(dim, 2u);
-        return Std::max(d, F23_WINO_TILE_SIZE_4) / F23_WINO_TILE_FMAP_STRIDE_2 - 1;
+        LocalTensor<T> mainBuf = vBuf_.GetWithOffset<T>(
+            singleShapeBufLength_, static_cast<uint32_t>(pingFlag_) * singleShapeBufLength_ * sizeof(T));
+        pingFlag_ = !pingFlag_;
+        return mainBuf;
     }
+
+    __aicore__ inline LocalTensor<T> GetTransposeBuffer()
+    {
+        return vBuf_.GetWithOffset<T>(
+            transposeBufCnt_ * transposeBufLength_, singleShapeBufLength_ * 2 * sizeof(T));
+    }
+
+    TBuf<TPosition::VECIN> vBuf_;
+    GlobalTensor<T> fmapGm_;
+    const uint32_t cin_;
+    const uint32_t hi_;
+    const uint32_t wi_;
+    const uint16_t padH_;
+    const uint16_t padW_;
+    const uint32_t tilesH_;
+    const uint32_t tilesW_;
+    const uint16_t singleShapeCin_;
+    const uint16_t singleShapeTilesH_;
+    const uint16_t singleShapeTilesW_;
+    const uint16_t transposeBufCnt_;
+    const uint32_t transposeBufLength_;
+    const uint32_t singleShapeBufLength_;
+    bool pingFlag_ = true;
 };
 
 #endif //CONV_BP_WINOGRAD_H
