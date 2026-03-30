@@ -19,7 +19,7 @@
 
 #include "basic_api/kernel_basic_intf.h"
 #include "utils/std/algorithm.h"
-#include "op_common/op_kernel/math_util.h"
+#include "op_kernel/math_util.h"
 
 using namespace AscendC;
 
@@ -452,7 +452,7 @@ private:
                 //列展开
                 UnfoldColsVf(
                     reinterpret_cast<__ubuf__ T*>(tileBuf.GetPhyAddr()),
-                    cLength,
+                    c1Length,
                     ucp);
             }
         } else {
@@ -780,20 +780,21 @@ private:
         const uint32_t fmapLeftBoundOffset =params.fmapLeftBoundOffset;
 
         for (uint16_t c1 = 0; c1 < c1Length; c1++) {
-            MicroAPI::RegTensor<T> s0;
-            MicroAPI::RegTensor<T> s1;
-            MicroAPI::RegTensor<T> s2;
-            MicroAPI::RegTensor<T> s3;
-
-            MicroAPI::RegTensor<T> d0;
-            MicroAPI::RegTensor<T> d1;
-            MicroAPI::RegTensor<T> d2;
-            MicroAPI::RegTensor<T> d3;
 
             constexpr uint32_t c0 = C0<T>();
 
             uint32_t maskValue = hValidElements;
             for (uint16_t i = 0; i < hRepeatTimes; i++) {
+                MicroAPI::RegTensor<T> s0;
+                MicroAPI::RegTensor<T> s1;
+                MicroAPI::RegTensor<T> s2;
+                MicroAPI::RegTensor<T> s3;
+
+                MicroAPI::RegTensor<T> d0;
+                MicroAPI::RegTensor<T> d1;
+                MicroAPI::RegTensor<T> d2;
+                MicroAPI::RegTensor<T> d3;
+
                 MicroAPI::MaskReg mask = MicroAPI::UpdateMask<T>(maskValue);
 
                 const uint32_t hOffset = tileBufWidth * i * BLK_COUNT_IN_VL;
