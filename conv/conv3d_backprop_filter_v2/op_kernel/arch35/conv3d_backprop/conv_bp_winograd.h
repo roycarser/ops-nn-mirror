@@ -354,66 +354,29 @@ private:
                     mainBuf[cLength * fmapHWAligned16],
                     static_cast<T>(0),
                     tailC0 * fmapHWAligned16);
-                PipeBarrier<PIPE_V>();
             }
-
-            //TODO 行变换时基于这些信息减少pad开销
-            //
-            //H方向上完全不在padding区域的tile
-            // uint32_t hCoreStart = Ops::Base::CeilDiv(
-            //     static_cast<uint32_t>(box.pad.hTop),
-            //     F23_WINO_TILE_FMAP_STRIDE_2);
-            //
-            // uint32_t hCoreEnd =
-            //     (Std::max(box.pad.hTop + fmap.hLength, F23_WINO_TILE_SIZE_4) - F23_WINO_TILE_SIZE_4) /
-            //     F23_WINO_TILE_FMAP_STRIDE_2;
-            //
-            // uint32_t hCoreLength = hCoreStart > hCoreEnd ?
-            //                            0 :
-            //                            hCoreEnd - hCoreStart + 1;
 
             uint32_t tileBufWidthC0Blocks = box.tile.wLength * F23_WINO_TILE_SIZE_4;
             uint32_t tileBufWidth = tileBufWidthC0Blocks * C0<T>();
             uint32_t tileBufC1Stride = box.tile.elements * F23_WINO_TILE_ELEMENTS_16 * C0<T>();
             uint32_t fmapAligned16C1Stride = fmapHWAligned16 * C0<T>();
 
-            UnfoldRowParams urp = {};
-            urp.tileBufC1Stride = tileBufC1Stride;
-            urp.fmapBufC1Stride = fmapAligned16C1Stride;
+            UnfoldRowParamsV2 urp = {};
             urp.fmapWidth = fmap.wLength * C0<T>();
-            urp.tileH = box.tile.hLength;
-            urp.tileBufWidth = tileBufWidth;
             //行展开后放在tileBuf的右侧,
             urp.wStoreOffset = tileBufWidth - (fmap.wLength + box.pad.wRight) * C0<T>();
             urp.wRepeatTimes = Ops::Base::CeilDiv(urp.fmapWidth, VL<T>());
             urp.tileHTailRepeatTimes = box.tile.hLength & 1;
             urp.tileHMainRepeatTimes = box.tile.hLength >> 1;
-            urp.validRowOffsetStart = box.pad.hTop * urp.fmapWidth;
-            urp.validRowOffsetEnd = urp.validRowOffsetStart + fmap.hLength * urp.fmapWidth;
 
             uint32_t fmapLeftBoundOffset = (box.tile.wLength * 2 - 2) * C0<T>();
 
-            UnfoldColParams ucp = {};
-            ucp.tileBufC1Stride = tileBufC1Stride;
-            ucp.tileBufWidthC0Blocks = tileBufWidthC0Blocks;
-            ucp.tileBufWidth = tileBufWidth;
+            UnfoldColParamsV2 ucp = {};
             ucp.hValidElements = box.tile.hLength * F23_WINO_TILE_SIZE_4 * C0<T>();
             ucp.hRepeatTimes = Ops::Base::CeilDiv(ucp.hValidElements, VL<T>());
             ucp.tileWTailRepeatTimes = box.tile.wLength & 1;
             ucp.tileWMainRepeatTimes = box.tile.wLength >> 1;
             ucp.fmapLeftBoundOffset = fmapLeftBoundOffset;
-
-            PadParams lrp = {};
-            lrp.tileBufC1Stride = tileBufC1Stride;
-            lrp.bufWidth = tileBufWidth;
-            lrp.bufWidthC0Blocks = tileBufWidthC0Blocks;
-            lrp.fmapH = box.tile.hLength * F23_WINO_TILE_SIZE_4;
-            lrp.fmapW = fmap.wLength;
-            lrp.hElementsInPadWBlock = lrp.fmapH * C0<T>();
-            lrp.hRepeatTimesInPadWBlock = Ops::Base::CeilDiv(lrp.hElementsInPadWBlock, VL<T>());
-            lrp.wElementsInPadHBlock = 0;
-            lrp.wRepeatTimesInPadHBlock = 0;
-            lrp.pad = {0, 0, box.pad.wLeft, box.pad.wRight};
 
             //每次处理最多transposeBufCnt条c1
             uint32_t cnt = Ops::Base::CeilDiv(c1, static_cast<uint32_t>(transposeBufCnt_));
@@ -426,33 +389,23 @@ private:
 
                 TransposeCHW2C1HWC0(
                     mainBuf[c1Idx * fmapAligned16C1Stride],
-                    transposeBuf, c1Length,
-                    fmapHWAligned16);
-                PipeBarrier<PIPE_V>();
-
+                    transposeBuf[box.pad.hTop * box.fmap.wLength * C0<T>()],
+                    c1Length,
+                    fmapHWAligned16,
+                    fmapAligned16C1Stride,
+                    transposeBufLength_);
+                //TODO 处理pad
                 LocalTensor<T> tileBuf = mainBuf[c1Idx * tileBufC1Stride];
-
                 //行变换
-                UnfoldRowsFromFmapBufVf(
+                UnfoldFromFmapBufVf(
                     reinterpret_cast<__ubuf__ T*>(tileBuf.GetPhyAddr()),
                     reinterpret_cast<__ubuf__ T*>(transposeBuf.GetPhyAddr()),
                     c1Length,
-                    urp);
-
-                //左右pad区域补0,行展开时不会操作左右pad区域,不需要加额外同步
-                if (box.pad.wLeft != 0 || box.pad.wRight != 0) {
-                    PadFmap<false, false, true, true>(
-                        reinterpret_cast<__ubuf__ T*>(tileBuf[fmapLeftBoundOffset].GetPhyAddr()),
-                        c1Length,
-                        lrp);
-                }
-
-                PipeBarrier<PIPE_V>();
-                //列展开
-                UnfoldColsVf(
-                    reinterpret_cast<__ubuf__ T*>(tileBuf.GetPhyAddr()),
-                    c1Length,
-                    ucp);
+                    tileBufC1Stride,
+                    transposeBufLength_,
+                    tileBufWidth,
+                    tileBufWidthC0Blocks,
+                    urp, ucp);
             }
         } else {
             //整个tile都由padding区域产生,不做计算直接置0,
@@ -468,21 +421,22 @@ private:
         const LocalTensor<T>& srcBuf,
         const LocalTensor<T>& dstBuf,
         uint32_t c1Length,
-        uint32_t fmapHWAligned16)
+        uint32_t fmapHWAligned16,
+        uint32_t srcC1Stride,
+        uint32_t dstC1Stride)
     {
-        constexpr uint32_t c0 = C0<T>();
-
         uint64_t srcList[16];
         uint64_t dstList[16];
 
-        for (uint32_t c = 0; c < c1Length; c++) {
-            uint32_t offset = c * c0 * fmapHWAligned16;
+        for (uint32_t c1 = 0; c1 < c1Length; c1++) {
+            uint32_t srcOffset = c1 * srcC1Stride;
+            uint32_t dstOffset = c1 * dstC1Stride;
 
             if constexpr (sizeof(T) == 2) {
 #pragma unroll
                 for (uint32_t i = 0; i < 16; i++) {
-                    uint32_t s = offset + i * fmapHWAligned16;
-                    uint32_t d = offset + i * 16;
+                    uint32_t s = srcOffset + i * fmapHWAligned16;
+                    uint32_t d = dstOffset + i * 16;
                     srcList[i] = reinterpret_cast<uint64_t>(srcBuf[s].GetPhyAddr());
                     dstList[i] = reinterpret_cast<uint64_t>(dstBuf[d].GetPhyAddr());
                 }
@@ -494,12 +448,12 @@ private:
             } else if constexpr (sizeof(T) == 4) {
 #pragma unroll
                 for (uint32_t i = 0; i < 8; i++) {
-                    uint32_t s = offset + i * fmapHWAligned16;
-                    uint32_t d = offset + i * 8;
+                    uint32_t s = srcOffset + i * fmapHWAligned16;
+                    uint32_t d = dstOffset + i * 8;
                     srcList[i] = reinterpret_cast<uint64_t>(srcBuf[s].GetPhyAddr());
                     srcList[i + 8] = reinterpret_cast<uint64_t>(srcBuf[s + 8].GetPhyAddr());
                     dstList[i * 2] = reinterpret_cast<uint64_t>(dstBuf[d].GetPhyAddr());
-                    dstList[i * 2 + 1] = reinterpret_cast<uint64_t>(dstBuf[offset + 8 * 8].GetPhyAddr());
+                    dstList[i * 2 + 1] = reinterpret_cast<uint64_t>(dstBuf[d + 8 * 8].GetPhyAddr());
                 }
 
                 TransDataTo5HDParams params;
@@ -511,6 +465,47 @@ private:
         }
     }
 
+    struct UnfoldColParamsV2 {
+        uint32_t hValidElements;
+        uint32_t fmapLeftBoundOffset;
+        uint16_t hRepeatTimes;
+        uint16_t tileWMainRepeatTimes;
+        uint16_t tileWTailRepeatTimes;
+    };
+
+    struct UnfoldRowParamsV2 {
+        uint32_t fmapWidth;
+        uint32_t wStoreOffset;
+        uint16_t wRepeatTimes;
+        uint16_t tileHMainRepeatTimes;
+        uint16_t tileHTailRepeatTimes;
+    };
+
+    static __simd_vf__ inline void UnfoldFromFmapBufVf(
+        __ubuf__ T* __restrict__ tileBuf,
+        __ubuf__ T* __restrict__ fmapBuf,
+        const uint16_t c1Length,
+        const uint32_t tileBufC1Stride,
+        const uint32_t fmapBufC1Stride,
+        const uint32_t tileBufWidth,
+        const uint16_t tileBufWidthC0Blocks,
+        const UnfoldRowParamsV2 urp,
+        const UnfoldColParamsV2 ucp)
+    {
+        __ubuf__ T* tmp = tileBuf + urp.wStoreOffset;
+        for (uint16_t c1 = 0; c1 < c1Length; c1++) {
+            __ubuf__ T* t = tmp + c1 * tileBufC1Stride;
+            __ubuf__ T* f = fmapBuf + c1 * fmapBufC1Stride;
+            UnfoldRowsFromFmapBufVf(t, f, tileBufWidth, urp);
+        }
+
+        MicroAPI::LocalMemBar<MicroAPI::MemType::VEC_LOAD, MicroAPI::MemType::VEC_STORE>();
+
+        for (uint16_t c1 = 0; c1 < c1Length; c1++) {
+            __ubuf__ T* t = tileBuf + c1 * tileBufC1Stride;
+            UnfoldColsVf(t, tileBufWidthC0Blocks, tileBufWidth, ucp);
+        }
+    }
 
     // 执行行变换
     // 原始数据:
@@ -552,158 +547,80 @@ private:
     //      +---------+---------+-------+---------+--+--+
     // 数据在H方向上展开后写入
     //
-    struct UnfoldRowParams {
-        uint32_t tileBufC1Stride;
-        uint32_t fmapBufC1Stride;
-        uint32_t fmapWidth;
-        uint32_t tileH;
-        uint32_t tileBufWidth;
-        uint32_t wStoreOffset;
-        uint32_t wRepeatTimes;
-        uint32_t validRowOffsetStart;
-        uint32_t validRowOffsetEnd;
-        uint16_t tileHMainRepeatTimes;
-        uint16_t tileHTailRepeatTimes;
-    };
-
-    static __simd_vf__ inline void UnfoldRowsFromFmapBufVf(
-        __ubuf__ T* __restrict__ buf,
+    static __simd_callee__ inline void UnfoldRowsFromFmapBufVf(
+        __ubuf__ T* __restrict__ tileBuf,
         __ubuf__ T* __restrict__ fmapBuf,
-        const uint16_t c1Length,
-        const UnfoldRowParams params)
+        const uint32_t tileBufWidth,
+        const UnfoldRowParamsV2& params)
     {
         const uint32_t fmapWidth = params.fmapWidth;
-        const uint32_t tileH = params.tileH;
         const uint16_t tileHMainRepeatTimes = params.tileHMainRepeatTimes;
         const uint16_t tileHTailRepeatTimes = params.tileHTailRepeatTimes;
-        const uint32_t tileBufWidth = params.tileBufWidth;
-        const uint32_t wStoreOffset = params.wStoreOffset;
         const uint16_t wRepeatTimes = params.wRepeatTimes;
-        const uint32_t validOffsetStart = params.validRowOffsetStart;
-        const uint32_t validOffsetEnd = params.validRowOffsetEnd;
 
-        MicroAPI::MaskReg maskAll = MicroAPI::CreateMask<T, MicroAPI::MaskPattern::ALL>();
         uint32_t maskValue = fmapWidth;
+        for (uint16_t i = 0; i < wRepeatTimes; i++) {
+            MicroAPI::MaskReg mask = MicroAPI::UpdateMask<T>(maskValue);
+            MicroAPI::RegTensor<T> s0;
+            MicroAPI::RegTensor<T> s1;
+            MicroAPI::RegTensor<T> s2;
+            MicroAPI::RegTensor<T> s3;
 
-        for (uint16_t c1 = 0; c1 < c1Length; c1++) {
-            for (uint16_t i = 0; i < wRepeatTimes; i++) {
-                MicroAPI::MaskReg mask = MicroAPI::UpdateMask<T>(maskValue);
-                //循环fmapW
-                const uint32_t wOffset = i * VL<T>();
+            MicroAPI::RegTensor<T> d0;
+            MicroAPI::RegTensor<T> d1;
+            MicroAPI::RegTensor<T> d2;
+            MicroAPI::RegTensor<T> d3;
 
-                MicroAPI::RegTensor<T> s0;
-                MicroAPI::RegTensor<T> s1;
-                MicroAPI::RegTensor<T> s2;
-                MicroAPI::RegTensor<T> s3;
+            // 从最上方的tile开始滑窗
+            // 先读取fmap首2行,每次循环往下读2行凑成4行执行变换
+            // 但若一个滑窗在fmap的1-4行分别读入s0,s1,s2,s3
+            // 在下一个滑窗s2,s3就变成1-2行,不考虑重新读取的话2-3行就只能读入s0,s1,滑窗1-4行就变成s2,s3,s0,s1
+            // 如果将s0,s1的数据拷贝到s2,s3可能会产生多余的指令并且产生数据依赖降低性能
+            // vf内scalar能力较弱不确定怎么样的代码编译器能正常优化
+            // 所以这里按照最朴素的方式展开循环一个循环内处理2个连续滑窗,
+            // 如果滑窗为奇数,则通过tileHTailRepeatTimes额外执行一次滑窗
 
-                MicroAPI::RegTensor<T> d0;
-                MicroAPI::RegTensor<T> d1;
-                MicroAPI::RegTensor<T> d2;
-                MicroAPI::RegTensor<T> d3;
+            //循环fmapW
+            const uint32_t wOffset = i * VL<T>();
 
-                // 从最上方的tile开始滑窗
-                // 先读取fmap首2行,每次循环往下读2行凑成4行执行变换
-                // 但若一个滑窗在fmap的1-4行分别读入s0,s1,s2,s3
-                // 在下一个滑窗s2,s3就变成1-2行,不考虑重新读取的话2-3行就只能读入s0,s1,滑窗1-4行就变成s2,s3,s0,s1
-                // 如果将s0,s1的数据拷贝到s2,s3可能会产生多余的指令并且产生数据依赖降低性能
-                // vf内scalar能力较弱不确定怎么样的代码编译器能正常优化
-                // 所以这里按照最朴素的方式展开循环一个循环内处理2个连续滑窗,
-                // 如果滑窗为奇数,则通过tileHTailRepeatTimes额外执行一次滑窗
+            __ubuf__ T* src = fmapBuf + wOffset;
+            MicroAPI::LoadAlign<T, MicroAPI::PostLiteral::POST_MODE_UPDATE>(s0, src, fmapWidth);
+            MicroAPI::LoadAlign<T, MicroAPI::PostLiteral::POST_MODE_UPDATE>(s1, src, fmapWidth);
 
-                //TODO 非padding区域不做valid校验
-                LoadAlignIfValid<true>(
-                    s0, fmapBuf, wOffset,
-                    validOffsetStart, validOffsetEnd, mask, maskAll);
-                LoadAlignIfValid<true>(
-                    s1, fmapBuf, wOffset + fmapWidth,
-                    validOffsetStart, validOffsetEnd, mask, maskAll);
+            __ubuf__ T* dst = tileBuf + wOffset;
+            for (uint16_t th = 0; th < tileHMainRepeatTimes; th++) {
+                MicroAPI::LoadAlign<T, MicroAPI::PostLiteral::POST_MODE_UPDATE>(s2, src, fmapWidth);
+                MicroAPI::LoadAlign<T, MicroAPI::PostLiteral::POST_MODE_UPDATE>(s3, src, fmapWidth);
 
-                for (uint16_t th = 0; th < tileHMainRepeatTimes; th++) {
-                    const uint16_t thIdx = th * 2;
-                    const uint32_t fmapOffset = wOffset + fmapWidth * thIdx * F23_WINO_TILE_FMAP_STRIDE_2;
+                TransformVf(s0, s1, s2, s3, d0, d1, d2, d3, mask);
 
-                    LoadAlignIfValid<true>(
-                        s2, fmapBuf, fmapOffset + 2 * fmapWidth,
-                        validOffsetStart, validOffsetEnd, mask, maskAll);
-                    LoadAlignIfValid<true>(
-                        s3, fmapBuf, fmapOffset + 3 * fmapWidth,
-                        validOffsetStart, validOffsetEnd, mask, maskAll);
+                MicroAPI::StoreAlign<T, MicroAPI::PostLiteral::POST_MODE_UPDATE>(dst, d0, tileBufWidth, mask);
+                MicroAPI::StoreAlign<T, MicroAPI::PostLiteral::POST_MODE_UPDATE>(dst, d1, tileBufWidth, mask);
+                MicroAPI::StoreAlign<T, MicroAPI::PostLiteral::POST_MODE_UPDATE>(dst, d2, tileBufWidth, mask);
+                MicroAPI::StoreAlign<T, MicroAPI::PostLiteral::POST_MODE_UPDATE>(dst, d3, tileBufWidth, mask);
 
-                    TransformVf(s0, s1, s2, s3, d0, d1, d2, d3, mask);
+                MicroAPI::LoadAlign<T, MicroAPI::PostLiteral::POST_MODE_UPDATE>(s0, src, fmapWidth);
+                MicroAPI::LoadAlign<T, MicroAPI::PostLiteral::POST_MODE_UPDATE>(s1, src, fmapWidth);
 
-                    const uint32_t tileOffset = wOffset + wStoreOffset + tileBufWidth * thIdx * F23_WINO_TILE_SIZE_4;
-                    MicroAPI::StoreAlign(buf + tileOffset, d0, mask);
-                    MicroAPI::StoreAlign(buf + tileOffset + tileBufWidth, d1, mask);
-                    MicroAPI::StoreAlign(buf + tileOffset + tileBufWidth * 2, d2, mask);
-                    MicroAPI::StoreAlign(buf + tileOffset + tileBufWidth * 3, d3, mask);
+                TransformVf(s2, s3, s0, s1, d0, d1, d2, d3, mask);
 
-                    LoadAlignIfValid<true>(
-                        s0, fmapBuf, fmapOffset + 4 * fmapWidth,
-                        validOffsetStart, validOffsetEnd, mask, maskAll);
-
-                    LoadAlignIfValid<true>(
-                        s1, fmapBuf, fmapOffset + 5 * fmapWidth,
-                        validOffsetStart, validOffsetEnd, mask, maskAll);
-
-                    TransformVf(s2, s3, s0, s1, d0, d1, d2, d3, mask);
-                    MicroAPI::StoreAlign(buf + tileOffset + tileBufWidth * 4, d0, mask);
-                    MicroAPI::StoreAlign(buf + tileOffset + tileBufWidth * 5, d1, mask);
-                    MicroAPI::StoreAlign(buf + tileOffset + tileBufWidth * 6, d2, mask);
-                    MicroAPI::StoreAlign(buf + tileOffset + tileBufWidth * 7, d3, mask);
-                }
-
-                for (uint16_t th = 0; th < tileHTailRepeatTimes; th++) {
-                    const uint16_t thIdx = tileH - 1;
-                    const uint32_t fmapOffset = wOffset + fmapWidth * thIdx * F23_WINO_TILE_FMAP_STRIDE_2;
-
-                    LoadAlignIfValid<true>(
-                        s2, fmapBuf, fmapOffset + 2 * fmapWidth,
-                        validOffsetStart, validOffsetEnd, mask, maskAll);
-
-                    LoadAlignIfValid<true>(
-                        s3, fmapBuf, fmapOffset + 3 * fmapWidth,
-                        validOffsetStart, validOffsetEnd, mask, maskAll);
-
-                    TransformVf(s0, s1, s2, s3, d0, d1, d2, d3, mask);
-
-                    const uint32_t tileOffset = wOffset + wStoreOffset + tileBufWidth * thIdx * F23_WINO_TILE_SIZE_4;
-                    MicroAPI::StoreAlign(buf + tileOffset, d0, mask);
-                    MicroAPI::StoreAlign(buf + tileOffset + tileBufWidth, d1, mask);
-                    MicroAPI::StoreAlign(buf + tileOffset + tileBufWidth * 2, d2, mask);
-                    MicroAPI::StoreAlign(buf + tileOffset + tileBufWidth * 3, d3, mask);
-                }
+                MicroAPI::StoreAlign<T, MicroAPI::PostLiteral::POST_MODE_UPDATE>(dst, d0, tileBufWidth, mask);
+                MicroAPI::StoreAlign<T, MicroAPI::PostLiteral::POST_MODE_UPDATE>(dst, d1, tileBufWidth, mask);
+                MicroAPI::StoreAlign<T, MicroAPI::PostLiteral::POST_MODE_UPDATE>(dst, d2, tileBufWidth, mask);
+                MicroAPI::StoreAlign<T, MicroAPI::PostLiteral::POST_MODE_UPDATE>(dst, d3, tileBufWidth, mask);
             }
 
-            buf += params.tileBufC1Stride;
-            fmapBuf += params.fmapBufC1Stride;
-        }
-    }
+            for (uint16_t th = 0; th < tileHTailRepeatTimes; th++) {
+                MicroAPI::LoadAlign<T, MicroAPI::PostLiteral::POST_MODE_UPDATE>(s2, src, fmapWidth);
+                MicroAPI::LoadAlign<T, MicroAPI::PostLiteral::POST_MODE_UPDATE>(s3, src, fmapWidth);
 
+                TransformVf(s0, s1, s2, s3, d0, d1, d2, d3, mask);
 
-    template <bool enable, typename S, typename M>
-    static __simd_callee__ inline void LoadAlignIfValid(
-        S& reg,
-        __ubuf__ T* buf,
-        uint32_t offset,
-        uint32_t validOffsetStart,
-        uint32_t validOffsetEnd,
-        M& mask,
-        M& allowAll)
-    {
-        //当offset处于valid区域时读取数据
-        if constexpr (enable) {
-            bool valid = offset >= validOffsetStart && offset < validOffsetEnd;
-            uint32_t allowMask = valid * VL<T>();
-            MicroAPI::MaskReg r0 = MicroAPI::UpdateMask<T>(allowMask);
-            MicroAPI::MaskReg r1;
-            //非有效区域时,r0为0,通过and操作将mask置空
-            MicroAPI::And(r1, mask, r0, allowAll);
-            //当offset在valid区域外时,r1全为0,所以即使offset-validOffsetStart溢出也无所谓
-            //因为根据文档datablock所对应的mask为0时,硬件不会读取block而是直接置0,所以越界也不用管
-            MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY>(
-                reg, buf + offset - validOffsetStart, 1, r1);
-        } else {
-            MicroAPI::LoadAlign(reg, buf + offset);
+                MicroAPI::StoreAlign<T, MicroAPI::PostLiteral::POST_MODE_UPDATE>(dst, d0, tileBufWidth, mask);
+                MicroAPI::StoreAlign<T, MicroAPI::PostLiteral::POST_MODE_UPDATE>(dst, d1, tileBufWidth, mask);
+                MicroAPI::StoreAlign<T, MicroAPI::PostLiteral::POST_MODE_UPDATE>(dst, d2, tileBufWidth, mask);
+                MicroAPI::StoreAlign<T, MicroAPI::PostLiteral::POST_MODE_UPDATE>(dst, d3, tileBufWidth, mask);
+            }
         }
     }
 
@@ -751,25 +668,12 @@ private:
     //      +---------+---------+-------+---------+
     //
 
-    struct UnfoldColParams {
-        uint32_t tileBufC1Stride;
-        uint32_t tileBufWidthC0Blocks;
-        uint32_t tileBufWidth;
-        uint32_t hValidElements;
-        uint32_t fmapLeftBoundOffset;
-        uint16_t hRepeatTimes;
-        uint16_t tileWMainRepeatTimes;
-        uint16_t tileWTailRepeatTimes;
-    };
-
-    static __simd_vf__ inline void UnfoldColsVf(
+    static __simd_callee__ inline void UnfoldColsVf(
         __ubuf__ T* buf,
-        const uint16_t c1Length,
-        const UnfoldColParams params)
+        const uint32_t tileBufWidthC0Blocks,
+        const uint32_t tileBufWidth,
+        const UnfoldColParamsV2& params)
     {
-        const uint32_t tileBufC1Stride = params.tileBufC1Stride;
-        const uint32_t tileBufWidthC0Blocks = params.tileBufWidthC0Blocks;
-        const uint32_t tileBufWidth = params.tileBufWidth;
         const uint32_t hValidElements = params.hValidElements;
         const uint16_t hRepeatTimes = params.hRepeatTimes;
         const uint16_t tileWMainRepeatTimes = params.tileWMainRepeatTimes;
@@ -777,24 +681,55 @@ private:
         //fmap靠在整块buf的右侧,所以读取时需要加个左边的偏移
         const uint32_t fmapLeftBoundOffset = params.fmapLeftBoundOffset;
 
-        for (uint16_t c1 = 0; c1 < c1Length; c1++) {
-            uint32_t maskValue = hValidElements;
-            for (uint16_t i = 0; i < hRepeatTimes; i++) {
-                MicroAPI::RegTensor<T> s0;
-                MicroAPI::RegTensor<T> s1;
-                MicroAPI::RegTensor<T> s2;
-                MicroAPI::RegTensor<T> s3;
+        uint32_t maskValue = hValidElements;
+        for (uint16_t i = 0; i < hRepeatTimes; i++) {
+            MicroAPI::RegTensor<T> s0;
+            MicroAPI::RegTensor<T> s1;
+            MicroAPI::RegTensor<T> s2;
+            MicroAPI::RegTensor<T> s3;
 
-                MicroAPI::RegTensor<T> d0;
-                MicroAPI::RegTensor<T> d1;
-                MicroAPI::RegTensor<T> d2;
-                MicroAPI::RegTensor<T> d3;
+            MicroAPI::RegTensor<T> d0;
+            MicroAPI::RegTensor<T> d1;
+            MicroAPI::RegTensor<T> d2;
+            MicroAPI::RegTensor<T> d3;
 
-                MicroAPI::MaskReg mask = MicroAPI::UpdateMask<T>(maskValue);
+            MicroAPI::MaskReg mask = MicroAPI::UpdateMask<T>(maskValue);
 
-                const uint32_t hOffset = tileBufWidth * i * BLK_COUNT_IN_VL;
+            const uint32_t hOffset = tileBufWidth * i * BLK_COUNT_IN_VL;
 
-                __ubuf__ T* src = buf + hOffset + fmapLeftBoundOffset;
+            __ubuf__ T* src = buf + hOffset + fmapLeftBoundOffset;
+
+            MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
+                MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                s0, src, tileBufWidthC0Blocks, 1, mask);
+            MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
+                MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                s1, src, tileBufWidthC0Blocks, 1, mask);
+
+            __ubuf__ T* dst = buf + hOffset;
+
+            for (uint16_t tw = 0; tw < tileWMainRepeatTimes; tw++) {
+                MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
+                    MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                    s2, src, tileBufWidthC0Blocks, 1, mask);
+                MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
+                    MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                    s3, src, tileBufWidthC0Blocks, 1, mask);
+
+                TransformVf(s0, s1, s2, s3, d0, d1, d2, d3, mask);
+
+                MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
+                    MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                    dst, d0, tileBufWidthC0Blocks, 1, mask);
+                MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
+                    MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                    dst, d1, tileBufWidthC0Blocks, 1, mask);
+                MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
+                    MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                    dst, d2, tileBufWidthC0Blocks, 1, mask);
+                MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
+                    MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                    dst, d3, tileBufWidthC0Blocks, 1, mask);
 
                 MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
                     MicroAPI::PostLiteral::POST_MODE_UPDATE>(
@@ -803,79 +738,44 @@ private:
                     MicroAPI::PostLiteral::POST_MODE_UPDATE>(
                     s1, src, tileBufWidthC0Blocks, 1, mask);
 
-                __ubuf__ T* dst = buf + hOffset;
-
-                for (uint16_t tw = 0; tw < tileWMainRepeatTimes; tw++) {
-                    MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                        MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        s2, src, tileBufWidthC0Blocks, 1, mask);
-                    MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                        MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        s3, src, tileBufWidthC0Blocks, 1, mask);
-
-                    TransformVf(s0, s1, s2, s3, d0, d1, d2, d3, mask);
-
-                    MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                        MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        dst, d0, tileBufWidthC0Blocks, 1, mask);
-                    MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                        MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        dst, d1, tileBufWidthC0Blocks, 1, mask);
-                    MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                        MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        dst, d2, tileBufWidthC0Blocks, 1, mask);
-                    MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                        MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        dst, d3, tileBufWidthC0Blocks, 1, mask);
-
-                    MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                        MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        s0, src, tileBufWidthC0Blocks, 1, mask);
-                    MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                        MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        s1, src, tileBufWidthC0Blocks, 1, mask);
-
-                    TransformVf(s2, s3, s0, s1, d0, d1, d2, d3, mask);
-                    MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                        MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        dst, d0, tileBufWidthC0Blocks, 1, mask);
-                    MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                        MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        dst, d1, tileBufWidthC0Blocks, 1, mask);
-                    MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                        MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        dst, d2, tileBufWidthC0Blocks, 1, mask);
-                    MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                        MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        dst, d3, tileBufWidthC0Blocks, 1, mask);
-                }
-
-                for (uint16_t th = 0; th < tileWTailRepeatTimes; th++) {
-                    MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                        MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        s2, src, tileBufWidthC0Blocks, 1, mask);
-                    MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                        MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        s3, src, tileBufWidthC0Blocks, 1, mask);
-
-                    TransformVf(s0, s1, s2, s3, d0, d1, d2, d3, mask);
-
-                    MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                        MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        dst, d0, tileBufWidthC0Blocks, 1, mask);
-                    MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                        MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        dst, d1, tileBufWidthC0Blocks, 1, mask);
-                    MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                        MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        dst, d2, tileBufWidthC0Blocks, 1, mask);
-                    MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
-                        MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        dst, d3, tileBufWidthC0Blocks, 1, mask);
-                }
+                TransformVf(s2, s3, s0, s1, d0, d1, d2, d3, mask);
+                MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
+                    MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                    dst, d0, tileBufWidthC0Blocks, 1, mask);
+                MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
+                    MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                    dst, d1, tileBufWidthC0Blocks, 1, mask);
+                MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
+                    MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                    dst, d2, tileBufWidthC0Blocks, 1, mask);
+                MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
+                    MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                    dst, d3, tileBufWidthC0Blocks, 1, mask);
             }
 
-            buf += tileBufC1Stride;
+            for (uint16_t th = 0; th < tileWTailRepeatTimes; th++) {
+                MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
+                    MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                    s2, src, tileBufWidthC0Blocks, 1, mask);
+                MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
+                    MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                    s3, src, tileBufWidthC0Blocks, 1, mask);
+
+                TransformVf(s0, s1, s2, s3, d0, d1, d2, d3, mask);
+
+                MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
+                    MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                    dst, d0, tileBufWidthC0Blocks, 1, mask);
+                MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
+                    MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                    dst, d1, tileBufWidthC0Blocks, 1, mask);
+                MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
+                    MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                    dst, d2, tileBufWidthC0Blocks, 1, mask);
+                MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
+                    MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                    dst, d3, tileBufWidthC0Blocks, 1, mask);
+            }
         }
     }
 
@@ -891,90 +791,141 @@ private:
     //       |             Padding             |hButton
     //       +---------------------------------+
 
-    struct PadParams {
-        uint32_t tileBufC1Stride;
-        uint32_t bufWidth;
-        uint32_t bufWidthC0Blocks;
-        uint32_t hElementsInPadWBlock;
-        uint32_t wElementsInPadHBlock;
-        uint32_t fmapH;
-        uint32_t fmapW;
-        uint16_t hRepeatTimesInPadWBlock;
-        uint16_t wRepeatTimesInPadHBlock;
-        HWPad pad;
-    };
+    // template <bool hTop, bool hBottom>
+    // static __simd_vf__ inline void PadH(
+    //     __ubuf__ T* buf,
+    //     const uint16_t repeatTimes,
+    //     const uint32_t repeatStride,
+    //     const uint32_t buttonOffset,
+    //     const uint16_t hTopLength,
+    //     const uint16_t hButtonLength,
+    //     const uint16_t dataBlocksInW,
+    //     const uint32_t dataBlocksSkippedInButton)
+    // {
+    //     MicroAPI::RegTensor<T> value;
+    //     MicroAPI::Duplicate(value, static_cast<T>(0));
+    //     constexpr uint8_t blockElements = GetDataBlockSizeInBytes() / sizeof(T);
+    //
+    //     uint32_t hTopPaddingElements = 0;
+    //     uint16_t hTopRepeatTimes = 0;
+    //     if constexpr (hTop) {
+    //         hTopPaddingElements = hTopLength * dataBlocksInW * blockElements;
+    //         hTopRepeatTimes = CeilDivision(hTopPaddingElements, VL<T>());
+    //     }
+    //
+    //     uint32_t hButtonPaddingElements = 0;
+    //     uint16_t hButtonRepeatTimes = 0;
+    //     __ubuf__ T* buttonBuf = buf;
+    //     if constexpr (hBottom) {
+    //         hButtonPaddingElements = (hButtonLength * dataBlocksInW - dataBlocksSkippedInButton) * blockElements;
+    //         hButtonRepeatTimes = CeilDivision(hButtonPaddingElements, VL<T>());
+    //         //TODO
+    //         buttonBuf = buf + buttonOffset+dataBlocksSkippedInButton*blockElements;
+    //     }
+    //
+    //     for (uint16_t i0 = 0; i0 < repeatTimes; i0++) {
+    //         if constexpr (hTop) {
+    //             uint32_t maskValueHTop = hTopPaddingElements;
+    //             for (uint16_t i = 0; i < hTopRepeatTimes; i++) {
+    //                 MicroAPI::MaskReg mask = MicroAPI::UpdateMask<T>(maskValueHTop);
+    //                 MicroAPI::StoreAlign(buf + i0 * repeatStride + i * VL<T>(), value, mask);
+    //             }
+    //         }
+    //
+    //         if constexpr (hBottom) {
+    //             uint32_t maskValueHButton = hButtonPaddingElements;
+    //             for (uint16_t i = 0; i < hButtonRepeatTimes; i++) {
+    //                 MicroAPI::MaskReg mask = MicroAPI::UpdateMask<T>(maskValueHButton);
+    //                 MicroAPI::StoreAlign(buttonBuf + i0 * repeatStride + i * VL<T>(), value, mask);
+    //             }
+    //         }
+    //     }
+    // }
 
-    template <bool hTop, bool hBottom, bool wLeft, bool wRight>
-    static __simd_vf__ inline void PadFmap(
-        __ubuf__ T* buf,
-        const uint16_t c1Length,
-        const PadParams params)
-    {
-        const uint32_t bufWidth = params.bufWidth;
-        const uint32_t bufWidthC0Blocks = params.bufWidthC0Blocks;
-        const uint32_t hElementsInPadWBlock = params.hElementsInPadWBlock;
-        const uint32_t wElementsInPadHBlock = params.wElementsInPadHBlock;
-        const uint32_t fmapH = params.fmapH;
-        const uint32_t fmapW = params.fmapW;
-        const uint16_t hRepeatTimesInPadWBlock = params.hRepeatTimesInPadWBlock;
-        const uint16_t wRepeatTimesInPadHBlock = params.wRepeatTimesInPadHBlock;
-        const HWPad& pad = params.pad;
-
-        MicroAPI::RegTensor<T> value;
-        MicroAPI::Duplicate(value, static_cast<T>(0));
-
-        for (uint16_t c1 = 0; c1 < c1Length; c1++) {
-            if constexpr (hTop) {
-                for (uint16_t i = 0; i < pad.hTop; i++) {
-                    uint32_t maskValue = wElementsInPadHBlock;
-                    uint32_t offset = i * bufWidth;
-                    for (uint16_t w = 0; w < wRepeatTimesInPadHBlock; w++) {
-                        MicroAPI::MaskReg mask = MicroAPI::UpdateMask<T>(maskValue);
-                        MicroAPI::StoreAlign(buf + offset + w * VL<T>(), value, mask);
-                    }
-                }
-            }
-
-            if constexpr (hBottom) {
-                for (uint16_t i = 0; i < pad.hBottom; i++) {
-                    uint32_t maskValue = wElementsInPadHBlock;
-                    uint32_t offset = (i + pad.hTop + fmapH) * bufWidth;
-                    for (uint16_t w = 0; w < wRepeatTimesInPadHBlock; w++) {
-                        MicroAPI::MaskReg mask = MicroAPI::UpdateMask<T>(maskValue);
-                        MicroAPI::StoreAlign(buf + offset + w * VL<T>(), value, mask);
-                    }
-                }
-            }
-
-            if constexpr (wLeft) {
-                for (uint16_t i = 0; i < pad.wLeft; i++) {
-                    uint32_t maskValue = hElementsInPadWBlock;
-                    uint32_t offset = pad.hTop * bufWidth + i * C0<T>();
-                    for (uint16_t w = 0; w < hRepeatTimesInPadWBlock; w++) {
-                        MicroAPI::MaskReg mask = MicroAPI::UpdateMask<T>(maskValue);
-                        MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY>(
-                            buf + offset + w * BLK_COUNT_IN_VL * bufWidth, value,
-                            bufWidthC0Blocks, mask);
-                    }
-                }
-            }
-
-            if constexpr (wRight) {
-                for (uint16_t i = 0; i < pad.wRight; i++) {
-                    uint32_t maskValue = hElementsInPadWBlock;
-                    uint32_t offset = pad.hTop * bufWidth + (i + pad.wLeft + fmapW) * C0<T>();
-                    for (uint16_t w = 0; w < hRepeatTimesInPadWBlock; w++) {
-                        MicroAPI::MaskReg mask = MicroAPI::UpdateMask<T>(maskValue);
-                        MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY>(
-                            buf + offset + w * BLK_COUNT_IN_VL * bufWidth, value,
-                            bufWidthC0Blocks, mask);
-                    }
-                }
-            }
-
-            buf += params.tileBufC1Stride;
-        }
-    }
+    // struct PadParams {
+    //     uint32_t tileBufC1Stride;
+    //     uint32_t bufWidth;
+    //     uint32_t bufWidthC0Blocks;
+    //     uint32_t hElementsInPadWBlock;
+    //     uint32_t wElementsInPadHBlock;
+    //     uint32_t fmapH;
+    //     uint32_t fmapW;
+    //     uint16_t hRepeatTimesInPadWBlock;
+    //     uint16_t wRepeatTimesInPadHBlock;
+    //     HWPad pad;
+    // };
+    //
+    // template <bool hTop, bool hBottom, bool wLeft, bool wRight>
+    // static __simd_vf__ inline void PadFmap(
+    //     __ubuf__ T* buf,
+    //     const uint16_t c1Length,
+    //     const PadParams params)
+    // {
+    //     const uint32_t bufWidth = params.bufWidth;
+    //     const uint32_t bufWidthC0Blocks = params.bufWidthC0Blocks;
+    //     const uint32_t hElementsInPadWBlock = params.hElementsInPadWBlock;
+    //     const uint32_t wElementsInPadHBlock = params.wElementsInPadHBlock;
+    //     const uint32_t fmapH = params.fmapH;
+    //     const uint32_t fmapW = params.fmapW;
+    //     const uint16_t hRepeatTimesInPadWBlock = params.hRepeatTimesInPadWBlock;
+    //     const uint16_t wRepeatTimesInPadHBlock = params.wRepeatTimesInPadHBlock;
+    //     const HWPad& pad = params.pad;
+    //
+    //     MicroAPI::RegTensor<T> value;
+    //     MicroAPI::Duplicate(value, static_cast<T>(0));
+    //
+    //     for (uint16_t c1 = 0; c1 < c1Length; c1++) {
+    //         if constexpr (hTop) {
+    //             for (uint16_t i = 0; i < pad.hTop; i++) {
+    //                 uint32_t maskValue = wElementsInPadHBlock;
+    //                 uint32_t offset = i * bufWidth;
+    //                 for (uint16_t w = 0; w < wRepeatTimesInPadHBlock; w++) {
+    //                     MicroAPI::MaskReg mask = MicroAPI::UpdateMask<T>(maskValue);
+    //                     MicroAPI::StoreAlign(buf + offset + w * VL<T>(), value, mask);
+    //                 }
+    //             }
+    //         }
+    //
+    //         if constexpr (hBottom) {
+    //             for (uint16_t i = 0; i < pad.hBottom; i++) {
+    //                 uint32_t maskValue = wElementsInPadHBlock;
+    //                 uint32_t offset = (i + pad.hTop + fmapH) * bufWidth;
+    //                 for (uint16_t w = 0; w < wRepeatTimesInPadHBlock; w++) {
+    //                     MicroAPI::MaskReg mask = MicroAPI::UpdateMask<T>(maskValue);
+    //                     MicroAPI::StoreAlign(buf + offset + w * VL<T>(), value, mask);
+    //                 }
+    //             }
+    //         }
+    //
+    //         if constexpr (wLeft) {
+    //             for (uint16_t i = 0; i < pad.wLeft; i++) {
+    //                 uint32_t maskValue = hElementsInPadWBlock;
+    //                 uint32_t offset = pad.hTop * bufWidth + i * C0<T>();
+    //                 for (uint16_t w = 0; w < hRepeatTimesInPadWBlock; w++) {
+    //                     MicroAPI::MaskReg mask = MicroAPI::UpdateMask<T>(maskValue);
+    //                     MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY>(
+    //                         buf + offset + w * BLK_COUNT_IN_VL * bufWidth, value,
+    //                         bufWidthC0Blocks, mask);
+    //                 }
+    //             }
+    //         }
+    //
+    //         if constexpr (wRight) {
+    //             for (uint16_t i = 0; i < pad.wRight; i++) {
+    //                 uint32_t maskValue = hElementsInPadWBlock;
+    //                 uint32_t offset = pad.hTop * bufWidth + (i + pad.wLeft + fmapW) * C0<T>();
+    //                 for (uint16_t w = 0; w < hRepeatTimesInPadWBlock; w++) {
+    //                     MicroAPI::MaskReg mask = MicroAPI::UpdateMask<T>(maskValue);
+    //                     MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY>(
+    //                         buf + offset + w * BLK_COUNT_IN_VL * bufWidth, value,
+    //                         bufWidthC0Blocks, mask);
+    //                 }
+    //             }
+    //         }
+    //
+    //         buf += params.tileBufC1Stride;
+    //     }
+    // }
 
 
     static __simd_callee__ inline void TransformVf(
