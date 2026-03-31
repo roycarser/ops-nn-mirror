@@ -679,8 +679,8 @@ private:
         const uint16_t tileWMainRepeatTimes = params.tileWMainRepeatTimes;
         const uint16_t tileWTailRepeatTimes = params.tileWTailRepeatTimes;
         //fmap靠在整块buf的右侧,所以读取时需要加个左边的偏移
-        const uint32_t fmapLeftBoundOffset = params.fmapLeftBoundOffset;
 
+        __ubuf__ T* src0 = buf + params.fmapLeftBoundOffset;
         uint32_t maskValue = hValidElements;
         for (uint16_t i = 0; i < hRepeatTimes; i++) {
             MicroAPI::RegTensor<T> s0;
@@ -697,7 +697,7 @@ private:
 
             const uint32_t hOffset = tileBufWidth * i * BLK_COUNT_IN_VL;
 
-            __ubuf__ T* src = buf + hOffset + fmapLeftBoundOffset;
+            __ubuf__ T* src = src0 + hOffset;
 
             MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
                 MicroAPI::PostLiteral::POST_MODE_UPDATE>(
