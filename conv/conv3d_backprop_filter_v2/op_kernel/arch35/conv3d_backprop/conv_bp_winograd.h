@@ -794,84 +794,84 @@ private:
 
                 const uint32_t hOffset = tileBufWidth * i * BLK_COUNT_IN_VL;
 
-                __ubuf__ T* src0 = buf + hOffset + fmapLeftBoundOffset;
+                __ubuf__ T* src = buf + hOffset + fmapLeftBoundOffset;
 
                 MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
                     MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                    s0, src0, tileBufWidthC0Blocks, 1, mask);
+                    s0, src, tileBufWidthC0Blocks, 1, mask);
                 MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
                     MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                    s1, src0, tileBufWidthC0Blocks, 1, mask);
+                    s1, src, tileBufWidthC0Blocks, 1, mask);
 
-                __ubuf__ T* dst0 = buf + hOffset;
+                __ubuf__ T* dst = buf + hOffset;
 
                 for (uint16_t tw = 0; tw < tileWMainRepeatTimes; tw++) {
                     MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
                         MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        s2, src0, tileBufWidthC0Blocks, 1, mask);
+                        s2, src, tileBufWidthC0Blocks, 1, mask);
                     MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
                         MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        s3, src0, tileBufWidthC0Blocks, 1, mask);
+                        s3, src, tileBufWidthC0Blocks, 1, mask);
 
                     TransformVf(s0, s1, s2, s3, d0, d1, d2, d3, mask);
 
                     MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
                         MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        dst0, d0, tileBufWidthC0Blocks, 1, mask);
+                        dst, d0, tileBufWidthC0Blocks, 1, mask);
                     MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
                         MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        dst0, d1, tileBufWidthC0Blocks, 1, mask);
+                        dst, d1, tileBufWidthC0Blocks, 1, mask);
                     MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
                         MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        dst0, d2, tileBufWidthC0Blocks, 1, mask);
+                        dst, d2, tileBufWidthC0Blocks, 1, mask);
                     MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
                         MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        dst0, d3, tileBufWidthC0Blocks, 1, mask);
+                        dst, d3, tileBufWidthC0Blocks, 1, mask);
 
                     MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
                         MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        s0, src0, tileBufWidthC0Blocks, 1, mask);
+                        s0, src, tileBufWidthC0Blocks, 1, mask);
                     MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
                         MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        s1, src0, tileBufWidthC0Blocks, 1, mask);
+                        s1, src, tileBufWidthC0Blocks, 1, mask);
 
                     TransformVf(s2, s3, s0, s1, d0, d1, d2, d3, mask);
                     MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
                         MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        dst0, d0, tileBufWidthC0Blocks, 1, mask);
+                        dst, d0, tileBufWidthC0Blocks, 1, mask);
                     MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
                         MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        dst0, d1, tileBufWidthC0Blocks, 1, mask);
+                        dst, d1, tileBufWidthC0Blocks, 1, mask);
                     MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
                         MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        dst0, d2, tileBufWidthC0Blocks, 1, mask);
+                        dst, d2, tileBufWidthC0Blocks, 1, mask);
                     MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
                         MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        dst0, d3, tileBufWidthC0Blocks, 1, mask);
+                        dst, d3, tileBufWidthC0Blocks, 1, mask);
                 }
 
                 for (uint16_t th = 0; th < tileWTailRepeatTimes; th++) {
                     MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
                         MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        s2, src0, tileBufWidthC0Blocks, 1, mask);
+                        s2, src, tileBufWidthC0Blocks, 1, mask);
                     MicroAPI::LoadAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
                         MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        s3, src0, tileBufWidthC0Blocks, 1, mask);
+                        s3, src, tileBufWidthC0Blocks, 1, mask);
 
                     TransformVf(s0, s1, s2, s3, d0, d1, d2, d3, mask);
 
                     MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
                         MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        dst0, d0, tileBufWidthC0Blocks, 1, mask);
+                        dst, d0, tileBufWidthC0Blocks, 1, mask);
                     MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
                         MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        dst0, d1, tileBufWidthC0Blocks, 1, mask);
+                        dst, d1, tileBufWidthC0Blocks, 1, mask);
                     MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
                         MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        dst0, d2, tileBufWidthC0Blocks, 1, mask);
+                        dst, d2, tileBufWidthC0Blocks, 1, mask);
                     MicroAPI::StoreAlign<T, MicroAPI::DataCopyMode::DATA_BLOCK_COPY,
                         MicroAPI::PostLiteral::POST_MODE_UPDATE>(
-                        dst0, d3, tileBufWidthC0Blocks, 1, mask);
+                        dst, d3, tileBufWidthC0Blocks, 1, mask);
                 }
             }
 
