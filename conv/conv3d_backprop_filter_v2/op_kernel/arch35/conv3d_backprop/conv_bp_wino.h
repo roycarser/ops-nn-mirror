@@ -17,41 +17,38 @@
 #define CONV_BP_WINO_H
 
 #include "conv_bp_wino_transform.h"
-#include "../../../../conv3d_backprop_input_v2/op_kernel/arch35/conv3d_backprop_input_v2/conv3d_backprop_input_v2_vec_transpose.h"
-#include "../conv3d_backprop_filter_v2/conv3d_backprop_filter_v2_init_output.h"
 
 using namespace AscendC;
 
 template <typename T,
-    TPosition pos,
-    pipe_t srcPipe,
+    TPosition dstPos,
     pipe_t dstPipe,
-    uint8_t SRC_READY_FLAG,
-    uint8_t DST_READ_FLAG,
+    uint8_t SRC_PUSH_QUE_FLAG,
+    uint8_t DST_POP_QUE_FLAG,
     bool enablePingPong = true>
-class CVSyncQueue {
+class MTE3CVSyncQueue {
     static constexpr uint8_t MIX_BLOCK_SYNC = 2;
 
 public:
-    __aicore__ inline CVSyncQueue()
+    __aicore__ inline MTE3CVSyncQueue()
     {
         freeCount_ = enablePingPong ? 2 : 1;
     }
 
-    __aicore__ inline void InitBuffer(TPipe* pipe, uint32_t bufSize)
+    __aicore__ inline void Init(TPipe* pipe, uint32_t bufSize)
     {
         bufSize_ = bufSize;
         pipe->InitBuffer(buf_, sizeof(T) * (enablePingPong ? bufSize_ * 2 : bufSize_));
     }
 
-    //src申请buf写入
+    //申请dst buf写入
     __aicore__ inline LocalTensor<T> AllocTensor()
     {
         if (freeCount_ > 0) {
             //初始阶段可以直接写入
             freeCount_--;
         } else {
-            CrossCoreWaitFlag<MIX_BLOCK_SYNC, srcPipe>(DST_READ_FLAG);
+            CrossCoreWaitFlag<MIX_BLOCK_SYNC, PIPE_MTE3>(DST_POP_QUE_FLAG);
         }
         return GetBuf();
     }
@@ -59,20 +56,20 @@ public:
     //src完成写入
     __aicore__ inline void EnQue()
     {
-        CrossCoreSetFlag<MIX_BLOCK_SYNC, srcPipe>(SRC_READY_FLAG);
+        CrossCoreSetFlag<MIX_BLOCK_SYNC, PIPE_MTE3>(SRC_PUSH_QUE_FLAG);
     }
 
     //dst等待src写入
     __aicore__ inline LocalTensor<T> DeQue()
     {
-        CrossCoreWaitFlag<MIX_BLOCK_SYNC, dstPipe>(SRC_READY_FLAG);
+        CrossCoreWaitFlag<MIX_BLOCK_SYNC, dstPipe>(SRC_PUSH_QUE_FLAG);
         return GetBuf();
     }
 
     //dst读取完毕,释放buf
     __aicore__ inline void FreeTensor()
     {
-        CrossCoreSetFlag<MIX_BLOCK_SYNC, dstPipe>(DST_READ_FLAG);
+        CrossCoreSetFlag<MIX_BLOCK_SYNC, dstPipe>(DST_POP_QUE_FLAG);
     }
 
 private:
@@ -86,7 +83,7 @@ private:
         }
     }
 
-    TBuf<pos> buf_;
+    TBuf<dstPos> buf_;
     uint32_t bufSize_ = 0;
     uint8_t freeCount_;
     bool pingFlag_ = true;
@@ -98,10 +95,10 @@ public:
     __aicore__ inline ConvBackpropFilterWinograd(
         const WinoFmapTransformer<T>& fmap,
         const WinoDyTransformer<T>& dy,
-        uint32_t tilesH,
-        uint32_t tilesW,
         uint32_t cin,
         uint32_t cout,
+        uint32_t tilesH,
+        uint32_t tilesW,
         uint16_t singleShapeCin,
         uint16_t singleShapeCout,
         uint16_t singleShapeTilesH,
@@ -118,36 +115,42 @@ public:
           singleShapeTilesW_(singleShapeTilesW),
           singleShapeFmapBufSize_(
               SingleShapeTileBufSize(
+                  singleShapeCin,
                   singleShapeTilesH,
-                  singleShapeTilesW,
-                  singleShapeCin)),
+                  singleShapeTilesW)),
           singleShapeDyBufSize_(
               SingleShapeTileBufSize(
+                  singleShapeCout,
                   singleShapeTilesH,
-                  singleShapeTilesW,
-                  singleShapeCout))
+                  singleShapeTilesW))
     {
     }
 
-    inline void __aicore__ Init(TPipe* pipe)
+    inline void __aicore__ Init()
     {
-        if ASCEND_IS_AIV {
-            uint32_t tiles = singleShapeTilesH_ * singleShapeTilesW_;
-            uint32_t fmapTSize =
-                fmap_.CalculateTransposeBufC0Length(tiles);
-            uint32_t dyTSize =
-                dy_.CalculateTransposeBufC0Length(tiles);
+        TPipe* pipe = GetTPipePtr();
 
-            pipe->InitBuffer(transposeBuf_, dyTSize + fmapTSize);
+        if ASCEND_IS_AIV {
+            uint32_t fmapTSize =
+                fmap_.CalculateTransposeBufC0Length(singleShapeTilesH_, singleShapeTilesW_);
+            uint32_t dyTSize =
+                dy_.CalculateTransposeBufC0Length(singleShapeTilesH_, singleShapeTilesW_);
+
+            pipe->InitBuffer(transposeBuf_, (dyTSize + fmapTSize) * sizeof(T));
             dyTransposeBuf_ = transposeBuf_.Get<T>(dyTSize);
             fmapTransposeBuf_ = transposeBuf_.GetWithOffset<T>(fmapTSize, dyTSize * sizeof(T));
 
-            pipe->InitBuffer(a1TransformBuf_, singleShapeDyBufSize_ * 2);
-            pipe->InitBuffer(b1TransformBuf_, singleShapeFmapBufSize_ * 2);
+            pipe->InitBuffer(dyVBuf_, singleShapeDyBufSize_ * 2 * sizeof(T));
+            pipe->InitBuffer(fmapVBuf_, singleShapeFmapBufSize_ * 2 * sizeof(T));
+
+            TransformVFlag::AllocEventId(pipe, fmapEventFlags_[0]);
+            TransformVFlag::AllocEventId(pipe, fmapEventFlags_[1]);
+            TransformVFlag::AllocEventId(pipe, dyEventFlags_[0]);
+            TransformVFlag::AllocEventId(pipe, dyEventFlags_[1]);
         }
 
-        a1Que_.InitBuffer(pipe);
-        b1Que_.InitBuffer(pipe);
+        a1Mte3Que_.Init(pipe, singleShapeDyBufSize_);
+        b1Mte3Que_.Init(pipe, singleShapeFmapBufSize_);
     }
 
     inline void __aicore__ IterateAll(
@@ -169,31 +172,56 @@ public:
             tile.elements = tile.hLength * tile.wLength;
 
             if ASCEND_IS_AIV {
+                if (unlikely(!initWARFlag_)) {
+                    //头几次的mte2操作不需要等待mte3结束,预先置1
+                    SetFlag<HardEvent::MTE3_MTE2>(fmapEventFlags_[0].mte32mte2);
+                    SetFlag<HardEvent::MTE3_MTE2>(fmapEventFlags_[1].mte32mte2);
+                    SetFlag<HardEvent::MTE3_MTE2>(dyEventFlags_[0].mte32mte2);
+                    SetFlag<HardEvent::MTE3_MTE2>(dyEventFlags_[1].mte32mte2);
+                    initWARFlag_ = true;
+                }
+
+                auto flags = getPingPongFlags();
+                TransformVFlag& fmapFlags = Std::get<0>(flags);
+                TransformVFlag& dyFlags = Std::get<1>(flags);
+
                 auto buf = getPingPongBuffer();
-                LocalTensor<T> dyVBuf = Std::get<0>(buf);
-                LocalTensor<T> fmapVBuf = Std::get<1>(buf);
+                LocalTensor<T>& fmapVBuf = Std::get<0>(buf);
+                LocalTensor<T>& dyVBuf = Std::get<1>(buf);
 
                 TileBox dyBox = dy_.CalculateSrcBox(tile, coutIdx, coutLength);
                 TileBox fmapBox = fmap_.CalculateSrcBox(tile, cinIdx, cinLength);
 
-                dy_.CopyIn(fmapVBuf, dyBox, dyBatchOffset);
-                fmap_.CopyIn(dyVBuf, fmapBox, fmapBatchOffset);
+                WaitFlag<HardEvent::MTE3_MTE2>(fmapFlags.mte32mte2);
+                fmap_.CopyIn(fmapVBuf, fmapBox, fmapBatchOffset);
+                SetFlag<HardEvent::MTE2_V>(fmapFlags.mte2v);
 
-                PipeBarrier<PIPE_ALL>();
+                WaitFlag<HardEvent::MTE3_MTE2>(dyFlags.mte32mte2);
+                dy_.CopyIn(dyVBuf, dyBox, dyBatchOffset);
+                SetFlag<HardEvent::MTE2_V>(dyFlags.mte2v);
 
-                dy_.Compute(fmapVBuf, dyTransposeBuf_, dyBox);
-                fmap_.Compute(dyVBuf, fmapTransposeBuf_, fmapBox);
+                WaitFlag<HardEvent::MTE2_V>(fmapFlags.mte2v);
+                fmap_.Compute(fmapVBuf, fmapTransposeBuf_, fmapBox);
+                SetFlag<HardEvent::V_MTE3>(fmapFlags.v2mte3);
 
-                PipeBarrier<PIPE_ALL>();
+                WaitFlag<HardEvent::MTE2_V>(dyFlags.mte2v);
+                dy_.Compute(dyVBuf, dyTransposeBuf_, dyBox);
+                SetFlag<HardEvent::V_MTE3>(dyFlags.v2mte3);
 
-                LocalTensor<T> dyA1Buf = a1Que_.AllocTensor();
-                dy_.CopyOut(dyVBuf, dyA1Buf, dyBox);
-                a1Que_.EneQue();
-
-                LocalTensor<T> fmapB1Buf = b1Que_.AllocTensor();
+                LocalTensor<T> fmapB1Buf = b1Mte3Que_.AllocTensor();
+                WaitFlag<HardEvent::V_MTE3>(fmapFlags.v2mte3);
                 fmap_.CopyOut(fmapVBuf, fmapB1Buf, fmapBox);
-                b1Que_.EneQue();
+                SetFlag<HardEvent::MTE3_MTE2>(fmapFlags.mte32mte2);
+                b1Mte3Que_.EnQue();
+
+                LocalTensor<T> dyA1Buf = a1Mte3Que_.AllocTensor();
+                WaitFlag<HardEvent::V_MTE3>(dyFlags.v2mte3);
+                dy_.CopyOut(dyVBuf, dyA1Buf, dyBox);
+                SetFlag<HardEvent::MTE3_MTE2>(dyFlags.mte32mte2);
+                a1Mte3Que_.EnQue();
             }
+
+            pingFlag_ = !pingFlag_;
 
             TileKIter::next(
                 iter,
@@ -203,19 +231,33 @@ public:
     }
 
 private:
-    Std::tuple<LocalTensor<T>, LocalTensor<T> > getPingPongBuffer()
+    struct TransformVFlag {
+        TEventID mte2v;
+        TEventID v2mte3;
+        TEventID mte32mte2;
+
+        static __aicore__ inline void AllocEventId(TPipe* pipe, TransformVFlag& flags)
+        {
+            flags.mte2v = pipe->AllocEventID<HardEvent::MTE2_V>();
+            flags.v2mte3 = pipe->AllocEventID<HardEvent::V_MTE3>();
+            flags.mte32mte2 = pipe->AllocEventID<HardEvent::MTE3_MTE2>();
+        }
+    };
+
+    __aicore__ inline Std::tuple<TransformVFlag, TransformVFlag> getPingPongFlags()
+    {
+        return Std::make_tuple(fmapEventFlags_[pingFlag_], dyEventFlags_[pingFlag_]);
+    }
+
+    __aicore__ inline Std::tuple<LocalTensor<T>, LocalTensor<T> > getPingPongBuffer()
     {
         uint32_t dyOffset = pingFlag_ * singleShapeDyBufSize_ * sizeof(T);
         uint32_t fmapOffset = pingFlag_ * singleShapeFmapBufSize_ * sizeof(T);
 
-        LocalTensor<T> dyVBuf = a1TransformBuf_.GetWithOffset<T>(singleShapeDyBufSize_, dyOffset);
-        LocalTensor<T> fmapVBuf = b1TransformBuf_.GetWithOffset<T>(singleShapeFmapBufSize_, fmapOffset);
+        LocalTensor<T> dyVBuf = dyVBuf_.GetWithOffset<T>(singleShapeDyBufSize_, dyOffset);
+        LocalTensor<T> fmapVBuf = fmapVBuf_.GetWithOffset<T>(singleShapeFmapBufSize_, fmapOffset);
 
-        LocalTensor<T> dyA1Buf = a1Buf_.GetWithOffset<T>(singleShapeDyBufSize_, dyOffset);
-        LocalTensor<T> fmapB1Buf = b1Buf_.GetWithOffset<T>(singleShapeFmapBufSize_, fmapOffset);
-
-        pingFlag_ = !pingFlag_;
-        return Std::make_tuple(dyVBuf, fmapVBuf, dyA1Buf, fmapB1Buf);
+        return Std::make_tuple(fmapVBuf, dyVBuf);
     }
 
     static inline uint32_t __aicore__ SingleShapeTileBufSize(uint32_t c, uint32_t th, uint32_t tw)
@@ -223,19 +265,22 @@ private:
         return TileUnfoldElements(th * tw) * Ops::Base::CeilAlign(c, C0<T>());
     }
 
+    MTE3CVSyncQueue<T, TPosition::A1, PIPE_MTE1, 0, 1> a1Mte3Que_;
+    MTE3CVSyncQueue<T, TPosition::B1, PIPE_MTE1, 2, 3> b1Mte3Que_;
 
-    CVSyncQueue<T, TPosition::A1, PIPE_MTE3, PIPE_MTE1, 0, 1> a1Que_;
-    CVSyncQueue<T, TPosition::B1, PIPE_MTE3, PIPE_MTE1, 2, 3> b1Que_;
-
-    TBuf<TPosition::VECIN> a1TransformBuf_;
-    TBuf<TPosition::VECIN> b1TransformBuf_;
+    TBuf<TPosition::VECIN> fmapVBuf_;
+    TBuf<TPosition::VECIN> dyVBuf_;
 
     TBuf<TPosition::VECIN> transposeBuf_;
     LocalTensor<T> fmapTransposeBuf_;
     LocalTensor<T> dyTransposeBuf_;
 
+    TransformVFlag fmapEventFlags_[2];
+    TransformVFlag dyEventFlags_[2];
+
     const WinoFmapTransformer<T>& fmap_;
     const WinoDyTransformer<T>& dy_;
+
     const uint32_t tilesH_;
     const uint32_t tilesW_;
     const uint32_t cin_;
@@ -246,7 +291,9 @@ private:
     const uint16_t singleShapeTilesW_;
     const uint32_t singleShapeFmapBufSize_;
     const uint32_t singleShapeDyBufSize_;
+
     bool pingFlag_ = true;
+    bool initWARFlag_ = false;
 };
 
 
