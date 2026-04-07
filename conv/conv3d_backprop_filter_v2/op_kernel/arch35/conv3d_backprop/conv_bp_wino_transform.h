@@ -53,11 +53,11 @@ struct UnfoldIntf {
         Impl::UnfoldRowsFromSrcBufVf(tileBuf, srcBuf, params);
     }
 
-    static __simd_callee__ inline void UnfoldColVf(
+    static __simd_callee__ inline void UnfoldColsVf(
         __ubuf__ T* buf,
         const UnfoldColParamsT& params)
     {
-        Impl::UnfoldColVf(buf, params);
+        Impl::UnfoldColsVf(buf, params);
     }
 };
 
@@ -73,13 +73,11 @@ public:
 
     __aicore__ inline WinoTransformer(
         __gm__ T* gm,
-        const uint32_t c,
         const uint32_t srcH,
         const uint32_t srcW,
         const uint16_t padH,
         const uint16_t padW)
-        : c_(c),
-          srcH_(srcH),
+        : srcH_(srcH),
           srcW_(srcW),
           padH_(padH),
           padW_(padW)
@@ -87,10 +85,9 @@ public:
         gm_.SetGlobalBuffer(gm);
     }
 
-    static inline uint32_t __aicore__ CalculateTransposeBufC0Length(
+    __aicore__ static inline uint32_t CalculateTransposeBufC0Length(
         uint32_t tileH, uint32_t tileW)
     {
-
         //额外申请[c0,align16(hw)]的空间给c0hw转置
         uint32_t h = SlideWin::Tiles2SrcLength(tileH);
         uint32_t w = SlideWin::Tiles2SrcLength(tileW);
@@ -152,7 +149,7 @@ public:
             // 且根据数学推到[th4,tw4] >= align16(hw)
             // 所以当前buf一定能放得下所有数据
 
-            DataCopyPad<T, AscendC::PaddingMode::Compact>(
+            AscendC::DataCopyPad<T, AscendC::PaddingMode::Compact>(
                 buf,
                 gm_[box.c.idx * srcH_ * srcW_ + src.hIdx * srcW_ + src.wIdx + batchOffset],
                 params,
@@ -237,7 +234,7 @@ private:
             AscendC::MicroAPI::MemType::VEC_LOAD,
             AscendC::MicroAPI::MemType::VEC_STORE>();
 
-        UnfoldPolicy::UnfoldColVf(tileBuf, ucp);
+        UnfoldPolicy::UnfoldColsVf(tileBuf, ucp);
     }
 
     __aicore__ static inline void TransposeCHW2C1HWC0(
@@ -281,7 +278,6 @@ private:
     }
 
     AscendC::GlobalTensor<T> gm_;
-    const uint32_t c_;
     const uint32_t srcH_;
     const uint32_t srcW_;
     const uint16_t padH_;
@@ -512,8 +508,7 @@ struct Fmap {
             // 先读取fmap首2行,每次循环往下读2行凑成4行执行变换
             // 但若一个滑窗在fmap的1-4行分别读入s0,s1,s2,s3
             // 在下一个滑窗s2,s3就变成1-2行,不考虑重新读取的话2-3行就只能读入s0,s1,滑窗1-4行就变成s2,s3,s0,s1
-            // 如果将s0,s1的数据拷贝到s2,s3可能会产生多余的指令并且产生数据依赖降低性能
-            // vf内scalar能力较弱不确定怎么样的代码编译器能正常优化
+            // 如果将s0,s1的数据拷贝到s2,s3可能会产生多余的mov指令
             // 所以这里按照最朴素的方式展开循环一个循环内处理2个连续滑窗,
             // 如果滑窗为奇数,则通过tileHTailRepeatTimes额外执行一次滑窗
 
