@@ -259,7 +259,8 @@ private:
 
     static inline uint32_t __aicore__ SingleShapeTileBufSize(uint32_t c, uint32_t th, uint32_t tw)
     {
-        return TileUnfoldElements(th * tw) * Ops::Base::CeilAlign(c, C0<T>());
+        uint32_t hw = TileUnfoldSize(th) * (TileUnfoldSize(tw) + TILE_BUF_BANK_CONFLICT_PADDING);
+        return hw * Ops::Base::CeilAlign(c, C0<T>());
     }
 
     MTE3CVSyncQueue<T, TPosition::A1, PIPE_MTE1, 0, 1> a1Mte3Que_;
