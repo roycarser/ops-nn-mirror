@@ -21,6 +21,9 @@
 
 //Transpose5HD做转置时按照16*16为最小单位的,所以搬运时hw轴要统一按照16元素对齐
 static constexpr uint32_t HW_SRC_ALIGNED_16 = 16;
+//tileBuf在满足tile空间的大小下需要pad 1到奇数,防止行列变换时跨行读列时
+//一整列都在少数bank产生bank冲突
+static constexpr uint8_t TILE_BUF_BANK_CONFLICT_PADDING = 1;
 
 struct CSlice {
     uint32_t idx;
@@ -164,6 +167,10 @@ public:
         const TileBox& box) const
     {
         uint16_t c1 = box.c.c1;
+        uint32_t tileBufW = TileUnfoldSize(box.tile.wLength) + TILE_BUF_BANK_CONFLICT_PADDING;
+        uint32_t tileBufH = TileUnfoldSize(box.tile.hLength);
+        uint32_t tileBufHW = tileBufW * tileBufH;
+
         if (const HWBox& src = box.src; src.elements != 0) {
             uint32_t fmapHWAligned16 = Ops::Base::CeilAlign(src.elements, HW_SRC_ALIGNED_16);
 
@@ -177,7 +184,7 @@ public:
 
             uint32_t padTopOffset = box.pad.hTop * src.wLength * C0<T>();
             uint32_t srcC1Stride = fmapHWAligned16 * C0<T>();
-            uint32_t tileUnfoldC1Stride = TileUnfoldElements(box.tile.elements) * C0<T>();
+            uint32_t tileUnfoldC1Stride = tileBufHW * C0<T>();
 
             const auto params = UnfoldPolicy::InitUnfoldParams(box);
             const typename UnfoldPolicy::UnfoldRowParamsT& urp = AscendC::Std::get<0>(params);
@@ -206,7 +213,7 @@ public:
             AscendC::Duplicate(
                 mainBuf,
                 static_cast<T>(0),
-                TileUnfoldElements(box.tile.elements) * c1 * C0<T>());
+                tileBufHW * c1 * C0<T>());
         }
     }
 
@@ -215,6 +222,7 @@ public:
         AscendC::LocalTensor<T>& out,
         const TileBox& box) const
     {
+        //TODO 拷贝时忽略右侧1 pad
         AscendC::DataCopyParams params;
         params.blockCount = 1;
         params.blockLen = TileUnfoldElements(box.tile.elements) * box.c.c1;
@@ -309,12 +317,13 @@ static inline __aicore__ void InitDefaultUnfoldParams(
     DefaultUnfoldRowParams& urp,
     DefaultUnfoldColParams& ucp)
 {
-    uint32_t tileBufWidthBlocks = TileUnfoldSize(box.tile.wLength);
+    uint32_t tileWSize = TileUnfoldSize(box.tile.wLength);
+    uint32_t tileBufWidthBlocks = tileWSize + TILE_BUF_BANK_CONFLICT_PADDING;
 
     urp.wValidElements = box.src.wLength * C0<T>();
     urp.tileBufWidth = tileBufWidthBlocks * C0<T>();
     //行展开后放在tileBuf的右侧,
-    urp.wStoreOffset = urp.tileBufWidth - (box.src.wLength - box.pad.wRight) * C0<T>();
+    urp.wStoreOffset = (tileWSize - box.src.wLength - box.pad.wRight) * C0<T>();
     urp.wRepeatTimes = Ops::Base::CeilDiv(urp.wValidElements, VL<T>());
     urp.tileH = box.tile.hLength;
 
