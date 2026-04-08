@@ -147,6 +147,12 @@ public:
             TransformVFlag::AllocEventId(pipe, fmapEventFlags_[1]);
             TransformVFlag::AllocEventId(pipe, dyEventFlags_[0]);
             TransformVFlag::AllocEventId(pipe, dyEventFlags_[1]);
+
+            //头几次的mte2操作不需要等待mte3结束,预先置1
+            SetFlag<HardEvent::MTE3_MTE2>(fmapEventFlags_[0].mte32mte2);
+            SetFlag<HardEvent::MTE3_MTE2>(fmapEventFlags_[1].mte32mte2);
+            SetFlag<HardEvent::MTE3_MTE2>(dyEventFlags_[0].mte32mte2);
+            SetFlag<HardEvent::MTE3_MTE2>(dyEventFlags_[1].mte32mte2);
         }
 
         a1Mte3Que_.Init(pipe, singleShapeDyBufSize_);
@@ -172,15 +178,6 @@ public:
             tile.elements = tile.hLength * tile.wLength;
 
             if ASCEND_IS_AIV {
-                if (unlikely(!initWARFlag_)) {
-                    //头几次的mte2操作不需要等待mte3结束,预先置1
-                    SetFlag<HardEvent::MTE3_MTE2>(fmapEventFlags_[0].mte32mte2);
-                    SetFlag<HardEvent::MTE3_MTE2>(fmapEventFlags_[1].mte32mte2);
-                    SetFlag<HardEvent::MTE3_MTE2>(dyEventFlags_[0].mte32mte2);
-                    SetFlag<HardEvent::MTE3_MTE2>(dyEventFlags_[1].mte32mte2);
-                    initWARFlag_ = true;
-                }
-
                 auto flags = getPingPongFlags();
                 TransformVFlag& fmapFlags = Std::get<0>(flags);
                 TransformVFlag& dyFlags = Std::get<1>(flags);
@@ -293,7 +290,6 @@ private:
     const uint32_t singleShapeDyBufSize_;
 
     bool pingFlag_ = true;
-    bool initWARFlag_ = false;
 };
 
 

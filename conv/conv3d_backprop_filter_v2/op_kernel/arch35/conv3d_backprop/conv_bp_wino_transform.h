@@ -40,7 +40,7 @@ struct UnfoldIntf {
     using UnfoldRowParamsT = typename Impl::UnfoldRowParamsT;
     using UnfoldColParamsT = typename Impl::UnfoldColParamsT;
 
-    static AscendC::Std::tuple<UnfoldRowParamsT, UnfoldColParamsT> InitUnfoldParams(const TileBox& box)
+    static __aicore__ AscendC::Std::tuple<UnfoldRowParamsT, UnfoldColParamsT> InitUnfoldParams(const TileBox& box)
     {
         return Impl::InitUnfoldParams(box);
     }
