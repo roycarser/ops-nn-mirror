@@ -140,19 +140,15 @@ public:
             dyTransposeBuf_ = transposeBuf_.Get<T>(dyTSize);
             fmapTransposeBuf_ = transposeBuf_.GetWithOffset<T>(fmapTSize, dyTSize * sizeof(T));
 
-            pipe->InitBuffer(dyVBuf_, singleShapeDyBufSize_ * 2 * sizeof(T));
-            pipe->InitBuffer(fmapVBuf_, singleShapeFmapBufSize_ * 2 * sizeof(T));
+            pipe->InitBuffer(dyVBuf_, singleShapeDyBufSize_ * sizeof(T));
+            pipe->InitBuffer(fmapVBuf_, singleShapeFmapBufSize_ * sizeof(T));
 
-            TransformVFlag::AllocEventId(pipe, fmapEventFlags_[0]);
-            TransformVFlag::AllocEventId(pipe, fmapEventFlags_[1]);
-            TransformVFlag::AllocEventId(pipe, dyEventFlags_[0]);
-            TransformVFlag::AllocEventId(pipe, dyEventFlags_[1]);
+            TransformVFlag::AllocEventId(pipe, fmapEventFlags_);
+            TransformVFlag::AllocEventId(pipe, dyEventFlags_);
 
-            //头几次的mte2操作不需要等待mte3结束,预先置1
-            SetFlag<HardEvent::MTE3_MTE2>(fmapEventFlags_[0].mte32mte2);
-            SetFlag<HardEvent::MTE3_MTE2>(fmapEventFlags_[1].mte32mte2);
-            SetFlag<HardEvent::MTE3_MTE2>(dyEventFlags_[0].mte32mte2);
-            SetFlag<HardEvent::MTE3_MTE2>(dyEventFlags_[1].mte32mte2);
+            //初始的mte2操作不需要等待mte3结束,预先置1
+            SetFlag<HardEvent::MTE3_MTE2>(fmapEventFlags_.mte32mte2);
+            SetFlag<HardEvent::MTE3_MTE2>(dyEventFlags_.mte32mte2);
         }
 
         a1Mte3Que_.Init(pipe, singleShapeDyBufSize_);
@@ -178,47 +174,41 @@ public:
             tile.elements = tile.hLength * tile.wLength;
 
             if ASCEND_IS_AIV {
-                auto flags = getPingPongFlags();
-                TransformVFlag& fmapFlags = Std::get<0>(flags);
-                TransformVFlag& dyFlags = Std::get<1>(flags);
 
-                auto buf = getPingPongBuffer();
-                LocalTensor<T>& fmapVBuf = Std::get<0>(buf);
-                LocalTensor<T>& dyVBuf = Std::get<1>(buf);
-
-                TileBox dyBox = dy_.CalculateSrcBox(tile, coutIdx, coutLength);
                 TileBox fmapBox = fmap_.CalculateSrcBox(tile, cinIdx, cinLength);
+                LocalTensor<T> fmapVBuf = fmapVBuf_.Get<T>();
 
-                WaitFlag<HardEvent::MTE3_MTE2>(fmapFlags.mte32mte2);
+                WaitFlag<HardEvent::MTE3_MTE2>(fmapEventFlags_.mte32mte2);
                 fmap_.CopyIn(fmapVBuf, fmapBox, fmapBatchOffset);
-                SetFlag<HardEvent::MTE2_V>(fmapFlags.mte2v);
+                SetFlag<HardEvent::MTE2_V>(fmapEventFlags_.mte2v);
 
-                WaitFlag<HardEvent::MTE3_MTE2>(dyFlags.mte32mte2);
-                dy_.CopyIn(dyVBuf, dyBox, dyBatchOffset);
-                SetFlag<HardEvent::MTE2_V>(dyFlags.mte2v);
-
-                WaitFlag<HardEvent::MTE2_V>(fmapFlags.mte2v);
+                WaitFlag<HardEvent::MTE2_V>(fmapEventFlags_.mte2v);
                 fmap_.Compute(fmapVBuf, fmapTransposeBuf_, fmapBox);
-                SetFlag<HardEvent::V_MTE3>(fmapFlags.v2mte3);
-
-                WaitFlag<HardEvent::MTE2_V>(dyFlags.mte2v);
-                dy_.Compute(dyVBuf, dyTransposeBuf_, dyBox);
-                SetFlag<HardEvent::V_MTE3>(dyFlags.v2mte3);
+                SetFlag<HardEvent::V_MTE3>(fmapEventFlags_.v2mte3);
 
                 LocalTensor<T> fmapB1Buf = b1Mte3Que_.AllocTensor();
-                WaitFlag<HardEvent::V_MTE3>(fmapFlags.v2mte3);
+                WaitFlag<HardEvent::V_MTE3>(fmapEventFlags_.v2mte3);
                 fmap_.CopyOut(fmapVBuf, fmapB1Buf, fmapBox);
-                SetFlag<HardEvent::MTE3_MTE2>(fmapFlags.mte32mte2);
+                SetFlag<HardEvent::MTE3_MTE2>(fmapEventFlags_.mte32mte2);
                 b1Mte3Que_.EnQue();
 
+                TileBox dyBox = dy_.CalculateSrcBox(tile, coutIdx, coutLength);
+                LocalTensor<T> dyVBuf = dyVBuf_.Get<T>();
+
+                WaitFlag<HardEvent::MTE3_MTE2>(dyEventFlags_.mte32mte2);
+                dy_.CopyIn(dyVBuf, dyBox, dyBatchOffset);
+                SetFlag<HardEvent::MTE2_V>(dyEventFlags_.mte2v);
+
+                WaitFlag<HardEvent::MTE2_V>(dyEventFlags_.mte2v);
+                dy_.Compute(dyVBuf, dyTransposeBuf_, dyBox);
+                SetFlag<HardEvent::V_MTE3>(dyEventFlags_.v2mte3);
+
                 LocalTensor<T> dyA1Buf = a1Mte3Que_.AllocTensor();
-                WaitFlag<HardEvent::V_MTE3>(dyFlags.v2mte3);
+                WaitFlag<HardEvent::V_MTE3>(dyEventFlags_.v2mte3);
                 dy_.CopyOut(dyVBuf, dyA1Buf, dyBox);
-                SetFlag<HardEvent::MTE3_MTE2>(dyFlags.mte32mte2);
+                SetFlag<HardEvent::MTE3_MTE2>(dyEventFlags_.mte32mte2);
                 a1Mte3Que_.EnQue();
             }
-
-            pingFlag_ = !pingFlag_;
 
             TileKIter::next(
                 iter,
@@ -241,22 +231,6 @@ private:
         }
     };
 
-    __aicore__ inline Std::tuple<TransformVFlag, TransformVFlag> getPingPongFlags()
-    {
-        return Std::make_tuple(fmapEventFlags_[pingFlag_], dyEventFlags_[pingFlag_]);
-    }
-
-    __aicore__ inline Std::tuple<LocalTensor<T>, LocalTensor<T> > getPingPongBuffer()
-    {
-        uint32_t dyOffset = pingFlag_ * singleShapeDyBufSize_ * sizeof(T);
-        uint32_t fmapOffset = pingFlag_ * singleShapeFmapBufSize_ * sizeof(T);
-
-        LocalTensor<T> dyVBuf = dyVBuf_.GetWithOffset<T>(singleShapeDyBufSize_, dyOffset);
-        LocalTensor<T> fmapVBuf = fmapVBuf_.GetWithOffset<T>(singleShapeFmapBufSize_, fmapOffset);
-
-        return Std::make_tuple(fmapVBuf, dyVBuf);
-    }
-
     static inline uint32_t __aicore__ SingleShapeTileBufSize(uint32_t c, uint32_t th, uint32_t tw)
     {
         uint32_t hw = TileUnfoldSize(th) * (TileUnfoldSize(tw) + TILE_BUF_BANK_CONFLICT_PADDING);
@@ -273,8 +247,8 @@ private:
     LocalTensor<T> fmapTransposeBuf_;
     LocalTensor<T> dyTransposeBuf_;
 
-    TransformVFlag fmapEventFlags_[2];
-    TransformVFlag dyEventFlags_[2];
+    TransformVFlag fmapEventFlags_;
+    TransformVFlag dyEventFlags_;
 
     const WinoFmapTransformer<T>& fmap_;
     const WinoDyTransformer<T>& dy_;
@@ -289,8 +263,6 @@ private:
     const uint16_t singleShapeTilesW_;
     const uint32_t singleShapeFmapBufSize_;
     const uint32_t singleShapeDyBufSize_;
-
-    bool pingFlag_ = true;
 };
 
 
