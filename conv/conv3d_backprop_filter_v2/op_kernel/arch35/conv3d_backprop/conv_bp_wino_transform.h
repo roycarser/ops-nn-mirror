@@ -21,7 +21,7 @@
 
 //Transpose5HD做转置时按照16*16为最小单位的,所以搬运时hw轴要统一按照16元素对齐
 static constexpr uint32_t HW_SRC_ALIGNED_16 = 16;
-//tileBuf在满足tile空间的大小下需要pad 1到奇数,防止行列变换时跨行读列时
+//tileBuf在满足tile空间的大小下需要pad 1列让宽变成奇数,防止行列变换时跨行读列时
 //一整列都在少数bank产生bank冲突
 static constexpr uint8_t TILE_BUF_BANK_CONFLICT_PADDING = 1;
 
@@ -222,10 +222,12 @@ public:
         AscendC::LocalTensor<T>& out,
         const TileBox& box) const
     {
-        //TODO 拷贝时忽略右侧1 pad
         AscendC::DataCopyParams params;
-        params.blockCount = 1;
-        params.blockLen = TileUnfoldElements(box.tile.elements) * box.c.c1;
+        params.blockCount = TileUnfoldSize(box.tile.hLength) * box.c.c1;
+        params.blockLen = TileUnfoldSize(box.tile.wLength);
+        //拷贝时忽略右侧1 pad
+        params.srcGap = TILE_BUF_BANK_CONFLICT_PADDING;
+        params.dstGap = 0;
         AscendC::DataCopy(out, mainBuf, params);
     }
 
