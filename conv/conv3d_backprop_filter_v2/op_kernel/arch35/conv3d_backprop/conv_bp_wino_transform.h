@@ -40,27 +40,27 @@ struct TileBox {
 
 template <typename T, typename Impl>
 struct UnfoldIntf {
-    using UnfoldRowParamsT = typename Impl::UnfoldRowParamsT;
     using UnfoldColParamsT = typename Impl::UnfoldColParamsT;
+    using UnfoldRowParamsT = typename Impl::UnfoldRowParamsT;
 
-    static __aicore__ AscendC::Std::tuple<UnfoldRowParamsT, UnfoldColParamsT> InitUnfoldParams(const TileBox& box)
+    static __aicore__ AscendC::Std::tuple<UnfoldColParamsT, UnfoldRowParamsT> InitUnfoldParams(const TileBox& box)
     {
         return Impl::InitUnfoldParams(box);
     }
 
-    static __simd_callee__ inline void UnfoldRowsFromSrcBufVf(
+    static __simd_callee__ inline void UnfoldColsFromSrcBufVf(
         __ubuf__ T* __restrict__ tileBuf,
         __ubuf__ T* __restrict__ srcBuf,
-        const UnfoldRowParamsT& params)
-    {
-        Impl::UnfoldRowsFromSrcBufVf(tileBuf, srcBuf, params);
-    }
-
-    static __simd_callee__ inline void UnfoldColsVf(
-        __ubuf__ T* buf,
         const UnfoldColParamsT& params)
     {
-        Impl::UnfoldColsVf(buf, params);
+        Impl::UnfoldColsFromSrcBufVf(tileBuf, srcBuf, params);
+    }
+
+    static __simd_callee__ inline void UnfoldRowsVf(
+        __ubuf__ T* buf,
+        const UnfoldRowParamsT& params)
+    {
+        Impl::UnfoldRowsVf(buf, params);
     }
 };
 
@@ -187,8 +187,8 @@ public:
             uint32_t tileUnfoldC1Stride = tileBufHW * C0<T>();
 
             const auto params = UnfoldPolicy::InitUnfoldParams(box);
-            const typename UnfoldPolicy::UnfoldRowParamsT& urp = AscendC::Std::get<0>(params);
-            const typename UnfoldPolicy::UnfoldColParamsT& ucp = AscendC::Std::get<1>(params);
+            const typename UnfoldPolicy::UnfoldColParamsT& ucp = AscendC::Std::get<0>(params);
+            const typename UnfoldPolicy::UnfoldRowParamsT& urp = AscendC::Std::get<1>(params);
 
             for (uint16_t i = 0; i < c1; i++) {
                 //从末端开始处理，由于mainBuf的头部搬入了整块fmap
@@ -206,7 +206,7 @@ public:
                 UnfoldFromSrcBufVf(
                     reinterpret_cast<__ubuf__ T*>(tileBuf.GetPhyAddr()),
                     reinterpret_cast<__ubuf__ T*>(transposeBuf.GetPhyAddr()),
-                    urp, ucp);
+                    ucp, urp);
             }
         } else {
             //整个tile都由padding区域产生,不做计算直接置0,
@@ -235,16 +235,16 @@ private:
     __simd_vf__ static inline void UnfoldFromSrcBufVf(
         __ubuf__ T* __restrict__ tileBuf,
         __ubuf__ T* __restrict__ srcBuf,
-        const typename UnfoldPolicy::UnfoldRowParamsT urp,
-        const typename UnfoldPolicy::UnfoldColParamsT ucp)
+        const typename UnfoldPolicy::UnfoldColParamsT ucp,
+        const typename UnfoldPolicy::UnfoldRowParamsT urp)
     {
-        UnfoldPolicy::UnfoldRowsFromSrcBufVf(tileBuf, srcBuf, urp);
+        UnfoldPolicy::UnfoldColsFromSrcBufVf(tileBuf, srcBuf, ucp);
 
         AscendC::MicroAPI::LocalMemBar<
             AscendC::MicroAPI::MemType::VEC_LOAD,
             AscendC::MicroAPI::MemType::VEC_STORE>();
 
-        UnfoldPolicy::UnfoldColsVf(tileBuf, ucp);
+        UnfoldPolicy::UnfoldRowsVf(tileBuf, urp);
     }
 
     __aicore__ static inline void TransposeCHW2C1HWC0(
@@ -298,14 +298,6 @@ namespace UnfoldImpl {
 using namespace AscendC::MicroAPI;
 
 struct DefaultUnfoldRowParams {
-    uint32_t wValidElements;
-    uint32_t wStoreOffset;
-    uint32_t tileBufWidth;
-    uint16_t wRepeatTimes;
-    uint16_t tileH;
-};
-
-struct DefaultUnfoldColParams {
     uint32_t hValidElements;
     uint32_t wLoadOffset;
     uint32_t tileBufWidthBlocks;
@@ -313,28 +305,36 @@ struct DefaultUnfoldColParams {
     uint16_t tileW;
 };
 
+struct DefaultUnfoldColParams {
+    uint32_t wValidElements;
+    uint32_t wStoreOffset;
+    uint32_t tileBufWidth;
+    uint16_t wRepeatTimes;
+    uint16_t tileH;
+};
+
 template <typename T>
 static inline __aicore__ void InitDefaultUnfoldParams(
     const TileBox& box,
-    DefaultUnfoldRowParams& urp,
-    DefaultUnfoldColParams& ucp)
+    DefaultUnfoldColParams& ucp,
+    DefaultUnfoldRowParams& urp)
 {
     uint32_t tileWSize = TileUnfoldSize(box.tile.wLength);
     uint32_t tileBufWidthBlocks = tileWSize + TILE_BUF_BANK_CONFLICT_PADDING;
 
-    urp.wValidElements = box.src.wLength * C0<T>();
-    urp.tileBufWidth = tileBufWidthBlocks * C0<T>();
+    ucp.wValidElements = box.src.wLength * C0<T>();
+    ucp.tileBufWidth = tileBufWidthBlocks * C0<T>();
     //行展开后放在tileBuf的右侧,
-    urp.wStoreOffset = (tileWSize - box.src.wLength - box.pad.wRight) * C0<T>();
-    urp.wRepeatTimes = Ops::Base::CeilDiv(urp.wValidElements, VL<T>());
-    urp.tileH = box.tile.hLength;
+    ucp.wStoreOffset = (tileWSize - box.src.wLength - box.pad.wRight) * C0<T>();
+    ucp.wRepeatTimes = Ops::Base::CeilDiv(ucp.wValidElements, VL<T>());
+    ucp.tileH = box.tile.hLength;
 
-    ucp.hValidElements = TileUnfoldSize(box.tile.hLength) * C0<T>();
-    ucp.tileBufWidthBlocks = tileBufWidthBlocks;
+    urp.hValidElements = TileUnfoldSize(box.tile.hLength) * C0<T>();
+    urp.tileBufWidthBlocks = tileBufWidthBlocks;
     //读取的起始位置,在行展开的写入位置在往前走padLeft的大小
-    ucp.wLoadOffset = urp.wStoreOffset - box.pad.wLeft * C0<T>();
-    ucp.hRepeatTimes = Ops::Base::CeilDiv(ucp.hValidElements, VL<T>());
-    ucp.tileW = box.tile.wLength;
+    urp.wLoadOffset = ucp.wStoreOffset - box.pad.wLeft * C0<T>();
+    urp.hRepeatTimes = Ops::Base::CeilDiv(urp.hValidElements, VL<T>());
+    urp.tileW = box.tile.wLength;
 }
 
 template <typename T>
@@ -342,22 +342,22 @@ struct Dy {
     using UnfoldRowParamsT = DefaultUnfoldRowParams;
     using UnfoldColParamsT = DefaultUnfoldColParams;
 
-    using ParamsTuple = AscendC::Std::tuple<UnfoldRowParamsT, UnfoldColParamsT>;
+    using ParamsTuple = AscendC::Std::tuple<UnfoldColParamsT, UnfoldRowParamsT>;
 
     static ParamsTuple inline __aicore__ InitUnfoldParams(const TileBox& box)
     {
         DefaultUnfoldRowParams urp = {};
         DefaultUnfoldColParams ucp = {};
 
-        InitDefaultUnfoldParams<T>(box, urp, ucp);
+        InitDefaultUnfoldParams<T>(box, ucp, urp);
 
-        return AscendC::Std::make_tuple(urp, ucp);
+        return AscendC::Std::make_tuple(ucp, urp);
     }
 
-    static __simd_callee__ inline void UnfoldRowsFromSrcBufVf(
+    static __simd_callee__ inline void UnfoldColsFromSrcBufVf(
         __ubuf__ T* __restrict__ tileBuf,
         __ubuf__ T* __restrict__ dyBuf,
-        const DefaultUnfoldRowParams& params)
+        const DefaultUnfoldColParams& params)
     {
         const uint32_t wValidElements = params.wValidElements;
         const uint32_t wStoreOffset = params.wStoreOffset;
@@ -395,9 +395,9 @@ struct Dy {
         }
     }
 
-    static __simd_callee__ inline void UnfoldColsVf(
+    static __simd_callee__ inline void UnfoldRowsVf(
         __ubuf__ T* buf,
-        const DefaultUnfoldColParams& params)
+        const DefaultUnfoldRowParams& params)
     {
         const uint32_t tileBufWidthBlocks = params.tileBufWidthBlocks;
         const uint32_t hValidElements = params.hValidElements;
@@ -458,40 +458,40 @@ template <typename T>
 struct Fmap {
     //fmap一个循环里展开2个tile,所以额外添加首位轮参数
     struct UnfoldFmapRowParams : DefaultUnfoldRowParams {
-        uint16_t tileHMainRepeatTimes;
-        uint16_t tileHTailRepeatTimes;
+        uint16_t tileWMainRepeatTimes;
+        uint16_t tileWTailRepeatTimes;
     };
 
     struct UnfoldFmapColParams : DefaultUnfoldColParams {
-        uint16_t tileWMainRepeatTimes;
-        uint16_t tileWTailRepeatTimes;
+        uint16_t tileHMainRepeatTimes;
+        uint16_t tileHTailRepeatTimes;
     };
 
     using UnfoldRowParamsT = UnfoldFmapRowParams;
     using UnfoldColParamsT = UnfoldFmapColParams;
 
-    using ParamsTuple = AscendC::Std::tuple<UnfoldRowParamsT, UnfoldColParamsT>;
+    using ParamsTuple = AscendC::Std::tuple<UnfoldColParamsT, UnfoldRowParamsT>;
 
     static ParamsTuple inline __aicore__ InitUnfoldParams(const TileBox& box)
     {
-        UnfoldFmapRowParams urp = {};
         UnfoldFmapColParams ucp = {};
+        UnfoldFmapRowParams urp = {};
 
-        InitDefaultUnfoldParams<T>(box, urp, ucp);
+        InitDefaultUnfoldParams<T>(box, ucp, urp);
 
-        urp.tileHMainRepeatTimes = urp.tileH >> 1;
-        urp.tileHTailRepeatTimes = urp.tileH & 1;
+        ucp.tileHMainRepeatTimes = ucp.tileH >> 1;
+        ucp.tileHTailRepeatTimes = ucp.tileH & 1;
 
-        ucp.tileWMainRepeatTimes = ucp.tileW >> 1;
-        ucp.tileWTailRepeatTimes = ucp.tileW & 1;
+        urp.tileWMainRepeatTimes = urp.tileW >> 1;
+        urp.tileWTailRepeatTimes = urp.tileW & 1;
 
-        return AscendC::Std::make_tuple(urp, ucp);
+        return AscendC::Std::make_tuple(ucp, urp);
     }
 
-    static __simd_callee__ inline void UnfoldRowsFromSrcBufVf(
+    static __simd_callee__ inline void UnfoldColsFromSrcBufVf(
         __ubuf__ T* __restrict__ tileBuf,
         __ubuf__ T* __restrict__ fmapBuf,
-        const UnfoldFmapRowParams& params)
+        const UnfoldFmapColParams& params)
     {
         const uint32_t wValidElements = params.wValidElements;
         const uint32_t wStoreOffset = params.wStoreOffset;
@@ -567,9 +567,9 @@ struct Fmap {
         }
     }
 
-    static __simd_callee__ inline void UnfoldColsVf(
+    static __simd_callee__ inline void UnfoldRowsVf(
         __ubuf__ T* buf,
-        const UnfoldFmapColParams& params)
+        const UnfoldFmapRowParams& params)
     {
         const uint32_t tileBufWidthBlocks = params.tileBufWidthBlocks;
         const uint32_t wLoadOffset = params.wLoadOffset;
