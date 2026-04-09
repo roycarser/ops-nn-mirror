@@ -68,7 +68,7 @@ template <typename T,
     uint32_t STRIDE,
     uint32_t WINDOW_SIZE,
     typename UnfoldImpl,
-    bool hasInputPadding >
+    bool hasInputPadding>
 class WinoTransformer {
 public:
     using SlideWin = SlideWindows<STRIDE, WINDOW_SIZE>;
@@ -132,7 +132,7 @@ public:
             AscendC::DataCopyExtParams params;
             params.blockCount = src.hLength;
             params.blockLen = src.wLength * sizeof(T);
-            params.srcStride = srcW_ * sizeof(T);
+            params.srcStride = (srcW_ - src.wLength) * sizeof(T);
             params.dstStride = 0;
 
             uint32_t fmapHWAligned16 = Ops::Base::CeilAlign(src.elements, HW_SRC_ALIGNED_16);
@@ -688,7 +688,6 @@ struct Fmap {
         Sub(d2, s2, s1, mask);
         Sub(d3, s1, s3, mask);
     }
-
 };
 }
 

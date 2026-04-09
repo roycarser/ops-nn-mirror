@@ -167,8 +167,8 @@ public:
         TileKIter iter;
         while (!iter.end) {
             HWBox tile = {};
-            tile.hIdx = tilesH_;
-            tile.wIdx = tilesW_;
+            tile.hIdx = iter.tileHIdx;
+            tile.wIdx = iter.tileWIdx;
             tile.hLength = Std::min(static_cast<uint32_t>(singleShapeTilesH_), tilesH_ - iter.tileHIdx);
             tile.wLength = Std::min(static_cast<uint32_t>(singleShapeTilesW_), tilesW_ - iter.tileWIdx);
             tile.elements = tile.hLength * tile.wLength;
