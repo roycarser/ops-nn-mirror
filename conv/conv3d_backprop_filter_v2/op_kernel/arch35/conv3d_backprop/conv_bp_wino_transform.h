@@ -75,7 +75,7 @@ public:
     using UnfoldPolicy = UnfoldIntf<T, UnfoldImpl>;
 
     __aicore__ inline WinoTransformer(
-        __gm__ T* gm,
+        __gm__ T* in,
         const uint32_t srcH,
         const uint32_t srcW,
         const uint16_t padH,
@@ -85,7 +85,7 @@ public:
           padH_(padH),
           padW_(padW)
     {
-        gm_.SetGlobalBuffer(gm);
+        gm_.SetGlobalBuffer(in);
     }
 
     __aicore__ static inline uint32_t CalculateTransposeBufC0Length(
@@ -98,10 +98,10 @@ public:
         uint32_t safeElements;
         if constexpr (hasInputPadding) {
             //transposeBuf中会做H方向pad的清0
-            //令src中有效数据为valid_h,valid_w
-            //那么需要 pad_top*w+ align16(valid_h*valid_w) <= buf_length
+            //令src中数据为h,w
+            //那么需要 pad_top*w+ align16(h*w) <= buf_length
             //所以这里要额外+15防止转置指令写入的数据溢出
-            //防止pad_top=3,valid_h=1,w=4,这种情况
+            //防止pad_top=3,h=1,w=4,这种情况
             //会写入的空间为3*4+16=28超过16
             //但如果不存在输入pad_top其实可以不做保护
             safeElements = Ops::Base::CeilAlign(h * w + 15, HW_SRC_ALIGNED_16);
@@ -123,10 +123,20 @@ public:
         return box;
     }
 
+    __aicore__ inline uint32_t SrcH() const
+    {
+        return srcH_;
+    }
+
+    __aicore__ inline uint32_t SrcW() const
+    {
+        return srcW_;
+    }
+
     __aicore__ inline void CopyIn(
         const AscendC::LocalTensor<T>& buf,
         const TileBox& box,
-        const uint32_t batchOffset) const
+        const uint64_t batchOffset) const
     {
         if (const HWBox& src = box.src; src.elements != 0) {
             AscendC::DataCopyExtParams params;
@@ -139,10 +149,10 @@ public:
 
             AscendC::LoopModeParams loop;
             loop.loop1Size = box.c.length;
-            loop.loop1SrcStride = srcW_ * srcH_ * sizeof(T);
+            loop.loop1SrcStride = static_cast<uint64_t>(srcW_) * srcH_ * sizeof(T);
             loop.loop1DstStride = fmapHWAligned16 * sizeof(T);
             loop.loop2Size = 1;
-            loop.loop1SrcStride = 0;
+            loop.loop2SrcStride = 0;
             loop.loop2DstStride = 0;
 
             SetLoopModePara(loop, AscendC::DataCopyMVType::OUT_TO_UB);
@@ -154,7 +164,10 @@ public:
 
             AscendC::DataCopyPad<T, AscendC::PaddingMode::Compact>(
                 buf,
-                gm_[box.c.idx * srcH_ * srcW_ + src.hIdx * srcW_ + src.wIdx + batchOffset],
+                gm_[batchOffset +
+                    static_cast<uint64_t>(box.c.idx) * srcH_ * srcW_ +
+                    static_cast<uint64_t>(src.hIdx) * srcW_ +
+                    src.wIdx],
                 params,
                 {false, 0, 0, 0});
             AscendC::ResetLoopModePara(AscendC::DataCopyMVType::OUT_TO_UB);
@@ -173,14 +186,6 @@ public:
 
         if (const HWBox& src = box.src; src.elements != 0) {
             uint32_t fmapHWAligned16 = Ops::Base::CeilAlign(src.elements, HW_SRC_ALIGNED_16);
-
-            if (const uint32_t tailC0 = c1 * C0<T>() - box.c.length; tailC0 != 0) {
-                //c轴不是c0对齐的,给他补0补到c0对齐
-                AscendC::Duplicate(
-                    mainBuf[box.c.length * fmapHWAligned16],
-                    static_cast<T>(0),
-                    tailC0 * fmapHWAligned16);
-            }
 
             uint32_t padTopOffset = box.pad.hTop * src.wLength * C0<T>();
             uint32_t srcC1Stride = fmapHWAligned16 * C0<T>();
@@ -219,16 +224,19 @@ public:
 
     __aicore__ inline void CopyOut(
         AscendC::LocalTensor<T>& mainBuf,
-        AscendC::LocalTensor<T>& out,
-        const TileBox& box) const
+        const NK1C1K0C0<T>& nk1c1k0c0,
+        const TileBox& box,
+        uint32_t batchIdx,
+        uint32_t k1Idx) const
     {
-        AscendC::DataCopyParams params;
-        params.blockCount = TileUnfoldSize(box.tile.hLength) * box.c.c1;
-        params.blockLen = TileUnfoldSize(box.tile.wLength);
-        //拷贝时忽略右侧1 pad
-        params.srcGap = TILE_BUF_BANK_CONFLICT_PADDING;
-        params.dstGap = 0;
-        AscendC::DataCopy(out, mainBuf, params);
+        nk1c1k0c0.CopyK0H4W4Out(
+            mainBuf,
+            box.tile,
+            TILE_BUF_BANK_CONFLICT_PADDING,
+            batchIdx,
+            k1Idx,
+            box.c.idx / C0<T>(),
+            box.c.c1);
     }
 
 private:

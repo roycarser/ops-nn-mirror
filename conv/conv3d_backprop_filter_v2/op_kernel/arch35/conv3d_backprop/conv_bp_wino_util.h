@@ -154,26 +154,159 @@ static constexpr __aicore__ inline uint32_t TileUnfoldSize(uint32_t tiles)
     return tiles * F23_TRANSFORM_TILE_SIZE_4;
 }
 
-struct TileKIter {
-    uint32_t tileHIdx = 0;
-    uint32_t tileWIdx = 0;
-    bool end = false;
 
-    static __aicore__ inline void next(
-        TileKIter& iter,
+//正变换后在gm上的排布[N,TileHW/SingleShapeTileHW(k1),C1,SingleShapeTileHW(k0),C0]
+//k0按照[singleShapeTileHW,16]排布
+template <typename T>
+class NK1C1K0C0 {
+public:
+     __aicore__ inline NK1C1K0C0(
+        __gm__ T* gm,
+        uint32_t c,
         uint32_t tileH,
         uint32_t tileW,
-        uint16_t singleShapeTileH,
-        uint16_t singleShapeTileW)
+        uint32_t singleShapeTileH,
+        uint32_t singleShapeTileW)
+        : k1_(Ops::Base::CeilDiv(tileH, singleShapeTileH) * Ops::Base::CeilDiv(tileW, singleShapeTileW)),
+          c1_(Ops::Base::CeilDiv(c, C0<T>())),
+          k0_(singleShapeTileH * singleShapeTileW)
     {
-        iter.tileWIdx += singleShapeTileW;
-        if (iter.tileWIdx >= tileW) {
-            iter.tileWIdx = 0;
-            iter.tileHIdx += singleShapeTileH;
-            iter.end = iter.tileHIdx >= tileH;
-        }
+        gm_.SetGlobalBuffer(gm);
     }
-};
 
+    //将一块按照[tileH4,tileW4]排布的k0搬出
+    __aicore__ inline void CopyK0H4W4Out(
+        const AscendC::LocalTensor<T>& c1th4tw4c0,
+        const HWBox& tiles,
+        uint32_t tw4Gap,
+        uint32_t batchIdx,
+        uint32_t k1Idx,
+        uint32_t c1Idx,
+        uint32_t c1Length) const
+    {
+        ascendc_assert(k0_>=tiles.elements, "can only move one k0 out");
+        //这个接口只能搬一块k0出去
+
+        constexpr uint32_t c0Bytes = C0<T>() * sizeof(T);
+        uint32_t gmOffset = GetOffset(batchIdx, k1Idx, c1Idx);
+        uint32_t tileHSize = TileUnfoldSize(tiles.hLength);
+        uint32_t tileWSize = TileUnfoldSize(tiles.wLength);
+
+        AscendC::DataCopyParams params;
+        //tile的顺序会变,从列优先变成行优先了,h方向变成内轴
+        //但反正都是累加轴其实顺序没什么影响,而且可以提升单次搬运的量
+        params.blockCount = tileHSize;
+        params.blockLen = F23_TRANSFORM_TILE_SIZE_4;
+        params.srcGap = tileWSize + tw4Gap;
+        params.dstGap = 0;
+
+        AscendC::LoopModeParams loop;
+        loop.loop1Size = tiles.wLength;
+        loop.loop1SrcStride = F23_TRANSFORM_TILE_SIZE_4 * c0Bytes;
+        loop.loop1DstStride = params.blockCount * params.blockLen * c0Bytes;
+        loop.loop2Size = c1Length;
+        loop.loop1SrcStride = tileHSize * (tileWSize + tw4Gap) * c0Bytes;
+        loop.loop2DstStride = k0_ * F23_TRANSFORM_TILE_ELEMENTS_16 * c0Bytes;
+
+        SetLoopModePara(loop, AscendC::DataCopyMVType::UB_TO_OUT);
+
+        AscendC::DataCopy(gm_[gmOffset], c1th4tw4c0, params);
+
+        AscendC::ResetLoopModePara(AscendC::DataCopyMVType::UB_TO_OUT);
+    }
+
+    //TODO test and remove
+    //
+    // __aicore__ inline void CopyK0TileOut(
+    //     const AscendC::LocalTensor<T>& c1th4tw4c0,
+    //     const HWBox& tile,
+    //     uint32_t tw4Gap,
+    //     uint32_t batchIdx,
+    //     uint32_t k1Idx,
+    //     uint32_t c1Idx,
+    //     uint32_t c1Length) const
+    // {
+    //     ascendc_assert(k0_>=tile.elements, "can only move one k0 out");
+    //     //这个接口只能搬一块k0出去
+    //
+    //     uint32_t gmOffset = GetOffset(batchIdx, k1Idx, c1Idx);
+    //
+    //     AscendC::DataCopyParams params;
+    //     params.blockLen = TileUnfoldSize(tile.wLength);
+    //     params.srcGap = tw4Gap;
+    //     params.dstGap = 0;
+    //     if (k0_ == tile.elements) {
+    //         params.blockCount = TileUnfoldSize(tile.hLength) * c1Length;
+    //     } else {
+    //         //尾轮一个tile不满k0时,将单个c1内的tile每行每列连在一起,数据会顺序一些
+    //         params.blockCount = TileUnfoldSize(tile.hLength);
+    //
+    //         AscendC::LoopModeParams loop;
+    //         loop.loop1Size = c1Length;
+    //         loop.loop1SrcStride = (params.blockLen + params.srcGap) * params.blockCount * C0<T>() * sizeof(T);
+    //         loop.loop1DstStride = k0_ * F23_TRANSFORM_TILE_ELEMENTS_16 * C0<T>() * sizeof(T);
+    //         loop.loop2Size = 1;
+    //         loop.loop1SrcStride = 0;
+    //         loop.loop2DstStride = 0;
+    //
+    //         SetLoopModePara(loop, AscendC::DataCopyMVType::UB_TO_OUT);
+    //     }
+    //
+    //     AscendC::DataCopy(gm_[gmOffset], c1th4tw4c0, params);
+    //
+    //     AscendC::ResetLoopModePara(AscendC::DataCopyMVType::UB_TO_OUT);
+    // }
+
+    __aicore__ inline void CopyK0TileIn(
+        const AscendC::LocalTensor<T>& buf,
+        const HWBox& tile,
+        uint32_t batchIdx,
+        uint32_t k1Idx,
+        uint32_t c1Idx,
+        uint32_t c1Length) const
+    {
+        ascendc_assert(k0_>=tile.elements, "can only move one k0 in");
+        //这个接口只能搬一块k0进来
+
+        uint32_t gmOffset = GetOffset(batchIdx, k1Idx, c1Idx);
+
+        uint32_t tiles16 = tile.elements * F23_TRANSFORM_TILE_ELEMENTS_16;
+        bool tailK = tile.elements < k0_;
+
+        AscendC::DataCopyParams params;
+        params.dstGap = 0;
+        if (tailK) {
+            params.blockCount = c1Length;
+            params.blockLen = tiles16;
+            params.srcGap = k0_ * F23_TRANSFORM_TILE_ELEMENTS_16 - tiles16;
+        } else {
+            params.blockCount = 1;
+            params.blockLen = c1Length * tiles16;
+            params.srcGap = 0;
+        }
+
+        AscendC::DataCopy(buf, gm_[gmOffset], params);
+    }
+
+
+    __aicore__ inline uint64_t GetOffset(
+        uint32_t nIdx,
+        uint32_t k1Idx,
+        uint32_t c1Idx) const
+    {
+        uint64_t k016c0 = static_cast<uint64_t>(k0_) * F23_TRANSFORM_TILE_ELEMENTS_16 * c0_;
+        uint64_t c1k016c0 = static_cast<uint64_t>(c1_) * k016c0;
+        uint64_t k1c1k016c0 = static_cast<uint64_t>(k1_) * c1k016c0;
+
+        return nIdx * k1c1k016c0 + k1Idx * c1k016c0 + c1Idx * k016c0;
+    }
+
+private:
+    AscendC::GlobalTensor<T> gm_;
+    const uint32_t k1_;
+    const uint32_t c1_;
+    const uint32_t k0_;
+    static constexpr uint8_t c0_ = C0<T>();
+};
 
 #endif //CONV_BP_WINO_UTIL_H
