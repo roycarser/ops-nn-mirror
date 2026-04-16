@@ -89,16 +89,16 @@ public:
                 load3d.mExtension = k;
 
                 LocalTensor<T> l0a = l0aQue_.AllocTensor<T>();
-                load3d.kExtension = cinC1 / C0<T>();
+                load3d.kExtension = cinC1;
                 load3d.enTranspose = true;
-                load3d.channelSize = cinC1;
+                load3d.channelSize = cinC1 * C0<T>();
                 LoadData(l0a, l1a[l1Offset], load3d);
                 l0aQue_.EnQue(l0a);
 
                 LocalTensor<T> l0b = l0bQue_.AllocTensor<T>();
-                load3d.kExtension = coutC1 / C0<T>();
+                load3d.kExtension = coutC1;
                 load3d.enTranspose = false;
-                load3d.channelSize = coutC1;
+                load3d.channelSize = coutC1 * C0<T>();
                 LoadData(l0b, l1b[l1Offset], load3d);
                 l0bQue_.EnQue(l0b);
 

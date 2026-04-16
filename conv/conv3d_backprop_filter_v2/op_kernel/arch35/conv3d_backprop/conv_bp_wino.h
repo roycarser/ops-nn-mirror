@@ -105,7 +105,7 @@ public:
         }
     }
 
-    inline void __aicore__ IterateAllV2(
+    inline void __aicore__ IterateAll(
         uint32_t batchIdx)
     {
         uint32_t cinCnt = Ops::Base::CeilDiv(cin_, static_cast<uint32_t>(singleShapeCin_));
@@ -148,29 +148,31 @@ public:
         uint32_t transformWatermarkCin = 0;
         uint32_t transformWatermarkCout = 0;
 
-        BlockIterator blockIterator(cinCnt, coutCnt, blockNumCin_, blockNumCout_);
+        BlockIterator blockIterator(coutCnt, cinCnt, blockNumCout_, blockNumCin_);
         while (blockIterator.More()) {
             if ASCEND_IS_AIC {
                 uint32_t coutBlockIdx;
                 uint32_t cinBlockIdx;
 
-                if (blockIterator.GetCurrentAicHWIdx(cinBlockIdx, coutBlockIdx)) {
-                    Mmad(coutBlockIdx * singleShapeCout_, cinBlockIdx * singleShapeCin_);
+                if (blockIterator.GetCurrentAicHWIdx(coutBlockIdx, cinBlockIdx)) {
+                    Mmad(batchIdx, coutBlockIdx * singleShapeCout_, cinBlockIdx * singleShapeCin_);
                 }
             }
 
             if ASCEND_IS_AIV {
-                uint32_t buttonRightCinBlockIdx = 0;
                 uint32_t buttonRightCoutBlockIdx = 0;
-                blockIterator.GetHWIdx(
-                    blockNumCin_ - 1, blockNumCout_ - 1,
-                    buttonRightCinBlockIdx, buttonRightCoutBlockIdx);
+                uint32_t buttonRightCinBlockIdx = 0;
 
-                uint32_t topLeftCinBlockIdx = 0;
-                uint32_t topLeftCoutBlockIdx = 0;
                 blockIterator.GetHWIdx(
-                    0, 0,
-                    topLeftCinBlockIdx, topLeftCoutBlockIdx);
+                    blockNumCout_ - 1, blockNumCin_ - 1,
+                    buttonRightCoutBlockIdx, buttonRightCinBlockIdx);
+
+                uint32_t topLeftCoutBlockIdx = 0;
+                uint32_t topLeftCinBlockIdx = 0;
+
+                blockIterator.GetHWIdx(
+                     0, 0,
+                     topLeftCoutBlockIdx, topLeftCinBlockIdx);
 
                 uint32_t transformCoutEndIdx = Std::min(cout_, (buttonRightCoutBlockIdx + 1) * singleShapeCout_);
                 uint32_t transformCinEndIdx;
@@ -207,6 +209,7 @@ private:
         uint32_t coutLength = Std::min(cout_ - coutIdx, singleShapeCout_);
         uint32_t coutC1Idx = coutIdx / C0<T>();
         uint32_t coutC1Length = Ops::Base::CeilDiv(coutLength, C0<T>());
+
         uint32_t cinLength = Std::min(cin_ - cinIdx, singleShapeCin_);
         uint32_t cinC1Idx = cinIdx / C0<T>();
         uint32_t cinC1Length = Ops::Base::CeilDiv(cinLength, C0<T>());
@@ -299,6 +302,7 @@ private:
             CrossCoreSetFlag<0, PIPE_MTE3>(kCROSS_CORE_AIV_SYNC_FLAG);
             CrossCoreWaitFlag<0, PIPE_MTE3>(kCROSS_CORE_AIV_SYNC_FLAG);
 
+            //通知cube消费正变换数据
             aivMTE3ToAicMTE2SyncQue_.Push();
 
             iter.Next();
@@ -394,21 +398,22 @@ private:
               blockH_(blockH),
               blockW_(blockW)
         {
-            //block按照h方向滑窗,w方向需要被整除
-            ascendc_assert((wCnt_ % blockW_) == 0);
-            flattenHLength_ = hCnt_ * (wCnt_ / blockW_);
+            //沿着 W 轴(Cin)滑窗，所以 H 轴(Cout)必须能被整除以保证阵型不乱
+            ascendc_assert((hCnt_ % blockH_) == 0);
+            flattenWLength_ = wCnt_ * (hCnt_ / blockH_);
+
             if ASCEND_IS_AIC {
-                currentAicBlockHOffset_ = GetBlockIdx() % blockH_;
-                currentAicBlockWOffset_ = GetBlockIdx() / blockH_;
+                currentAicBlockHOffset_ = GetBlockIdx() / blockW_;
+                currentAicBlockWOffset_ = GetBlockIdx() % blockW_;
             } else {
                 currentAicBlockHOffset_ = 0;
                 currentAicBlockWOffset_ = 0;
             }
         }
 
-        inline __aicore__ bool More()
+        inline __aicore__ bool More() const
         {
-            return loopIdx_ * blockH_ < flattenHLength_;
+            return loopIdx_ * blockW_ < flattenWLength_;
         }
 
         inline __aicore__ bool GetCurrentAicHWIdx(uint32_t& hIdx, uint32_t& wIdx)
@@ -432,14 +437,14 @@ private:
             ascendc_assert(blockHOffset < blockH_);
             ascendc_assert(blockWOffset < blockW_);
 
-            uint32_t flattenHIdx = loopIdx_ * blockH_ + blockHOffset;
+            uint32_t flattenWIdx = loopIdx_ * blockW_ + blockWOffset;
 
             //不在hCnt和wCnt有效范围内也要设置,供给aiv分配正变换任务使用
-            uint32_t q = flattenHIdx / hCnt_;
-            outputHIdx = flattenHIdx - q * hCnt_;
-            outputWIdx = q * blockW_ + blockWOffset;
+            uint32_t q = flattenWIdx / wCnt_;
+            outputWIdx = flattenWIdx - q * wCnt_;
+            outputHIdx = q * blockH_ + blockHOffset;
 
-            return flattenHIdx < flattenHLength_;
+            return flattenWIdx < flattenWLength_;
         }
 
         inline __aicore__ void Next()
@@ -454,7 +459,7 @@ private:
         const uint32_t blockW_;
         uint32_t currentAicBlockHOffset_;
         uint32_t currentAicBlockWOffset_;
-        uint32_t flattenHLength_;
+        uint32_t flattenWLength_;
         uint32_t loopIdx_ = 0;
     };
 
