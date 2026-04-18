@@ -26,11 +26,11 @@ template <typename T>
 class ConvBackpropFilterWinograd {
 public:
     __aicore__ inline ConvBackpropFilterWinograd(
-        WinoFmapTransformer<T>& fmap,
-        WinoDyTransformer<T>& dy,
-        NK1C1K0C0<T>& nk1c1k0c0Fmap,
-        NK1C1K0C0<T>& nk1c1k0c0Dy,
-        WinoMMAD<T> winoMmad,
+        const WinoFmapTransformer<T>& fmap,
+        const WinoDyTransformer<T>& dy,
+        const NK1C1K0C0<T>& nk1c1k0c0Fmap,
+        const NK1C1K0C0<T>& nk1c1k0c0Dy,
+        WinoMMAD<T>& winoMmad,
         uint32_t cin,
         uint32_t cout,
         uint32_t tilesH,
@@ -88,7 +88,7 @@ public:
         }
 
         if ASCEND_IS_AIC {
-            winoMmad_.Init();
+            winoMmad_.Init(singleShapeCout_, singleShapeCin_, singleShapeTilesH_ * singleShapeTilesW_);
         }
     }
 
@@ -103,6 +103,8 @@ public:
         if ASCEND_IS_AIC {
             winoMmad_.End();
         }
+
+        aivMTE3ToAicMTE2SyncQue_.PipeBarrierAllEnd();
     }
 
     inline void __aicore__ IterateAll(
@@ -155,7 +157,9 @@ public:
                 uint32_t cinBlockIdx;
 
                 if (blockIterator.GetCurrentAicHWIdx(coutBlockIdx, cinBlockIdx)) {
-                    Mmad(batchIdx, coutBlockIdx * singleShapeCout_, cinBlockIdx * singleShapeCin_);
+                    Mmad<true>(batchIdx, coutBlockIdx * singleShapeCout_, cinBlockIdx * singleShapeCin_);
+                } else {
+                    Mmad<false>(0, 0, 0);
                 }
             }
 
@@ -171,8 +175,8 @@ public:
                 uint32_t topLeftCinBlockIdx = 0;
 
                 blockIterator.GetHWIdx(
-                     0, 0,
-                     topLeftCoutBlockIdx, topLeftCinBlockIdx);
+                    0, 0,
+                    topLeftCoutBlockIdx, topLeftCinBlockIdx);
 
                 uint32_t transformCoutEndIdx = Std::min(cout_, (buttonRightCoutBlockIdx + 1) * singleShapeCout_);
                 uint32_t transformCinEndIdx;
@@ -202,8 +206,8 @@ public:
         }
     }
 
-
 private:
+    template <bool NotIdle>
     inline __aicore__ void Mmad(uint32_t batchIdx, uint32_t coutIdx, uint32_t cinIdx)
     {
         uint32_t coutLength = Std::min(cout_ - coutIdx, singleShapeCout_);
@@ -214,21 +218,24 @@ private:
         uint32_t cinC1Idx = cinIdx / C0<T>();
         uint32_t cinC1Length = Ops::Base::CeilDiv(cinLength, C0<T>());
 
-        TileKIterator iter(this);
+        TileKIterator iter(*this);
         while (iter.More()) {
             HWBox tiles = iter.TileBox();
 
             aivMTE3ToAicMTE2SyncQue_.WaitData();
-
-            winoMmad_.LoadL1(
-                tiles, batchIdx, iter.kIdx(),
-                nk1c1k0t16c0Dy_, coutC1Idx, coutC1Length,
-                nk1c1k0t16c0Fmap_, cinC1Idx, cinC1Length);
+            //尾轮时虽然空跑但是队列信号还得照发
+            if constexpr (NotIdle) {
+                winoMmad_.LoadL1(
+                    tiles, batchIdx, iter.kIdx(),
+                    nk1c1k0t16c0Dy_, coutC1Idx, coutC1Length,
+                    nk1c1k0t16c0Fmap_, cinC1Idx, cinC1Length);
+            }
 
             aivMTE3ToAicMTE2SyncQue_.Pop();
 
-            winoMmad_.Compute(tiles, coutC1Length, cinC1Length, iter.kIdx() == 0);
-
+            if constexpr (NotIdle) {
+                winoMmad_.Compute(tiles, coutC1Length, cinC1Length, iter.kIdx() == 0);
+            }
             iter.Next();
         }
     }
@@ -242,15 +249,16 @@ private:
         uint32_t fmapTaskCnt = Ops::Base::CeilDiv(cinLength, static_cast<uint32_t>(singleShapeTransformC_));
 
         uint32_t totalTaskCnt = dyTaskCnt + fmapTaskCnt;
-        uint32_t blockNumAiv = GetBlockNum();
-
-        LocalTensor<T> transposeVBuf = transposeBuf_.Get<T>();
+        uint32_t blockNumAiv = GetBlockNum() * GetSubBlockNum();
 
         //only NCHW
         uint64_t srcBatchOffsetDy = batchIdx * cout_ * dy_.SrcH() * dy_.SrcW();
         uint64_t srcBatchOffsetFmap = batchIdx * cin_ * fmap_.SrcH() * fmap_.SrcW();
 
-        TileKIterator iter(this);
+        LocalTensor<T> transformVBuf[2] = {transformBuf_[0].Get<T>(), transformBuf_[1].Get<T>()};
+        LocalTensor<T> transposeVBuf = transposeBuf_.Get<T>();
+
+        TileKIterator iter(*this);
         while (iter.More()) {
             HWBox tile = iter.TileBox();
 
@@ -258,9 +266,6 @@ private:
 
             //TODO 跨迭代偏移？不要每次都从0核开始处理，这样前面的核会不会压力更大？
             for (uint32_t taskId = GetBlockIdx(); taskId < totalTaskCnt; taskId += blockNumAiv) {
-                LocalTensor<T> transformVBuf = transformBuf_[transformPingPongFlag_].Get<T>();
-                TransformVFlag eventFlags = transformEventFlags_[transformPingPongFlag_];
-
                 if (taskId < dyTaskCnt) {
                     uint32_t dyTaskId = taskId;
                     uint32_t coutStart = coutIdx + dyTaskId * singleShapeTransformC_;
@@ -274,9 +279,9 @@ private:
                         coutStart,
                         Std::min(singleShapeTransformC_, coutIdx + coutLength - coutStart),
                         iter.kIdx(),
-                        transformVBuf,
+                        transformVBuf[transformPingPongFlag_],
                         transposeVBuf,
-                        eventFlags);
+                        transformEventFlags_[transformPingPongFlag_]);
                 } else {
                     uint32_t fmapTaskId = taskId - dyTaskCnt;
                     uint32_t cinStart = cinIdx + fmapTaskId * singleShapeTransformC_;
@@ -290,9 +295,9 @@ private:
                         cinStart,
                         Std::min(singleShapeTransformC_, cinIdx + cinLength - cinStart),
                         iter.kIdx(),
-                        transformVBuf,
+                        transformVBuf[transformPingPongFlag_],
                         transposeVBuf,
-                        eventFlags);
+                        transformEventFlags_[transformPingPongFlag_]);
                 }
 
                 transformPingPongFlag_ = !transformPingPongFlag_;
@@ -302,7 +307,7 @@ private:
             CrossCoreSetFlag<0, PIPE_MTE3>(kCROSS_CORE_AIV_SYNC_FLAG);
             CrossCoreWaitFlag<0, PIPE_MTE3>(kCROSS_CORE_AIV_SYNC_FLAG);
 
-            //通知cube消费正变换数据
+            //所有v核mte结束后通知cube消费正变换数据
             aivMTE3ToAicMTE2SyncQue_.Push();
 
             iter.Next();
@@ -439,7 +444,7 @@ private:
 
             uint32_t flattenWIdx = loopIdx_ * blockW_ + blockWOffset;
 
-            //不在hCnt和wCnt有效范围内也要设置,供给aiv分配正变换任务使用
+            //不在hCnt和wCnt有效范围内也要设置
             uint32_t q = flattenWIdx / wCnt_;
             outputWIdx = flattenWIdx - q * wCnt_;
             outputHIdx = q * blockH_ + blockHOffset;
@@ -508,6 +513,12 @@ private:
             CrossCoreSetFlag<2, DST_PIPE>(POP_FLAG);
         }
 
+        __aicore__ inline void PipeBarrierAllEnd()
+        {
+            //如果CrossCoreSetFlag是最后的指令可能因为一执行就核就退出导致没能成功set,整个核结束前加个全量等待
+            PipeBarrier<PIPE_ALL>();
+        }
+
     private:
         uint8_t freeSlot = FREE_SLOTS;
     };
@@ -532,10 +543,10 @@ private:
         kCROSS_CORE_AIV2AIC_SEND_FLAG,
         kCROSS_CORE_AIC2AIV_RECV_FLAG> aivMTE3ToAicMTE2SyncQue_;
 
-    WinoFmapTransformer<T>& fmap_;
-    WinoDyTransformer<T>& dy_;
-    NK1C1K0C0<T>& nk1c1k0t16c0Fmap_;
-    NK1C1K0C0<T>& nk1c1k0t16c0Dy_;
+    const WinoFmapTransformer<T>& fmap_;
+    const WinoDyTransformer<T>& dy_;
+    const NK1C1K0C0<T>& nk1c1k0t16c0Fmap_;
+    const NK1C1K0C0<T>& nk1c1k0t16c0Dy_;
     WinoMMAD<T>& winoMmad_;
 
     const uint32_t tilesH_;
