@@ -197,7 +197,7 @@ public:
         //但反正都是累加轴其实顺序没什么影响,而且可以提升单次搬运的量
         params.blockCount = tileHSize;
         params.blockLen = F23_TRANSFORM_TILE_SIZE_4;
-        params.srcGap = tileWSize + tw4Gap;
+        params.srcGap = tileWSize + tw4Gap - F23_TRANSFORM_TILE_SIZE_4;
         params.dstGap = 0;
 
         AscendC::LoopModeParams loop;
@@ -205,7 +205,7 @@ public:
         loop.loop1SrcStride = F23_TRANSFORM_TILE_SIZE_4 * c0Bytes;
         loop.loop1DstStride = params.blockCount * params.blockLen * c0Bytes;
         loop.loop2Size = c1Length;
-        loop.loop1SrcStride = tileHSize * (tileWSize + tw4Gap) * c0Bytes;
+        loop.loop2SrcStride = tileHSize * (tileWSize + tw4Gap) * c0Bytes;
         loop.loop2DstStride = k0_ * F23_TRANSFORM_TILE_ELEMENTS_16 * c0Bytes;
 
         SetLoopModePara(loop, AscendC::DataCopyMVType::UB_TO_OUT);
@@ -215,47 +215,6 @@ public:
         AscendC::ResetLoopModePara(AscendC::DataCopyMVType::UB_TO_OUT);
     }
 
-    //TODO test and remove
-    //
-    // __aicore__ inline void CopyK0TileOut(
-    //     const AscendC::LocalTensor<T>& c1th4tw4c0,
-    //     const HWBox& tile,
-    //     uint32_t tw4Gap,
-    //     uint32_t batchIdx,
-    //     uint32_t k1Idx,
-    //     uint32_t c1Idx,
-    //     uint32_t c1Length) const
-    // {
-    //     ascendc_assert(k0_>=tile.elements, "can only move one k0 out");
-    //     //这个接口只能搬一块k0出去
-    //
-    //     uint32_t gmOffset = GetOffset(batchIdx, k1Idx, c1Idx);
-    //
-    //     AscendC::DataCopyParams params;
-    //     params.blockLen = TileUnfoldSize(tile.wLength);
-    //     params.srcGap = tw4Gap;
-    //     params.dstGap = 0;
-    //     if (k0_ == tile.elements) {
-    //         params.blockCount = TileUnfoldSize(tile.hLength) * c1Length;
-    //     } else {
-    //         //尾轮一个tile不满k0时,将单个c1内的tile每行每列连在一起,数据会顺序一些
-    //         params.blockCount = TileUnfoldSize(tile.hLength);
-    //
-    //         AscendC::LoopModeParams loop;
-    //         loop.loop1Size = c1Length;
-    //         loop.loop1SrcStride = (params.blockLen + params.srcGap) * params.blockCount * C0<T>() * sizeof(T);
-    //         loop.loop1DstStride = k0_ * F23_TRANSFORM_TILE_ELEMENTS_16 * C0<T>() * sizeof(T);
-    //         loop.loop2Size = 1;
-    //         loop.loop1SrcStride = 0;
-    //         loop.loop2DstStride = 0;
-    //
-    //         SetLoopModePara(loop, AscendC::DataCopyMVType::UB_TO_OUT);
-    //     }
-    //
-    //     AscendC::DataCopy(gm_[gmOffset], c1th4tw4c0, params);
-    //
-    //     AscendC::ResetLoopModePara(AscendC::DataCopyMVType::UB_TO_OUT);
-    // }
 
     __aicore__ inline void CopyK0TileIn(
         const AscendC::LocalTensor<T>& buf,
