@@ -245,6 +245,7 @@ private:
         uint32_t coutIdx, uint32_t cinIdx,
         uint32_t coutLength, uint32_t cinLength)
     {
+        uint32_t aivTaskOffset = 0;
         uint32_t dyTaskCnt = Ops::Base::CeilDiv(coutLength, static_cast<uint32_t>(singleShapeTransformC_));
         uint32_t fmapTaskCnt = Ops::Base::CeilDiv(cinLength, static_cast<uint32_t>(singleShapeTransformC_));
 
@@ -264,8 +265,12 @@ private:
 
             aivMTE3ToAicMTE2SyncQue_.WaitSlot();
 
-            //TODO 跨迭代偏移？不要每次都从0核开始处理，这样前面的核会不会压力更大？
-            for (uint32_t taskId = GetBlockIdx(); taskId < totalTaskCnt; taskId += blockNumAiv) {
+            //变换任务每轮从前一批空闲的v核开始拉取任务
+            //假设每轮只有18个任务,那么第一轮0-17核拉取到任务,第二轮就是18-35核拉取到任务
+            //这样可以尽量并行
+            for (uint32_t taskId = (GetBlockIdx() + blockNumAiv - aivTaskOffset) % blockNumAiv;
+                 taskId < totalTaskCnt;
+                 taskId += blockNumAiv) {
                 if (taskId < dyTaskCnt) {
                     uint32_t dyTaskId = taskId;
                     uint32_t coutStart = coutIdx + dyTaskId * singleShapeTransformC_;
@@ -303,6 +308,7 @@ private:
                 transformPingPongFlag_ = !transformPingPongFlag_;
             }
 
+            aivTaskOffset = (aivTaskOffset + totalTaskCnt) % blockNumAiv;
             //同步等待所有aiv的mte3完成
             CrossCoreSetFlag<0, PIPE_MTE3>(kCROSS_CORE_AIV_SYNC_FLAG);
             CrossCoreWaitFlag<0, PIPE_MTE3>(kCROSS_CORE_AIV_SYNC_FLAG);

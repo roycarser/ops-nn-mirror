@@ -40,17 +40,17 @@ public:
         pipe->InitBuffer(l1bQue_, 2, singleShapeCin * tile16Size);
 
         uint32_t l0aSize = singleShapeCout * baseKSize;
-        pipe->InitBuffer(l0aBuf_[0],  l0aSize);
-        pipe->InitBuffer(l0aBuf_[1],  l0aSize);
+        pipe->InitBuffer(l0aBuf_[0], l0aSize);
+        pipe->InitBuffer(l0aBuf_[1], l0aSize);
 
         uint32_t l0bSize = singleShapeCin * baseKSize;
-        pipe->InitBuffer(l0bBuf_[0],  l0bSize);
-        pipe->InitBuffer(l0bBuf_[1],  l0bSize);
+        pipe->InitBuffer(l0bBuf_[0], l0bSize);
+        pipe->InitBuffer(l0bBuf_[1], l0bSize);
 
         pipe->InitBuffer(l0cBuf_, TOTAL_L0C_SIZE);
 
-        Mte1MadFlag::Alloc(pipe,mte1madFlag_[0]);
-        Mte1MadFlag::Alloc(pipe,mte1madFlag_[1]);
+        Mte1MadFlag::Alloc(pipe, mte1madFlag_[0]);
+        Mte1MadFlag::Alloc(pipe, mte1madFlag_[1]);
 
         SetFlag<HardEvent::M_MTE1>(mte1madFlag_[0].mad2mte1);
         SetFlag<HardEvent::M_MTE1>(mte1madFlag_[1].mad2mte1);
@@ -84,10 +84,16 @@ public:
         LocalTensor<T> l1a = l1aQue_.DeQue<T>();
         LocalTensor<T> l1b = l1bQue_.DeQue<T>();
 
-        LoadData3DParamsV2<T> load3d;
-        load3d.l1H = tiles.elements;
-        load3d.l1W = F23_TRANSFORM_TILE_ELEMENTS_16;
+        //用load3d默认的配置,每个LoadData里面会设置load3d的FMatrix和PadValue这2个寄存器
+        //这会导致mte1的issue queue快速占满,本来一次MAD只需要2个load3d搬运指令,现在需要6条指令
+        //winograd的16个点位算完需要使用96条mte1指令使得scalar被IssueQueue卡主不能加载后续的mte2指令
+        //所以这里调整配置让LoadData内部不去更新寄存器,由外部统一设置,减少mte1指令占用
+        static constexpr IsResetLoad3dConfig load3dNotSetSPR = {false, false};
+        constexpr uint8_t pad[4] = {0, 0, 0, 0};
 
+        SetFmatrix(tiles.elements, F23_TRANSFORM_TILE_ELEMENTS_16, pad, FmatrixMode::FMATRIX_LEFT);
+
+        LoadData3DParamsV2<T> load3d;
         load3d.strideW = F23_TRANSFORM_TILE_ELEMENTS_16;
         load3d.strideH = 1;
         load3d.filterW = 1;
@@ -122,14 +128,14 @@ public:
                 load3d.kExtension = cinC1;
                 load3d.enTranspose = true;
                 load3d.channelSize = cinC1C0;
-                LoadData(l0a, l1a[l1Offset], load3d);
-
+                //禁止load3d内部额外设置寄存器
+                LoadData<T, load3dNotSetSPR>(l0a, l1a[l1Offset], load3d);
 
                 LocalTensor<T>& l0b = l0bBuf[pingFlag];
                 load3d.kExtension = coutC1;
                 load3d.enTranspose = false;
                 load3d.channelSize = coutC1C0;
-                LoadData(l0b, l1b[l1Offset], load3d);
+                LoadData<T, load3dNotSetSPR>(l0b, l1b[l1Offset], load3d);
 
                 SetFlag<HardEvent::MTE1_M>(flag.mte12mad);
                 WaitFlag<HardEvent::MTE1_M>(flag.mte12mad);
