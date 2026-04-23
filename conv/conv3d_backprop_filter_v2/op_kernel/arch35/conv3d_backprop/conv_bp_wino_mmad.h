@@ -32,13 +32,13 @@ public:
     __aicore__ inline void Init(uint32_t singleShapeCout, uint32_t singleShapeCin, uint32_t singleShapeTilesHW)
     {
         TPipe* pipe = GetTPipePtr();
+        pipe->InitBuffer(l1Buf_, TOTAL_L1_SIZE);
 
-        uint32_t tile16Size = singleShapeTilesHW * F23_TRANSFORM_TILE_ELEMENTS_16 * sizeof(T);
+        uint32_t tile16Size = singleShapeTilesHW * F23_TRANSFORM_TILE_ELEMENTS_16;
+        l1aLength_ = singleShapeCout * tile16Size;
+        l1bLength_ = singleShapeCin * tile16Size;
+
         uint32_t baseKSize = baseK_ * sizeof(T);
-
-        pipe->InitBuffer(l1aQue_, 2, singleShapeCout * tile16Size);
-        pipe->InitBuffer(l1bQue_, 2, singleShapeCin * tile16Size);
-
         uint32_t l0aSize = singleShapeCout * baseKSize;
         pipe->InitBuffer(l0aBuf_[0], l0aSize);
         pipe->InitBuffer(l0aBuf_[1], l0aSize);
@@ -49,48 +49,58 @@ public:
 
         pipe->InitBuffer(l0cBuf_, TOTAL_L0C_SIZE);
 
-        Mte1MadFlag::Alloc(pipe, mte1madFlag_[0]);
-        Mte1MadFlag::Alloc(pipe, mte1madFlag_[1]);
+        EventFlag::template Alloc<HardEvent::MTE2_MTE1, HardEvent::MTE1_MTE2>(pipe, mte2mte1Flag_[0]);
+        EventFlag::template Alloc<HardEvent::MTE2_MTE1, HardEvent::MTE1_MTE2>(pipe, mte2mte1Flag_[1]);
+        EventFlag::template Alloc<HardEvent::MTE1_M, HardEvent::M_MTE1>(pipe, mte1madFlag_[0]);
+        EventFlag::template Alloc<HardEvent::MTE1_M, HardEvent::M_MTE1>(pipe, mte1madFlag_[1]);
 
-        SetFlag<HardEvent::M_MTE1>(mte1madFlag_[0].mad2mte1);
-        SetFlag<HardEvent::M_MTE1>(mte1madFlag_[1].mad2mte1);
-
+        SetFlag<HardEvent::MTE1_MTE2>(mte2mte1Flag_[0].dst2src);
+        SetFlag<HardEvent::MTE1_MTE2>(mte2mte1Flag_[1].dst2src);
+        SetFlag<HardEvent::M_MTE1>(mte1madFlag_[0].dst2src);
+        SetFlag<HardEvent::M_MTE1>(mte1madFlag_[1].dst2src);
         SetHF32Mode(hf32Flag_);
     }
 
     __aicore__ inline void End()
     {
         SetHF32Mode(false);
-        WaitFlag<HardEvent::M_MTE1>(mte1madFlag_[0].mad2mte1);
-        WaitFlag<HardEvent::M_MTE1>(mte1madFlag_[1].mad2mte1);
+        WaitFlag<HardEvent::MTE1_MTE2>(mte2mte1Flag_[0].dst2src);
+        WaitFlag<HardEvent::MTE1_MTE2>(mte2mte1Flag_[1].dst2src);
+        WaitFlag<HardEvent::M_MTE1>(mte1madFlag_[0].dst2src);
+        WaitFlag<HardEvent::M_MTE1>(mte1madFlag_[1].dst2src);
     }
 
     __aicore__ inline void LoadL1(
         const HWBox& tiles, uint32_t batchIdx, uint32_t k1Idx,
         const NK1C1K0C0<T>& nk1c1k0c0Dy, uint32_t coutC1Idx, uint32_t coutC1Length,
-        const NK1C1K0C0<T>& nk1c1k0c0Fmap, uint32_t cinC1Idx, uint32_t cinC1Length)
+        const NK1C1K0C0<T>& nk1c1k0c0Fmap, uint32_t cinC1Idx, uint32_t cinC1Length,
+        bool l1PingPongFlag)
     {
-        LocalTensor<T> l1a = l1aQue_.AllocTensor<T>();
-        nk1c1k0c0Dy.CopyK0TileIn(l1a, tiles, batchIdx, k1Idx, coutC1Idx, coutC1Length);
-        l1aQue_.EnQue(l1a);
+        EventFlag& mte2mte1 = mte2mte1Flag_[l1PingPongFlag];
+        WaitFlag<HardEvent::MTE1_MTE2>(mte2mte1.dst2src);
 
-        LocalTensor<T> l1b = l1bQue_.AllocTensor<T>();
+        auto l1Buf = GetL1Buf(l1PingPongFlag);
+        LocalTensor<T>& l1a = Std::get<0>(l1Buf);
+        LocalTensor<T>& l1b = Std::get<1>(l1Buf);
+
+        nk1c1k0c0Dy.CopyK0TileIn(l1a, tiles, batchIdx, k1Idx, coutC1Idx, coutC1Length);
         nk1c1k0c0Fmap.CopyK0TileIn(l1b, tiles, batchIdx, k1Idx, cinC1Idx, cinC1Length);
-        l1bQue_.EnQue(l1b);
+
+        SetFlag<HardEvent::MTE2_MTE1>(mte2mte1.src2dst);
     }
 
-    __aicore__ inline void Compute(const HWBox& tiles, uint32_t coutC1, uint32_t cinC1, bool firstK)
+    __aicore__ inline void Compute(
+        const HWBox& tiles, uint32_t coutC1, uint32_t cinC1,
+        bool firstK, bool l1PingPongFlag)
     {
-        LocalTensor<T> l1a = l1aQue_.DeQue<T>();
-        LocalTensor<T> l1b = l1bQue_.DeQue<T>();
+        EventFlag& mte2mte1Flag = mte2mte1Flag_[l1PingPongFlag];
+        WaitFlag<HardEvent::MTE2_MTE1>(mte2mte1Flag.src2dst);
 
         //用load3d默认的配置,每个LoadData里面会设置load3d的FMatrix和PadValue这2个寄存器
-        //这会导致mte1的issue queue快速占满,本来一次MAD只需要2个load3d搬运指令,现在需要6条指令
-        //winograd的16个点位算完需要使用96条mte1指令使得scalar被IssueQueue卡主不能加载后续的mte2指令
-        //所以这里调整配置让LoadData内部不去更新寄存器,由外部统一设置,减少mte1指令占用
+        //导致L1每次搬运多2个MOVE_SPR的指令,这里直接外部统一设置优化下
         static constexpr IsResetLoad3dConfig load3dNotSetSPR = {false, false};
         constexpr uint8_t pad[4] = {0, 0, 0, 0};
-
+        //设置寄存器也算在对应的mte指令里面,所以必须和loadData一样在WaitFlag之后执行
         SetFmatrix(tiles.elements, F23_TRANSFORM_TILE_ELEMENTS_16, pad, FmatrixMode::FMATRIX_LEFT);
 
         LoadData3DParamsV2<T> load3d;
@@ -106,14 +116,18 @@ public:
         LocalTensor<T> l0aBuf[2] = {l0aBuf_[0].Get<T>(), l0aBuf_[1].Get<T>()};
         LocalTensor<T> l0bBuf[2] = {l0bBuf_[0].Get<T>(), l0bBuf_[1].Get<T>()};
 
+        auto l1Buf = GetL1Buf(l1PingPongFlag);
+        LocalTensor<T>& l1a = Std::get<0>(l1Buf);
+        LocalTensor<T>& l1b = Std::get<1>(l1Buf);
+
         uint32_t cinC1C0 = cinC1 * C0<T>();
         uint32_t coutC1C0 = coutC1 * C0<T>();
 
         for (uint32_t offsetK = 0; offsetK < tiles.elements; offsetK += baseK_) {
 #pragma unroll
             for (uint8_t i = 0; i != F23_TRANSFORM_TILE_ELEMENTS_16; i++) {
-                //通过奇偶性判断PingPong
-                const int pingFlag = i & 1;
+                //通过奇偶性判断l0PingPong
+                const int l0pingFlag = i & 1;
 
                 uint16_t l1Offset = i * C0<T>();
                 uint16_t k = Std::min(baseK_, tiles.elements - offsetK);
@@ -121,24 +135,24 @@ public:
                 load3d.mStartPt = offsetK;
                 load3d.mExtension = k;
 
-                Mte1MadFlag& flag = mte1madFlag_[pingFlag];
-                WaitFlag<HardEvent::M_MTE1>(flag.mad2mte1);
+                EventFlag& mte1madFlag = mte1madFlag_[l0pingFlag];
+                WaitFlag<HardEvent::M_MTE1>(mte1madFlag.dst2src);
 
-                LocalTensor<T>& l0a = l0aBuf[pingFlag];
+                LocalTensor<T>& l0a = l0aBuf[l0pingFlag];
                 load3d.kExtension = cinC1;
                 load3d.enTranspose = true;
                 load3d.channelSize = cinC1C0;
                 //禁止load3d内部额外设置寄存器
                 LoadData<T, load3dNotSetSPR>(l0a, l1a[l1Offset], load3d);
 
-                LocalTensor<T>& l0b = l0bBuf[pingFlag];
+                LocalTensor<T>& l0b = l0bBuf[l0pingFlag];
                 load3d.kExtension = coutC1;
                 load3d.enTranspose = false;
                 load3d.channelSize = coutC1C0;
                 LoadData<T, load3dNotSetSPR>(l0b, l1b[l1Offset], load3d);
 
-                SetFlag<HardEvent::MTE1_M>(flag.mte12mad);
-                WaitFlag<HardEvent::MTE1_M>(flag.mte12mad);
+                SetFlag<HardEvent::MTE1_M>(mte1madFlag.src2dst);
+                WaitFlag<HardEvent::MTE1_M>(mte1madFlag.src2dst);
 
                 MmadParams params;
                 params.m = coutC1C0;
@@ -146,33 +160,50 @@ public:
                 params.k = k;
                 params.cmatrixInitVal = firstK;
                 AscendC::Mmad(l0c[i * l0cBufSize], l0a, l0b, params);
-                SetFlag<HardEvent::M_MTE1>(flag.mad2mte1);
+                SetFlag<HardEvent::M_MTE1>(mte1madFlag.dst2src);
             }
 
             firstK = false;
         }
 
-        l1aQue_.FreeTensor(l1a);
-        l1bQue_.FreeTensor(l1b);
+        SetFlag<HardEvent::MTE1_MTE2>(mte2mte1Flag.dst2src);
     }
 
 private:
-    struct Mte1MadFlag {
-        TEventID mad2mte1;
-        TEventID mte12mad;
+    __aicore__ inline Std::tuple<LocalTensor<T>, LocalTensor<T> > GetL1Buf(bool flagPingPong)
+    {
+        //PingPong按L1/2为界
+        //整个L1被均分为2个bank,PingPong以L1SIZE/2为界分配到2个bank上
+        //确保PingBuf上执行mte1/mte2时不会和PongBuf上的mte1/mte2产生bank冲突
 
-        __aicore__ inline static void Alloc(TPipe* pipe, Mte1MadFlag& flag)
+        constexpr uint32_t offsetPingPong = TOTAL_L1_SIZE / 2;
+        uint32_t initOffset = offsetPingPong * flagPingPong;
+        LocalTensor<T> l1a = l1Buf_.GetWithOffset<T>(l1aLength_, initOffset);
+        LocalTensor<T> l1b = l1Buf_.GetWithOffset<T>(l1bLength_, initOffset + l1aLength_ * sizeof(T));
+
+        return Std::make_tuple(l1a, l1b);
+    }
+
+    struct EventFlag {
+        TEventID src2dst;
+        TEventID dst2src;
+
+        template <HardEvent Src2DstEvent, HardEvent Dst2SrcEvent>
+        static __aicore__ inline void Alloc(TPipe* pipe, EventFlag& flag)
         {
-            flag.mad2mte1 = pipe->AllocEventID<HardEvent::M_MTE1>();
-            flag.mte12mad = pipe->AllocEventID<HardEvent::MTE1_M>();
+            flag.src2dst = pipe->AllocEventID<Src2DstEvent>();
+            flag.dst2src = pipe->AllocEventID<Dst2SrcEvent>();
         }
     };
 
-    TQue<TPosition::A1, 1> l1aQue_;
-    TQue<TPosition::B1, 1> l1bQue_;
+    //L1上用TBuf规避bank冲突
+    TBuf<TPosition::A1> l1Buf_;
+    uint32_t l1aLength_ = 0;
+    uint32_t l1bLength_ = 0;
+    EventFlag mte2mte1Flag_[2];
 
     //TQue的scalar比较重,mte1上操作比较频繁直接用TBuf减少scalar开销
-    Mte1MadFlag mte1madFlag_[2];
+    EventFlag mte1madFlag_[2];
     TBuf<TPosition::A2> l0aBuf_[2];
     TBuf<TPosition::B2> l0bBuf_[2];
     TBuf<TPosition::CO1> l0cBuf_;

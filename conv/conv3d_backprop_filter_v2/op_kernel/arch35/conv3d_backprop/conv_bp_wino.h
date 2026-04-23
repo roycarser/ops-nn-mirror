@@ -219,25 +219,95 @@ private:
         uint32_t cinC1Length = Ops::Base::CeilDiv(cinLength, C0<T>());
 
         TileKIterator iter(*this);
-        while (iter.More()) {
+
+        if (iter.More()) {
+            //winograd每个点位需要执行16次独立的mad计算
+            //由于dav上cube的issue queue大小为16,算上wait flag
+            //一次最多塞入8条mad指令后就会阻塞,进而block住整个scalar
+            //让下一轮的mte2无法执行,导致整体串行化
+            //所以这里用预取下一轮的数据的方式来解决
+            //
+            // 首次Compute前直接下发PingPong两块L1的搬运指令:
+            //  LoadL1 Ping
+            //  LoadL1 Pong
+            //
+            // 然后在L1Ping上做计算,此时scalar单元会由于issue queue满而被阻塞
+            //  Compute Ping (block scalar)
+            //
+            // ComputePing的scalar执行完后在下发L1Ping的搬运指令,即便scalar被卡主也没关系,因为
+            // L1Ping搬入时为了下下轮计算,下一轮所需要的L1Pong已经被预载了
+            //  LoadL1 Ping
+            //
+            // 下发L1Pong的计算指令,由于L1Pong的搬运指令已经提前下发,所以在vector正变换更得上的情况下L1Pong应该搬运的差不多了
+            // ComputePong可以立刻执行
+            //  Compute Pong
+
+            bool loadPingPong = false;
+            bool computePingPong = loadPingPong;
+
             HWBox tiles = iter.TileBox();
+            uint32_t kIdx = iter.kIdx();
 
-            aivMTE3ToAicMTE2SyncQue_.WaitData();
-            //尾轮时虽然空跑但是队列信号还得照发
-            if constexpr (NotIdle) {
-                winoMmad_.LoadL1(
-                    tiles, batchIdx, iter.kIdx(),
-                    nk1c1k0t16c0Dy_, coutC1Idx, coutC1Length,
-                    nk1c1k0t16c0Fmap_, cinC1Idx, cinC1Length);
-            }
+            MmadLoadL1<NotIdle>(
+                tiles, batchIdx, kIdx,
+                coutC1Idx, coutC1Length, cinC1Idx, cinC1Length,
+                loadPingPong);
+            //优先让第一次LoadL1执行完在执行后续的搬运
+            //防止后续紧跟着的搬运抢资源拖慢第一次搬运耗时,延迟mad启动
+            PipeBarrier<PIPE_MTE2>();
 
-            aivMTE3ToAicMTE2SyncQue_.Pop();
+            loadPingPong = !loadPingPong;
 
-            if constexpr (NotIdle) {
-                winoMmad_.Compute(tiles, coutC1Length, cinC1Length, iter.kIdx() == 0);
-            }
             iter.Next();
+
+            while (iter.More()) {
+                HWBox nextTiles = iter.TileBox();
+                uint32_t nextKIdx = iter.kIdx();
+
+                MmadLoadL1<NotIdle>(
+                    nextTiles, batchIdx, nextKIdx,
+                    coutC1Idx, coutC1Length, cinC1Idx, cinC1Length,
+                    loadPingPong);
+
+                loadPingPong = !loadPingPong;
+
+                if constexpr (NotIdle) {
+                    winoMmad_.Compute(tiles, coutC1Length, cinC1Length, kIdx == 0, computePingPong);
+                }
+
+                tiles = nextTiles;
+                kIdx = nextKIdx;
+
+                computePingPong = !computePingPong;
+
+                iter.Next();
+            }
+
+            if constexpr (NotIdle) {
+                winoMmad_.Compute(tiles, coutC1Length, cinC1Length, kIdx == 0, computePingPong);
+            }
         }
+    }
+
+    template <bool NotIdle>
+    inline __aicore__ void MmadLoadL1(
+        const HWBox& tiles, uint32_t batchIdx, uint32_t k1Idx,
+        uint32_t coutC1Idx, uint32_t coutC1Length,
+        uint32_t cinC1Idx, uint32_t cinC1Length,
+        bool l1PingPongFlag)
+    {
+        aivMTE3ToAicMTE2SyncQue_.WaitData();
+        //尾轮时虽然空跑但是队列信号还得照发
+
+        if constexpr (NotIdle) {
+            winoMmad_.LoadL1(
+                tiles, batchIdx, k1Idx,
+                nk1c1k0t16c0Dy_, coutC1Idx, coutC1Length,
+                nk1c1k0t16c0Fmap_, cinC1Idx, cinC1Length,
+                l1PingPongFlag);
+        }
+
+        aivMTE3ToAicMTE2SyncQue_.Pop();
     }
 
     inline __aicore__ void Transform(
