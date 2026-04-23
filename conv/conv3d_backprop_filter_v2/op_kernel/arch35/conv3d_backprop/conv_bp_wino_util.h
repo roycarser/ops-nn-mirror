@@ -188,7 +188,7 @@ public:
         //这个接口只能搬一块k0出去
 
         constexpr uint32_t c0Bytes = C0<T>() * sizeof(T);
-        uint32_t gmOffset = GetOffset(batchIdx, k1Idx, c1Idx);
+        uint64_t gmOffset = GetOffset(batchIdx, k1Idx, c1Idx);
         uint32_t tileHSize = TileUnfoldSize(tiles.hLength);
         uint32_t tileWSize = TileUnfoldSize(tiles.wLength);
 
@@ -227,7 +227,7 @@ public:
         ascendc_assert(k0_>=tile.elements, "can only move one k0 in");
         //这个接口只能搬一块k0进来
 
-        uint32_t gmOffset = GetOffset(batchIdx, k1Idx, c1Idx);
+        uint64_t gmOffset = GetOffset(batchIdx, k1Idx, c1Idx);
 
         uint32_t tiles16 = tile.elements * F23_TRANSFORM_TILE_ELEMENTS_16;
         bool tailK = tile.elements < k0_;
