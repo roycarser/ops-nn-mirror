@@ -1,10 +1,12 @@
 # aclnnAdaptiveAvgPool3d
-## 产品支持情况
+
 [📄 查看源码](https://gitcode.com/cann/ops-nn/tree/master/pooling/adaptive_avg_pool3d)
+
+## 产品支持情况
 
 | 产品                                                         | 是否支持 |
 | :----------------------------------------------------------- | :------: |
-| <term>Ascend 950PR/Ascend 950DT</term>                             |    ×     |
+| <term>Ascend 950PR/Ascend 950DT</term>                             |    √     |
 | <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>     |    √     |
 | <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term> |    √     |
 | <term>Atlas 200I/500 A2 推理产品</term>                      |    ×     |
@@ -16,7 +18,9 @@
 在指定三维输出shape信息（outputSize）的情况下，完成张量self的3D自适应平均池化计算。aclnnAdaptiveAvgPool3d与aclnnAvgPool3d不同的是，aclnnAdaptiveAvgPool3d只需要指定输出的大小，就可以自动推导出kernel的大小与对应的步长。
 
 ## 函数原型
+
 每个算子分为[两段式接口](../../../docs/zh/context/两段式接口.md)，必须先调用“aclnnAdaptiveAvgPool3dGetWorkspaceSize”接口获取计算所需workspace大小以及包含了算子计算流程的执行器，再调用“aclnnAdaptiveAvgPool3d”接口执行计算。
+
 ```Cpp
 aclnnStatus aclnnAdaptiveAvgPool3dGetWorkspaceSize(
   const aclTensor   *self,
@@ -25,6 +29,7 @@ aclnnStatus aclnnAdaptiveAvgPool3dGetWorkspaceSize(
   uint64_t          *workspaceSize,
   aclOpExecutor     **executor)
 ```
+
 ```Cpp
 aclnnStatus aclnnAdaptiveAvgPool3d(
   void          *workspace,
@@ -32,6 +37,7 @@ aclnnStatus aclnnAdaptiveAvgPool3d(
   aclOpExecutor *executor,
   aclrtStream    stream)
 ```
+
 ## aclnnAdaptiveAvgPool3dGetWorkspaceSize
 
 - **参数说明：**
@@ -110,53 +116,55 @@ aclnnStatus aclnnAdaptiveAvgPool3d(
     </tr>
   </tbody></table>
   
-  -  <term>Atlas 推理系列产品</term>： 参数`self`、`out`的数据类型不支持BFLOAT16。
--  **返回值：**
+  - <term>Atlas 推理系列产品</term>： 参数`self`、`out`的数据类型不支持BFLOAT16。
+
+- **返回值**
 
     aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
     第一段接口完成入参校验，出现以下场景时报错：
+
     <table style="undefined;table-layout: fixed; width: 1166px"><colgroup>
-    <col style="width: 267px">
-    <col style="width: 124px">
-    <col style="width: 775px">
-    </colgroup>
-    <thead>
-    <tr>
-      <th>返回码</th>
-      <th>错误码</th>
-      <th>描述</th>
-    </tr></thead>
-  <tbody>
-    <tr>
-      <td>ACLNN_ERR_PARAM_NULLPTR</td>
-      <td>161001</td>
-      <td>传入的self、outputSize或out是空指针。</td>
-    </tr>
-    <tr>
-      <td rowspan="7">ACLNN_ERR_PARAM_INVALID</td>
-      <td rowspan="7">161002</td>
-      <td>self的数据类型和数据格式不在支持的范围之内。</td>
-    </tr>
-    <tr>
-      <td>self和out数据类型不一致。</td>
-    </tr>
-    <tr>
-      <td>self的维度不等于4或5。</td>
-    </tr>
-    <tr>
-      <td>self或out的shape的某一维不大于0。</td>
-    </tr>
-    <tr>
-      <td>outputSize长度不为3。</td>
-    </tr>
-    <tr>
-      <td>self和out的NC维度不一致。</td>
-    </tr>
-    <tr>
-      <td>out的shape与self的shape和outputSize推导出的shape结果不一致。</td>
-    </tr>
-  </tbody>
-  </table>
+      <col style="width: 267px">
+      <col style="width: 124px">
+      <col style="width: 775px">
+      </colgroup>
+      <thead>
+      <tr>
+        <th>返回码</th>
+        <th>错误码</th>
+        <th>描述</th>
+      </tr></thead>
+
+    <tbody>
+      <tr>
+        <td>ACLNN_ERR_PARAM_NULLPTR</td>
+        <td>161001</td>
+        <td>传入的self、outputSize或out是空指针。</td>
+      </tr>
+      <tr>
+        <td rowspan="7">ACLNN_ERR_PARAM_INVALID</td>
+        <td rowspan="7">161002</td>
+        <td>self的数据类型和数据格式不在支持的范围之内。</td>
+      </tr>
+      <tr>
+        <td>self和out数据类型不一致。</td>
+      </tr>
+      <tr>
+        <td>self的维度不等于4或5。</td>
+      </tr>
+      <tr>
+        <td>self或out的shape的某一维不大于0。</td>
+      </tr>
+      <tr>
+        <td>outputSize长度不为3。</td>
+      </tr>
+      <tr>
+        <td>self和out的NC维度不一致。</td>
+      </tr>
+      <tr>
+        <td>out的shape与self的shape和outputSize推导出的shape结果不一致。</td>
+      </tr>
+    </tbody></table>
 
 ## aclnnAdaptiveAvgPool3d
 
@@ -201,6 +209,7 @@ aclnnStatus aclnnAdaptiveAvgPool3d(
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 
 ## 约束说明
+
 - 确定性计算：
   - aclnnAdaptiveAvgPool3d默认确定性实现。
 
@@ -214,7 +223,7 @@ aclnnStatus aclnnAdaptiveAvgPool3d(
 示例代码如下，仅供参考，具体编译和执行过程请参考[编译与运行样例](../../../docs/zh/context/编译与运行样例.md)。
 
 ```Cpp
-
+#include <cstdio>
 #include <iostream>
 #include <vector>
 #include "acl/acl.h"
@@ -348,4 +357,3 @@ int main() {
   return 0;
 }
 ```
-

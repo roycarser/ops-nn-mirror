@@ -23,8 +23,8 @@
 #include "platform/platform_info.h"
 #include "register/op_impl_registry.h"
 #include "util/math_util.h"
-#include "tiling_base/tiling_base.h"
-#include "tiling_base/tiling_templates_registry.h"
+#include "op_host/tiling_base.h"
+#include "op_host/tiling_templates_registry.h"
 
 namespace optiling
 {
@@ -136,6 +136,7 @@ public:
     int64_t indicesStride_ = 1;
     uint64_t indicesCastMode_ = 0;  // 0: 不Cast; 1：int32 Cast int16; 2：int64 Cast int32; 3：int64 Cast int16; 4:int32 Cast uint8; 5:int64 Cast uint8.
     int64_t indicesCastDtypeSize_ = 0;
+    int64_t isProcessSingleRow_ = 0;
 
     ge::DataType dtype_ = ge::DT_UNDEFINED;
     ge::DataType indicesDtype_ = ge::DT_UNDEFINED;

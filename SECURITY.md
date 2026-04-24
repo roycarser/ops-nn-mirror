@@ -7,9 +7,9 @@
 ## 文件权限控制
 
 - 建议用户在主机（包括宿主机）及容器中设置运行系统umask值为0027及以上，保障新增文件夹默认最高权限为750，新增文件默认最高权限为640。
-- 建议用户对个人隐私数据、商业资产、源文件和算子开发过程中保存的各类文件等敏感内容做好权限控制等安全措施。例如涉及本项目安装目录权限管控、输入公共数据文件权限管控，设定的权限建议参考[A-文件（夹）各场景权限管控推荐最大值](#A-文件（夹）各场景权限管控推荐最大值)。
+- 建议用户对个人隐私数据、商业资产、源文件和算子开发过程中保存的各类文件等敏感内容做好权限控制等安全措施。例如涉及本项目安装目录权限管控、输入公共数据文件权限管控，设定的权限建议参考[A-文件（夹）各场景权限管控推荐最大值](#a-文件夹各场景权限管控推荐最大值)。
 - 算子运行时可能会缓存算子编译文件，存储在运行目录下的`kernel_meta_*`文件夹内，加快后续算子的调用速度，用户可根据需要自行对生成后的相关文件进行权限控制。
-- 用户安装和使用过程需要做好权限控制，建议参考[A-文件（夹）各场景权限管控推荐最大值](#A-文件（夹）各场景权限管控推荐最大值)文件权限参考进行设置。
+- 用户安装和使用过程需要做好权限控制，建议参考[A-文件（夹）各场景权限管控推荐最大值](#a-文件夹各场景权限管控推荐最大值)文件权限参考进行设置。
 
 ## 构建安全声明
 
@@ -22,20 +22,22 @@
 - 算子通过[PyTorch](https://gitee.com/ascend/pytorch)方式调用时，可能会因为版本不匹配导致运行错误，具体请参考[PyTorch安全声明](https://gitee.com/ascend/pytorch#%E5%AE%89%E5%85%A8%E5%A3%B0%E6%98%8E)。
 
 ## 公网地址声明
+
 本项目代码中包含的公网地址声明如下所示：
 
 |      类型      |                                           开源代码地址                                           |                            文件名                             |             公网IP地址/公网URL地址/域名/邮箱地址/压缩文件地址             |                   用途说明                    |
 | :------------: |:------------------------------------------------------------------------------------------:|:----------------------------------------------------------| :---------------------------------------------------------- |:-----------------------------------------|
-|  依赖  | 不涉及  | cmake/third_party/makeself-fetch.cmake | https://gitcode.com/cann-src-third-party/makeself/releases/download/release-2.5.0-patch1.0/makeself-release-2.5.0-patch1.tar.gz | 从gitcode下载makeself源码，作用编译依赖 |
-|  依赖  | 不涉及  | cmake/third_party/nlohmann_json.cmake | https://gitcode.com/cann-src-third-party/json/releases/download/v3.11.3/include.zip | 从gitcode下载json源码，作用编译依赖 |
-|  依赖  | 不涉及  | cmake/third_party/gtest.cmake | https://gitcode.com/cann-src-third-party/googletest/releases/download/v1.14.0/googletest-1.14.0.tar.gz | 从gitcode下载googletest源码，作用编译依赖 |
-|  依赖  | 不涉及  | cmake/third_party/eigen.cmake | https://gitcode.com/cann-src-third-party/eigen/releases/download/5.0.0-h0.trunk/eigen-5.0.0.tar.gz | 从gitcode下载eigen源码，作用编译依赖 |
-|  依赖  | 不涉及  | ops-nn/install_deps.sh | https://apt.kitware.com/keys/kitware-archive-latest.asc | 从gitcode下载install_deps源码，作用编译依赖 |
-|  依赖  | 不涉及  | ops-nn/install_deps.sh | https://apt.kitware.com/ubuntu/ | 从gitcode下载install_deps源码，作用编译依赖 |
-|  依赖  | 不涉及  | cmake | https://apt.kitware.com/keys/kitware-archive-latest.asc | 从kitware下载cmake软件，作用编译依赖 |
-|  依赖  | 不涉及  | cmake | https://apt.kitware.com/ubuntu/ | 从kitware下载cmake软件，作用编译依赖 |
+|  依赖  | 不涉及  | cmake/third_party/makeself-fetch.cmake | [https://gitcode.com/cann-src-third-party/makeself/releases/download/release-2.5.0-patch1.0/makeself-release-2.5.0-patch1.tar.gz](https://gitcode.com/cann-src-third-party/makeself/releases/download/release-2.5.0-patch1.0/makeself-release-2.5.0-patch1.tar.gz) | 从gitcode下载makeself源码，作用编译依赖 |
+|  依赖  | 不涉及  | cmake/third_party/nlohmann_json.cmake | [https://gitcode.com/cann-src-third-party/json/releases/download/v3.11.3/include.zip](https://gitcode.com/cann-src-third-party/json/releases/download/v3.11.3/include.zip) | 从gitcode下载json源码，作用编译依赖 |
+|  依赖  | 不涉及  | cmake/third_party/gtest.cmake | [https://gitcode.com/cann-src-third-party/googletest/releases/download/v1.14.0/googletest-1.14.0.tar.gz](https://gitcode.com/cann-src-third-party/googletest/releases/download/v1.14.0/googletest-1.14.0.tar.gz) | 从gitcode下载googletest源码，作用编译依赖 |
+|  依赖  | 不涉及  | cmake/third_party/eigen.cmake | [https://gitcode.com/cann-src-third-party/eigen/releases/download/5.0.0-h0.trunk/eigen-5.0.0.tar.gz](https://gitcode.com/cann-src-third-party/eigen/releases/download/5.0.0-h0.trunk/eigen-5.0.0.tar.gz) | 从gitcode下载eigen源码，作用编译依赖 |
+|  依赖  | 不涉及  | ops-nn/install_deps.sh | [https://apt.kitware.com/keys/kitware-archive-latest.asc](https://apt.kitware.com/keys/kitware-archive-latest.asc) | 从gitcode下载install_deps源码，作用编译依赖 |
+|  依赖  | 不涉及  | ops-nn/install_deps.sh | [https://apt.kitware.com/ubuntu/](https://apt.kitware.com/ubuntu/) | 从gitcode下载install_deps源码，作用编译依赖 |
+|  依赖  | 不涉及  | cmake | [https://apt.kitware.com/keys/kitware-archive-latest.asc](https://apt.kitware.com/keys/kitware-archive-latest.asc) | 从kitware下载cmake软件，作用编译依赖 |
+|  依赖  | 不涉及  | cmake | [https://apt.kitware.com/ubuntu/](https://apt.kitware.com/ubuntu/) | 从kitware下载cmake软件，作用编译依赖 |
 
 ## 漏洞机制说明
+
 [漏洞管理](https://gitcode.com/cann/community/blob/master/security/security.md)
 
 ## 附录

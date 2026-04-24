@@ -163,7 +163,7 @@ aclnnStatus aclnnDynamicQuant(
     - 出参`yOut`的数据类型仅支持INT8。
     - 入参`smoothScalesOptional`为预留参数，当前版本不参与计算。
   
-- **返回值：**
+- **返回值**
 
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
   
@@ -244,15 +244,16 @@ aclnnStatus aclnnDynamicQuant(
   </tbody>
   </table>
 
-- **返回值：**
+- **返回值**
 
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 
 ## 约束说明
 
-- yOut的数据类型为INT4时，需满足x和yOut的最后一维能被2整除。
-- yOut的数据类型为INT32时，需满足x的最后一维能被8整除。
-- <term>Atlas 推理系列产品</term>：尾轴只支持32位对齐的数据，暂时只支持对称量化，不支持BFLOAT16数据类型。
+- <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>、<term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>、<term>Ascend 950PR/Ascend 950DT</term>：
+  - yOut的数据类型为INT4时，需满足x和yOut的最后一维能被2整除。
+  - yOut的数据类型为INT32时，需满足x的最后一维能被8整除。
+- <term>Atlas 推理系列产品</term>、<term>Atlas 训练系列产品</term>：输入x的最后一维需满足被32整除，暂时只支持对称量化，不支持BFLOAT16数据类型。
 - 确定性计算：
   - aclnnDynamicQuant默认确定性实现。
 
@@ -388,7 +389,7 @@ int main() {
     ret = CreateAclTensor(scaleHostData, scaleShape, &scaleDeviceAddr, aclDataType::ACL_FLOAT, &scale);
     CHECK_RET(ret == ACL_SUCCESS, return ret);
 
-    // 3. 调用CANN算子库API，需要修改为具体的Api名称
+    // 3. 调用CANN算子库API，需要修改为具体的API名称
     uint64_t workspaceSize = 0;
     aclOpExecutor* executor;
 

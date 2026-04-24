@@ -3,6 +3,7 @@
 [📄 查看源码](https://gitcode.com/cann/ops-nn/tree/master/optim/apply_adam_w)
 
 ## 产品支持情况
+
 |产品             |  是否支持  |
 |:-------------------------|:----------:|
 |  <term>Ascend 950PR/Ascend 950DT</term>   |     √    |
@@ -12,47 +13,56 @@
 |  <term>Atlas 推理系列产品</term>     |     √    |
 |  <term>Atlas 训练系列产品</term>    |     √    |
 
-
 ## 功能说明
 
-- **接口功能：** 实现adamW优化器功能。
+- **接口功能：** 实现AdamW优化器功能。
 
 - **计算公式：**
+
   $$
   g_t=\begin{cases}-g_t
-  & \text{ if } maxmize= true\\
-  g_t  & \text{ if } maxmize=false
+  & \text{ if } maximize= true\\
+  g_t  & \text{ if } maximize=false
   \end{cases}
   $$
+
   $$
   m_{t}=\beta_{1} m_{t-1}+\left(1-\beta_{1}\right) g_{t} \\
   $$
+
   $$
   v_{t}=\beta_{2} v_{t-1}+\left(1-\beta_{2}\right) g_{t}^{2}
   $$
+
   $$
   \beta_{1}^{t}=\beta_{1}^{t-1}\times\beta_{1}
   $$
+
   $$
   \beta_{2}^{t}=\beta_{2}^{t-1}\times\beta_{2}
   $$
+
   $$
   v_t=\begin{cases}\max(maxGradNorm, v_t)
   & \text{ if } amsgrad = true\\
   v_t  & \text{ if } amsgrad = false
   \end{cases}
   $$
+
   $$
   \hat{m}_{t}=\frac{m_{t}}{1-\beta_{1}^{t}} \\
   $$
+
   $$
   \hat{v}_{t}=\frac{v_{t}}{1-\beta_{2}^{t}} \\
   $$
+
   $$
   \theta_{t+1}=\theta_{t}-\frac{\eta}{\sqrt{\hat{v}_{t}}+\epsilon} \hat{m}_{t}-\eta \cdot \lambda \cdot \theta_{t-1}
   $$
 
 ## 函数原型
+
 每个算子分为[两段式接口](../../../docs/zh/context/两段式接口.md)，必须先调用“aclnnApplyAdamWGetWorkspaceSize”接口获取计算所需workspace大小以及包含了算子计算流程的执行器，再调用“aclnnApplyAdamW”接口执行计算。
 
 ```Cpp
@@ -87,16 +97,15 @@ aclnnStatus aclnnApplyAdamW(
 
 - **参数说明：**
 
-  </style>
-  <table class="tg" style="undefined;table-layout: fixed; width: 1155px"><colgroup>
-  <col style="width: 267px">
-  <col style="width: 87px">
-  <col style="width: 201px">
-  <col style="width: 153px">
+  <table class="tg" style="undefined;table-layout: fixed; width: 1428px"><colgroup>
+  <col style="width: 230px">
+  <col style="width: 120px">
+  <col style="width: 330px">
+  <col style="width: 230px">
   <col style="width: 138px">
-  <col style="width: 93px">
-  <col style="width: 108px">
-  <col style="width: 108px">
+  <col style="width: 115px">
+  <col style="width: 120px">
+  <col style="width: 145px">
   </colgroup>
   <thead>
     <tr>
@@ -123,7 +132,7 @@ aclnnStatus aclnnApplyAdamW(
     <tr>
       <td class="tg-0lax">mRef（aclTensor*）</td>
       <td class="tg-0lax">输入/输出</td>
-      <td class="tg-0lax">adamw优化器中m参数，公式中的m。</td>
+      <td class="tg-0lax">AdamW优化器中m参数，公式中的m。</td>
       <td class="tg-0lax">shape要求与输入varRef保持一致。</td>
       <td class="tg-0lax">与varRef保持一致</td>
       <td class="tg-0lax">ND</td>
@@ -133,7 +142,7 @@ aclnnStatus aclnnApplyAdamW(
     <tr>
       <td class="tg-0pky">vRef（aclTensor*）</td>
       <td class="tg-0pky">输入/输出</td>
-      <td class="tg-0pky">adamw优化器中v参数，公式中的v。</td>
+      <td class="tg-0pky">AdamW优化器中v参数，公式中的v。</td>
       <td class="tg-0pky">shape要求与输入varRef保持一致。</td>
       <td class="tg-0pky">与varRef保持一致</td>
       <td class="tg-0pky">ND</td>
@@ -163,7 +172,7 @@ aclnnStatus aclnnApplyAdamW(
     <tr>
       <td class="tg-0pky">lr（aclTensor*）</td>
       <td class="tg-0pky">输入</td>
-      <td class="tg-0pky">学习率，公式中的η，通常情况下为1-e3、1-恶、1-e9。</td>
+      <td class="tg-0pky">学习率，公式中的η，通常情况下为1e-3、1e-6、1-e9。</td>
       <td class="tg-0pky">shape要求为[1]。</td>
       <td class="tg-0pky">与varRef保持一致</td>
       <td class="tg-0pky">ND</td>
@@ -277,11 +286,11 @@ aclnnStatus aclnnApplyAdamW(
   aclnnStatus： 返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 
   第一段接口完成入参校验，出现以下场景时报错：
-  </style>
-  <table class="tg" style="undefined;table-layout: fixed; width: 731px"><colgroup>
-  <col style="width: 268px">
-  <col style="width: 87px">
-  <col style="width: 376px">
+  
+  <table class="tg" style="undefined;table-layout: fixed; width: 1150px"><colgroup>
+  <col style="width: 270px">
+  <col style="width: 130px">
+  <col style="width: 750px">
   </colgroup>
   <thead>
     <tr>
@@ -342,7 +351,7 @@ aclnnStatus aclnnApplyAdamW(
     <tr>
       <td>workspaceSize</td>
       <td>输入</td>
-      <td>在Device侧申请的workspace大小，由第一段接口aclnnAdvanceStepGetWorkspaceSize获取。</td>
+      <td>在Device侧申请的workspace大小，由第一段接口aclnnApplyAdamWGetWorkspaceSize获取。</td>
     </tr>
     <tr>
       <td>executor</td>
@@ -367,7 +376,9 @@ aclnnStatus aclnnApplyAdamW(
   - aclnnApplyAdamW默认确定性实现。
 
 ## 调用示例
+
 示例代码如下，仅供参考，具体编译和执行过程请参考[编译与运行样例](../../../docs/zh/context/编译与运行样例.md)。
+
 ```Cpp
 #include <iostream>
 #include <vector>

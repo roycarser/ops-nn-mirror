@@ -42,10 +42,10 @@ private:
     void SetTilingData(gert::TilingContext* context);
     void PrintTilingData(gert::TilingContext* context);
 
-    void IsCapableForFullLoad(gert::TilingContext* context);
+    void IsCapableForFullLoad(const gert::TilingContext* context);
     void IsCapableForRecompute(gert::TilingContext* context);
     void IsCapableForSplitM(gert::TilingContext* context);
-    void SetTilingDataForPerChannel();
+    void SetTilingDataForPerChannel(gert::TilingContext* context);
     void PrintTilingDataForPerChannel(gert::TilingContext* context);
     void CalculateTilingData();
     ge::graphStatus CalculateTilingDataForPerChannel(gert::TilingContext* context);
@@ -85,6 +85,7 @@ private:
     bool isEmptyTensor = false;
     uint32_t quantMode_ = 0;     // 0: pertoken, 1: pertensor
     bool isSymmetrical_ = false; // 0: False, 1: True
+    float dstTypeMax = 0.0;
 
     int32_t yDtype;
     // members for perchannel

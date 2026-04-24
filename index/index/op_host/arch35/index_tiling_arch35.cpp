@@ -13,7 +13,7 @@
  * \brief ac index tiling cpp
  */
 
-#include "tiling_base/tiling_templates_registry.h"
+#include "op_host/tiling_templates_registry.h"
 #include "register/op_def_registry.h"
 #include "tiling/tiling_api.h"
 #include "log/log.h"
@@ -22,6 +22,7 @@
 #include "util/math_util.h"
 #include "index_tiling.h"
 #include "index_tiling_arch35.h"
+#include <string_view>
 
 using namespace AscendC;
 
@@ -44,7 +45,7 @@ constexpr uint64_t INPUT_DTYPE_B128 = 16;
 constexpr uint32_t IDX_TYPE_TILING_KEY_WEIGHT = 100;
 constexpr size_t INDEXED_SIZES_IDX = 1;
 constexpr size_t INDICES_IDX = 3;
-constexpr uint32_t DCACHE_SIZE = 32 * 1024;
+constexpr uint32_t DCACHE_SIZE = 128 * 1024;
 constexpr uint32_t MAX_DIM = 8;
 constexpr uint32_t LIMIT_DIM = 5;
 #ifdef DAVID_FPGA
@@ -188,6 +189,10 @@ ge::graphStatus IndexSimtTiling::GetParamsShapeInfo()
 
 ge::graphStatus IndexSimtTiling::GetShapeAttrsInfo()
 {
+    const char *op_type = context_->GetNodeType();
+    OP_CHECK_NULL_WITH_CONTEXT(context_, op_type);
+    OP_LOGD("IndexSimtTiling", "tiling for %s", op_type);
+    isIndexPut_ = std::string_view(op_type) == "IndexPutV2";
     if (!isIndexPut_) {
         accumulateMode_ = false;
         tilingData_.set_accumulateMode(0);
@@ -337,8 +342,9 @@ ge::graphStatus IndexSimtTiling::PostTiling()
         context_->GetRawTilingData()->SetDataSize(tilingData_.GetDataSize());
     }
     context_->SetBlockDim(std::min(Ops::Base::CeilDiv(outputLength_, usedThread), coreNum_));
-    context_->SetLocalMemorySize(DCACHE_SIZE);
+    context_->SetLocalMemorySize(ubSize_ - DCACHE_SIZE);
     return ge::GRAPH_SUCCESS;
 }
 REGISTER_OPS_TILING_TEMPLATE(Index, IndexSimtTiling, 30);
+REGISTER_OPS_TILING_TEMPLATE(IndexPutV2, IndexSimtTiling, 30);
 } // namespace optiling

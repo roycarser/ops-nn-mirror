@@ -15,7 +15,7 @@
 #include "group_norm_grad_tiling_arch35.h"
 #include "group_norm_grad_empty_tiling_arch35.h"
 #include "group_norm_grad_tiling.h"
-#include "tiling_base/tiling_util.h"
+#include "op_host/tiling_util.h"
 
 namespace {
 constexpr int64_t FP32_MODE = 0;
@@ -173,8 +173,8 @@ bool GroupNormGradTiling::CheckInputShape()
         return false);
     attrs = tilingContext->GetAttrs();
     OP_TILING_CHECK((attrs == nullptr), OP_LOGE(tilingContext->GetNodeName(), "Get attrs Failed."), return false);
-    if (attrs->GetAttrPointer<int32_t>(0) != nullptr) {
-        tilingParams->g = *(attrs->GetAttrPointer<int32_t>(0));
+    if (attrs->GetAttrPointer<int64_t>(0) != nullptr) {
+        tilingParams->g = *(attrs->GetAttrPointer<int64_t>(0));
     } else {
         OP_LOGE(tilingContext->GetNodeName(), "group is nullptr");
         return false;

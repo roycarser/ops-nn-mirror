@@ -15,7 +15,7 @@
 
 ## 功能说明
 
-- 接口功能：完成量化计算参数scale数据类型的转换，将FLOAT32的数据类型转换为硬件需要的UINT64，INT64类型。相较于aclnnTransQuantParamV2版本，增加了roundMode输入，用于选择数据类型转换过程中，数据值转换采取的转化模式。
+- 接口功能：完成量化计算参数scale数据类型的转换，将FLOAT32的数据类型转换为硬件需要的UINT64，INT64类型。相较于aclnnTransQuantParamV2版本，增加了roundMode输入，用于选择数据类型转换过程中，数据值转换采取的转换模式。
 - 计算公式：
 
   1. `out`为64位格式，初始为0。
@@ -72,7 +72,6 @@ aclnnStatus aclnnTransQuantParamV3(
 ## aclnnTransQuantParamV3GetWorkspaceSize
 
 - **参数说明：**
-
 
   <table style="undefined;table-layout: fixed; width: 1550px"><colgroup>
   <col style="width: 170px">
@@ -159,7 +158,7 @@ aclnnStatus aclnnTransQuantParamV3(
   </tbody>
   </table>
 
-- **返回值：**
+- **返回值**
 
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 
@@ -192,7 +191,8 @@ aclnnStatus aclnnTransQuantParamV3(
       <td>scale、offset的shape不在支持的范围内。</td>
     </tr>
     <tr>
-      <td>roundMode的值不在支持的范围内。</tr>
+      <td>roundMode的值不在支持的范围内。</td>
+    </tr>
   </tbody></table>
 
 ## aclnnTransQuantParamV3
@@ -234,7 +234,7 @@ aclnnStatus aclnnTransQuantParamV3(
   </tbody>
   </table>
 
-- **返回值：**
+- **返回值**
 
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 
@@ -373,7 +373,7 @@ int aclnnTransQuantParamV3Test(int32_t deviceId, aclrtStream& stream)
     std::unique_ptr<void, aclError (*)(void*)> outDeviceAddrPtr(outDeviceAddr, aclrtFree);
     CHECK_RET(ret == ACL_SUCCESS, return ret);
 
-    // 3. 调用CANN算子库API，需要修改为具体的Api名称
+    // 3. 调用CANN算子库API，需要修改为具体的API名称
     uint64_t workspaceSize = 0;
     aclOpExecutor* executor;
     // 调用aclnnTransQuantParamV3第一段接口

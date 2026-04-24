@@ -13,7 +13,6 @@
 |  <term>Kirin X90 处理器系列产品</term> | √ |
 |  <term>Kirin 9030 处理器系列产品</term> | √ |
 
-
 ## 功能说明
 
 - 算子功能：RmsNorm是大模型常用的标准化操作，相比LayerNorm，其去掉了减去均值的部分。AddRmsNormQuant算子将RmsNorm前的Add算子以及RmsNorm归一化的输出给到1个或2个Quantize算子融合起来，减少搬入搬出操作。
@@ -147,14 +146,14 @@
       <td>y1</td>
       <td>输出</td>
       <td>表示量化输出Tensor，对应公式中的`y1`。</td>
-      <td>INT8</td>
+      <td>INT8、HIFLOAT8、FLOAT8_E5M2、FLOAT8_E4M3FN</td>
       <td>ND</td>
     </tr>
     <tr>
       <td>y2</td>
       <td>输出</td>
       <td>表示量化输出Tensor，对应公式中的`y2`。</td>
-      <td>INT8</td>
+      <td>INT8、HIFLOAT8、FLOAT8_E5M2、FLOAT8_E4M3FN</td>
       <td>ND</td>
     </tr>
     <tr>
@@ -166,11 +165,17 @@
     </tr>
   </tbody></table>
 
-  - <term>Atlas 推理系列产品</term>：x1、x2、gamma、scales1、scales2、zero_points1、zero_points2、beta、x的数据类型不支持BFLOAT16。
+  - <term>Atlas 推理系列产品</term>：x1、x2、gamma、scales1、scales2、zero_points1、zero_points2、beta、x的数据类型不支持BFLOAT16，输出参数y1、y2的数据类型仅支持INT8。
 
-  - <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>、<term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>：x1、x2、gamma、x、beta的数据类型不支持FLOAT32。
+  - <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>、<term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>：x1、x2、gamma、x、beta的数据类型不支持FLOAT32，输出参数y1、y2的数据类型仅支持INT8。
 
   - <term>Ascend 950PR/Ascend 950DT</term>：可选输入beta不支持配置。
+
+  - Kirin X90/Kirin 9030处理器系列产品：
+    - x1、x2、gamma、beta和x的数据类型只支持FLOAT16。
+    - scales1和scales2的数据类型只支持FLOAT32。
+    - zero_points1和zero_points2的数据类型只支持INT32。
+    - y1和y2的数据类型只支持INT8。
 
 ## 约束说明
 

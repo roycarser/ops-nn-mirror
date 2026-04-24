@@ -100,7 +100,9 @@ IFS=' ' read -r -a op_categories <<< "$op_category_list"
 builtin_dirs=()
 experimental_dirs=()
 force_jit="false"
+force=""
 pr_file="pr_filelist.txt"
+THREAD_NUM="-j16"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -force_jit)
@@ -117,6 +119,23 @@ while [[ $# -gt 0 ]]; do
             else
                 echo "-pr_file use default value: $pr_file"
             fi
+            shift
+            ;;
+        --no_force)
+            force="--no_force"
+            shift
+            ;;
+        -j)
+            if [[ ${2+x} && -n "$2" && "$2" != --* ]]; then
+                THREAD_NUM="-j$2"
+                shift
+            else
+                echo "-j use default value: 16"
+            fi
+            shift
+            ;;
+        -j*)
+            THREAD_NUM="$1"
             shift
             ;;
         *)
@@ -154,7 +173,7 @@ done
 
 builtin_ops_name=()
 experimental_ops_name=()
-build_all=${build_all:-0}
+build_all=${build_all:-"false"}
 
 mapfile -t lines < ${pr_file}
 
@@ -216,7 +235,7 @@ do
     done
     # 如果被修改的文件在common或cmake目录下 则触发整仓jit编译
     if [[ "$file_path" == "common/"* || "$file_path" == "cmake/"* ]]; then
-        build_all=1
+        build_all="true"
     fi
 done
 
@@ -224,25 +243,24 @@ echo "related op: ${builtin_ops_name[*]}"
 echo "related experimental op: ${experimental_ops_name[*]}"
 echo "need build all: ${build_all}"
 
-cann_3rd_lib_path="/home/jenkins/opensource"
 a5_soc="ascend950"
 
 if [[ ${#builtin_ops_name[@]} -gt 0 && "$force_jit" = "false" ]]; then
     builtin_ops_str=$(IFS=,; echo "${builtin_ops_name[*]}")
-    build_cmd="bash build.sh --pkg --ops=$builtin_ops_str --soc=$a5_soc -j16 --cann_3rd_lib_path=$cann_3rd_lib_path"
+    build_cmd="bash build.sh --pkg --ops=$builtin_ops_str --soc=$a5_soc ${THREAD_NUM} --cann_3rd_lib_path=${ASCEND_3RD_LIB_PATH} ${force}"
     run_build_command "$build_cmd"
     execute_run_file "custom"
 fi
 
 if [[ ${#experimental_ops_name[@]} -gt 0 && "$force_jit" = "false" ]]; then
     experimental_ops_str=$(IFS=,; echo "${experimental_ops_name[*]}")
-    build_cmd="bash build.sh --pkg --experimental --ops=$experimental_ops_str --soc=$a5_soc -j16 --cann_3rd_lib_path=$cann_3rd_lib_path"
+    build_cmd="bash build.sh --pkg --experimental --ops=$experimental_ops_str --soc=$a5_soc ${THREAD_NUM} --cann_3rd_lib_path=${ASCEND_3RD_LIB_PATH} ${force}"
     run_build_command "$build_cmd"
     execute_run_file "custom"
 fi
 
-if [ ${build_all} -eq 1 ]; then
-    build_cmd="bash build.sh --pkg --jit --soc=$a5_soc -j16 --cann_3rd_lib_path=$cann_3rd_lib_path"
+if [ "${build_all}" == "true" ]; then
+    build_cmd="bash build.sh --pkg --jit --soc=$a5_soc ${THREAD_NUM} --cann_3rd_lib_path=${ASCEND_3RD_LIB_PATH}"
     run_build_command "$build_cmd"
     execute_run_file "builtin"
 fi

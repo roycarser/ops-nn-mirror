@@ -119,6 +119,7 @@ protected:
                                   uint64_t& newTailMain);
     bool GetOuterMAxisTailCnt(uint64_t& baseTailSplitCnt, uint64_t& tailMain);
     bool GetOuterNAxisTailCnt(uint64_t& baseTailSplitCnt, uint64_t& tailMain);
+    virtual bool CheckCoreNum() const;
 
     DequantBmm::QuantBatchMatmulV3TilingDataParams tilingDataSelf_;
     DequantBmm::QuantBatchMatmulV3TilingDataParams &tilingData_;
@@ -130,6 +131,7 @@ protected:
     bool isBf16Mix_ = false;
     uint64_t singleCoreASizeWithFullLoad_ = 0;
     uint64_t singleCoreBSizeWithFullLoad_ = 0;
+    bool isSupportS4S4_ = false;
 
     bool CheckL1Size(uint64_t leftL1Size, uint64_t tempStepKa, uint64_t tempStepKb) const;
     void AdjustStepK(uint64_t leftL1Size, uint64_t &tempStepKa, uint64_t &tempStepKb, bool isStepKa) const;

@@ -24,14 +24,14 @@
 #include "util/math_util.h"
 #include "graph/utils/type_utils.h"
 #include "log/log.h"
-#include "common/inc/error_util.h"
+#include "error_util.h"
 #include "register/op_impl_registry.h"
 #include "log/log.h"
 #include "error_util.h"
 #include "matmul/common/op_host/math_util.h"
 #include "platform/platform_infos_def.h"
 #include "matmul/common/op_host/op_tiling/debug_tiling.h"
-#include "../../../op_kernel/arch35/quant_batch_matmul_v4_tiling_data.h"
+#include "../../../op_kernel/arch35/quant_batch_matmul_v4_tiling_data_apt.h"
 
 using AscendC::BLOCK_CUBE;
 using namespace Ops::NN;
@@ -48,7 +48,10 @@ inline bool IsNotEmptyShape(const gert::StorageShape* storageShape)
 
 inline bool IsFormatNZ(ge::Format format)
 {
-    return format == ge::FORMAT_FRACTAL_NZ || format == ge::FORMAT_FRACTAL_NZ_C0_4;
+    return format == ge::FORMAT_FRACTAL_NZ || 
+           format == ge::FORMAT_FRACTAL_NZ_C0_4 ||
+           format == ge::FORMAT_FRACTAL_NZ_C0_32;
+
 }
 
 void QuantBatchMatmulV4TilingBase::InitCompileInfo()
@@ -261,9 +264,9 @@ bool QuantBatchMatmulV4TilingBase::AnalyzeDtype()
             ge::TypeUtils::DataTypeToSerialString(inputParams_.bDtype).c_str()),
         return false);
     // check y dtype
-    OP_TILING_CHECK(inputParams_.cDtype != ge::DT_BF16,
+    OP_TILING_CHECK(inputParams_.cDtype != ge::DT_BF16 && inputParams_.cDtype != ge::DT_FLOAT16,
         VECTOR_INNER_ERR_REPORT_TILIING(inputParams_.opName,
-        "Unsupported data type [%s] for Y. Only DT_BF16 is supported.",
+        "Unsupported data type [%s] for Y. DT_BF16 and DT_FLOAT16 are supported.",
         ge::TypeUtils::DataTypeToSerialString(inputParams_.cDtype).c_str()),
         return false);
     if (inputParams_.antiQuantType != QuantType::MX) {
@@ -315,16 +318,20 @@ bool QuantBatchMatmulV4TilingBase::AnalyzeX2scaleDtype(const gert::CompileTimeTe
         VECTOR_INNER_ERR_REPORT_TILIING(inputParams_.opName, "X2 scale can not be null."), return false);
     inputParams_.x2ScaleDtype = x2ScaleDesc->GetDataType();
     OP_TILING_CHECK(
-        inputParams_.antiQuantType == QuantType::PER_GROUP && inputParams_.x2ScaleDtype != ge::DT_BF16,
+        inputParams_.antiQuantType == QuantType::PER_GROUP && inputParams_.x2ScaleDtype != ge::DT_BF16 &&
+            inputParams_.x2ScaleDtype != ge::DT_FLOAT16,
         VECTOR_INNER_ERR_REPORT_TILIING(
             inputParams_.opName,
-            "In per_group quantization mode, the x2 scale dtype supports only DT_BF16, but the actual value is %s.",
+            "In per_group quantization mode, the x2 scale dtype supports DT_BF16 and DT_FLOAT16, but the actual value "
+            "is %s.",
             ge::TypeUtils::DataTypeToSerialString(inputParams_.x2ScaleDtype).c_str()),
         return false);
-    OP_TILING_CHECK(inputParams_.x2ScaleDtype != ge::DT_BF16 && inputParams_.x2ScaleDtype != ge::DT_FLOAT8_E8M0,
+    OP_TILING_CHECK(
+        inputParams_.x2ScaleDtype != ge::DT_BF16 && inputParams_.x2ScaleDtype != ge::DT_FLOAT8_E8M0 &&
+            inputParams_.x2ScaleDtype != ge::DT_FLOAT16,
         VECTOR_INNER_ERR_REPORT_TILIING(
             inputParams_.opName,
-            "Unsupported data type [%s] for X2 scale. Only DT_BF16 and DT_FLOAT8_E8M0 is supported.",
+            "Unsupported data type [%s] for X2 scale. Only DT_BF16, DT_FLOAT16 and DT_FLOAT8_E8M0 is supported.",
             ge::TypeUtils::DataTypeToSerialString(inputParams_.x2ScaleDtype).c_str()),
         return false);
     OP_TILING_CHECK(
@@ -481,18 +488,14 @@ bool QuantBatchMatmulV4TilingBase::AnalyzeShapeSize(const gert::StorageShape* x1
         OP_TILING_CHECK(inputParams_.kSize != kBSize, VECTOR_INNER_ERR_REPORT_TILIING(inputParams_.opName,
             "kA[%lu] is not equal kB[%lu]", inputParams_.kSize, kBSize), return false);
     } else if (x2ShapeDimSize == VALID_WEIGHT_NZ_DIM_NUM) {
-        uint32_t n0Idx = inputParams_.transB ? DIM_INDEX_2 : DIM_INDEX_3;
-        uint32_t n1Idx = inputParams_.transB ? DIM_INDEX_1 : DIM_INDEX_0;
-        // (n1, k1, k0, n0) or (k1, n1, n0, k0)
-        uint64_t n1 = x2Shape->GetStorageShape().GetDim(n1Idx);
-        uint64_t n0 = x2Shape->GetStorageShape().GetDim(n0Idx);
-        // 当x2数据类型是float32, 并且最后1维是n0时, 最后一维扩大8倍
-        OPS_CHECK_NULL_WITH_CONTEXT(context_, context_->GetInputDesc(X2_INDEX));
+        auto x2OriginShape = x2Shape->GetOriginShape();
+        auto x2ShapeDimSize = x2OriginShape.GetDimNum();
+        inputParams_.nSize = static_cast<uint64_t>(
+            inputParams_.transB ? x2OriginShape.GetDim(x2ShapeDimSize - MATMUL_SHAPE_DIM_NUM) :
+                                  x2OriginShape.GetDim(x2ShapeDimSize - 1)); // - 1: 表示尾轴为n轴
         if (context_->GetInputDesc(X2_INDEX)->GetDataType() == ge::DT_FLOAT && !inputParams_.transB) {
-            n0 *= B4_IN_B32_NUMS;
+            inputParams_.nSize *= B4_IN_B32_NUMS;
         }
-
-        inputParams_.nSize = n1 * n0;
     }
     OP_TILING_CHECK(inputParams_.mSize < MIN_SHAPE_SIZE,
         VECTOR_INNER_ERR_REPORT_TILIING(inputParams_.opName,
@@ -529,8 +532,8 @@ bool QuantBatchMatmulV4TilingBase::AnalyzeBiasShape(const gert::StorageShape* bi
                     return false);
     OP_TILING_CHECK(biasStorageShape.GetDim(DIM_INDEX_0) != VALID_BIAS_SHAPE_SIZE ||
                         static_cast<size_t>(biasStorageShape.GetDim(DIM_INDEX_1)) != inputParams_.nSize,
-                    VECTOR_INNER_ERR_REPORT_TILIING(inputParams_.opName, "bias shape only support [1, n], input is %s",
-                                                    Ops::Base::ToString(biasStorageShape).c_str()),
+                    VECTOR_INNER_ERR_REPORT_TILIING(inputParams_.opName, "bias shape only support [1, %ld], input is %s",
+                                                    inputParams_.nSize, Ops::Base::ToString(biasStorageShape).c_str()),
                     return false);
     return true;
 }
@@ -549,12 +552,16 @@ bool QuantBatchMatmulV4TilingBase::AnalyzeX1ScaleShape(const gert::StorageShape*
                 VALID_X1_SCALE_DIM_NUM,
                 x1ScaleShapeDimNum),
             return false);
-        OP_TILING_CHECK(x1ScaleStorageShape.GetDim(0) != static_cast<int64_t>(inputParams_.mSize) ||
-                            x1ScaleStorageShape.GetDim(1) != static_cast<int64_t>(inputParams_.kSize / GROUP_ALIGN_SIZE),
-            VECTOR_INNER_ERR_REPORT_TILIING(inputParams_.opName,
-                "Expected shape of X1 scale to be [%lu, %lu], but actual shape is %s.",
-                inputParams_.mSize, inputParams_.kSize / GROUP_ALIGN_SIZE,
-                Ops::Base::ToString(x1ScaleStorageShape).c_str()), return false);
+        // x1ScaleStorageShape (m, k / GROUP_ALIGN_SIZE / 2, 2)
+        OP_TILING_CHECK(
+            x1ScaleStorageShape.GetDim(0) != static_cast<int64_t>(inputParams_.mSize) ||
+                x1ScaleStorageShape.GetDim(1) != ops::CeilDiv(static_cast<int64_t>(inputParams_.kSize), GROUP_ALIGN_SIZE * 2L) ||
+                x1ScaleStorageShape.GetDim(2) != 2UL,
+            VECTOR_INNER_ERR_REPORT_TILIING(
+                inputParams_.opName, "Expected shape of X1 scale to be [%lu, %lu, 2], but actual shape is %s.",
+                inputParams_.mSize, ops::CeilDiv<uint64_t>(inputParams_.kSize, GROUP_ALIGN_SIZE * 2),
+                Ops::Base::ToString(x1ScaleStorageShape).c_str()),
+            return false);
     }
     return true;
 }
@@ -598,12 +605,16 @@ bool QuantBatchMatmulV4TilingBase::AnalyzeX2ScaleShape(const gert::StorageShape*
             VECTOR_INNER_ERR_REPORT_TILIING(inputParams_.opName,
                 "Expected dimension of X2 scale to be %lu, but actual dimension is %lu.",
                 VALID_X2_SCALE_DIM_NUM, x2ScaleShapeDimNum), return false);
-        OP_TILING_CHECK(x2ScaleStorageShape.GetDim(0) != static_cast<int64_t>(inputParams_.nSize) ||
-                            x2ScaleStorageShape.GetDim(1) != static_cast<int64_t>(inputParams_.kSize) / GROUP_ALIGN_SIZE,
-            VECTOR_INNER_ERR_REPORT_TILIING(inputParams_.opName,
-                "Expected shape of X2 scale to be [%lu, %lu], but actual shape is %s.",
-                inputParams_.nSize, inputParams_.kSize / GROUP_ALIGN_SIZE,
-                Ops::Base::ToString(x2ScaleStorageShape).c_str()), return false);
+        // x2ScaleStorageShape: (n, k / GROUP_ALIGN_SIZE / 2, 2)
+        OP_TILING_CHECK(
+            x2ScaleStorageShape.GetDim(0) != static_cast<int64_t>(inputParams_.nSize) ||
+                x2ScaleStorageShape.GetDim(1) != ops::CeilDiv<int64_t>(inputParams_.kSize, (GROUP_ALIGN_SIZE * 2)) ||
+                x2ScaleStorageShape.GetDim(2) != 2,
+            VECTOR_INNER_ERR_REPORT_TILIING(
+                inputParams_.opName, "Expected shape of X2 scale to be [%lu, %lu, 2], but actual shape is %s.",
+                inputParams_.nSize, ops::CeilDiv<int64_t>(inputParams_.kSize, (GROUP_ALIGN_SIZE * 2)),
+                Ops::Base::ToString(x2ScaleStorageShape).c_str()),
+            return false);
     } else if (inputParams_.groupSize > 0) {
         return AnalyzeX2ScalePerGroupShape(x2ScaleShape);
     } else if (x2ScaleShapeSize == 1) {

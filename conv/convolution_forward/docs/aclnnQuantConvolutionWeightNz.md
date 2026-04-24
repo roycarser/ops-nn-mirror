@@ -19,7 +19,7 @@
 
 - 计算公式：
 
-  假定输入（input）的 shape 是 $(N, C_{\text{in}}, D, H, W)$，weight 的 原shape 是 $(C_{\text{out}}, C_{\text{in}}, K_d, K_h, K_w)$，scale 的 shape 是 $(C_{\text{out}})$，bias 的 shape 是 $C_{\text{out}}$，输出（output）的 shape 是 $(N, C_{\text{out}}, D_{\text{out}}, H_{\text{out}}, W_{\text{out}})$，其中 $N$ 表示批次大小（batch size），$C$ 是通道数，$D$、$H$ 和 $W$ 分别是样本的深度、高度和宽度，$K_d$、$K_h$ 和 $K_w$ 分别是卷积核的深度、高度和宽度，那输出将被表示为：
+  假定输入（input）的 shape 是 $(N, C_{\text{in}}, D, H, W)$，weight 的原shape 是 $(C_{\text{out}}, C_{\text{in}}, K_d, K_h, K_w)$，scale 的 shape 是 $(C_{\text{out}})$，bias 的 shape 是 $C_{\text{out}}$，输出（output）的 shape 是 $(N, C_{\text{out}}, D_{\text{out}}, H_{\text{out}}, W_{\text{out}})$，其中 $N$ 表示批次大小（batch size），$C$ 是通道数，$D$、$H$ 和 $W$ 分别是样本的深度、高度和宽度，$K_d$、$K_h$ 和 $K_w$ 分别是卷积核的深度、高度和宽度，那输出将被表示为：
 
   $$
   \text{output}(N_i, C_{\text{out}_j}, D_{\text{out}}, H_{\text{out}}, W_{\text{out}}) = \left[\sum_{k = 0}^{C_{\text{in}} - 1} \text{weight}(C_{\text{out}_j}, k) \star \text{input}(N_i, k)\right] \times \text{scale}(C_{\text{out}_j}) + \text{bias}(C_{\text{out}_j})
@@ -80,27 +80,28 @@ aclnnStatus aclnnQuantConvolutionWeightNz(
   <th style="width:145px">维度（shape）</th>
   <th style="width:145px">非连续 Tensor</th>
   </tr>
-  <td>input</td>
+    <tr>
+  <td>input（aclTensor*）</td>
   <td>输入</td>
   <td>公式中的 input，表示卷积输入。</td>
-  <td><ul><li>input、weight原shape、output 的维度需要相同。</li><li>支持空 Tensor。</li><li>数据类型与 weight 的数据类型需满足数据类型推导规则（参见<a href="../../../docs/zh/context/互推导关系.md">互推导关系</a>）。</li><li>N≥0，C≥1，D≥0，H≥0，W≥0。</li></ul></td>
+  <td><ul><li>input、weight原shape、output 的维度需要相同。</li><li>不支持空 Tensor。</li><li>数据类型与 weight 的数据类型需满足数据类型推导规则（参见<a href="../../../docs/zh/context/互推导关系.md">互推导关系</a>）。</li><li>N≥0，C≥1，D≥0，H≥0，W≥0。</li></ul></td>
   <td>INT8</td>
   <td>NCDHW</td>
   <td>5</td>
   <td style="text-align:center">√</td>
   </tr>
   <tr>
-  <td>weight</td>
+  <td>weight（aclTensor*）</td>
   <td>输入</td>
   <td>公式中的 weight，表示卷积权重。</td>
-  <td><ul><li>其原 shape 的 C 维度需要与 input 的 C 维度保持一致。</li><li>支持空 Tensor。</li><li>数据类型与 input 的数据类型需满足数据类型推导规则（参见<a href="../../../docs/zh/context/互推导关系.md">互推导关系</a>）。</li><li>FRACTAL_Z_3D格式各个维度表示：（D * C1 * H * W，N1，N0，C0），其中D，H，W为transdata前的NCDWH。N0=16，C0=32，N1与N满足关系：N1=CEIL(N,N0)。 </li><li>所有维度≥1。</li></ul></td>
+  <td><ul><li>其原 shape 的 C 维度需要与 input 的 C 维度保持一致。</li><li>不支持空 Tensor。</li><li>数据类型与 input 的数据类型需满足数据类型推导规则（参见<a href="../../../docs/zh/context/互推导关系.md">互推导关系</a>）。</li><li>FRACTAL_Z_3D格式各个维度表示：（D * C1 * H * W，N1，N0，C0），其中D，H，W为transdata前的NCDWH。N0=16，C0=32，N1与N满足关系：N1=CEIL(N,N0)。 </li><li>所有维度≥1。</li></ul></td>
   <td>INT8</td>
   <td>Fractal_Z_3D</td>
   <td>4</td>
   <td style="text-align:center">√</td>
   </tr>
   <tr>
-  <td>bias</td>
+  <td>bias（aclTensor*）</td>
   <td>输入</td>
   <td>公式中的 bias，表示卷积偏置。</td>
   <td>一维且与 weight 原shape第一维相等。</td>
@@ -110,7 +111,7 @@ aclnnStatus aclnnQuantConvolutionWeightNz(
   <td style="text-align:center">√</td>
   </tr>
   <tr>
-  <td>scale</td>
+  <td>scale（aclTensor*）</td>
   <td>输入</td>
   <td>公式中的 scale，表示量化参数。</td>
   <td>一维且与 weight 原shape第一维相等。</td>
@@ -120,7 +121,7 @@ aclnnStatus aclnnQuantConvolutionWeightNz(
   <td style="text-align:center">√</td>
   </tr>
   <tr>
-  <td>offset</td>
+  <td>offset（aclTensor*）</td>
   <td>输入</td>
   <td>预留量化参数。</td>
   <td>目前暂不支持，传入空指针 nullptr 即可。</td>
@@ -130,7 +131,7 @@ aclnnStatus aclnnQuantConvolutionWeightNz(
   <td style="text-align:center">-</td>
   </tr>
   <tr>
-  <td>stride</td>
+  <td>stride（aclIntArray*）</td>
   <td>输入</td>
   <td>卷积扫描步长。</td>
   <td><ul><li>数组长度=3。</li><li>strideH 和 strideW 应在 [1,63] 范围内。</li><li>conv3d 场景下 strideD 应在 [1,1000000] 范围内。</li></ul></td>
@@ -140,7 +141,7 @@ aclnnStatus aclnnQuantConvolutionWeightNz(
   <td style="text-align:center">-</td>
   </tr>
   <tr>
-  <td>padding</td>
+  <td>padding（aclIntArray*）</td>
   <td>输入</td>
   <td>对 input 的填充。</td>
   <td><ul><li>值应≥0。</li><li>paddingH 和 paddingW 应在 [0,255] 范围内。</li><li>conv3d 场景下 paddingD 应在 [0,1000000] 范围内。</li></ul></td>
@@ -150,7 +151,7 @@ aclnnStatus aclnnQuantConvolutionWeightNz(
   <td style="text-align:center">-</td>
   </tr>
   <tr>
-  <td>dilation</td>
+  <td>dilation（aclIntArray*）</td>
   <td>输入</td>
   <td>卷积核中元素的间隔。</td>
   <td><ul><li>值应>0。</li><li>dilationH 和 dilationW 应在 [1,255] 范围内。</li><li>conv3d 场景下 dilationD 应在 [1,1000000] 范围内。</li></ul></td>
@@ -160,7 +161,7 @@ aclnnStatus aclnnQuantConvolutionWeightNz(
   <td style="text-align:center">-</td>
   </tr>
   <tr>
-  <td>transposed</td>
+  <td>transposed（bool）</td>
   <td>输入</td>
   <td>预留参数。表示是否为转置量化卷积。</td>
   <td>目前暂不支持，传入 false 即可。</td>
@@ -170,7 +171,7 @@ aclnnStatus aclnnQuantConvolutionWeightNz(
   <td style="text-align:center">-</td>
   </tr>
   <tr>
-  <td>outputPadding</td>
+  <td>outputPadding（aclIntArray*）</td>
   <td>输入</td>
   <td>预留参数。表示转置卷积情况下，对输出所有边的填充。</td>
   <td>非转置卷积情况下，忽略该属性配置。目前暂不支持，传入空指针 nullptr 即可。</td>
@@ -180,7 +181,7 @@ aclnnStatus aclnnQuantConvolutionWeightNz(
   <td style="text-align:center">-</td>
   </tr>
   <tr>
-  <td>groups</td>
+  <td>groups（int64_t）</td>
   <td>输入</td>
   <td>表示从输入通道到输出通道的块链接个数。</td>
   <td>值=1</td>
@@ -190,7 +191,7 @@ aclnnStatus aclnnQuantConvolutionWeightNz(
   <td style="text-align:center">-</td>
   </tr>
   <tr>
-  <td>offsetx</td>
+  <td>offsetx（int32_t）</td>
   <td>输入</td>
   <td>表示量化因子。</td>
   <td>[-128,127] 或 0。</td>
@@ -200,7 +201,7 @@ aclnnStatus aclnnQuantConvolutionWeightNz(
   <td style="text-align:center">-</td>
   </tr>
   <tr>
-  <td>roundMode</td>
+  <td>roundMode（char*）</td>
   <td>输入</td>
   <td>表示取整模式。</td>
   <td>rint、round 或 nullptr。</td>
@@ -210,7 +211,7 @@ aclnnStatus aclnnQuantConvolutionWeightNz(
   <td style="text-align:center">-</td>
   </tr>
   <tr>
-  <td>output</td>
+  <td>output（aclTensor*）</td>
   <td>输出</td>
   <td>公式中的 out，表示卷积输出。</td>
   <td><ul><li>其 shape 满足卷积的推导规则。</li><li>不支持空 Tensor 输出。</li><li>通道数等于 weight 原shape第一维，其他维度≥0。</li></ul></td>
@@ -220,7 +221,7 @@ aclnnStatus aclnnQuantConvolutionWeightNz(
   <td style="text-align:center">√</td>
   </tr>
   <tr>
-  <td>workspaceSize</td>
+  <td>workspaceSize（uint64_t*）</td>
   <td>输出</td>
   <td>返回需要在 Device 侧申请的 workspace 大小。</td>
   <td>-</td>
@@ -230,7 +231,7 @@ aclnnStatus aclnnQuantConvolutionWeightNz(
   <td style="text-align:center">-</td>
   </tr>
   <tr>
-  <td>executor</td>
+  <td>executor（aclOpExecutor**）</td>
   <td>输出</td>
   <td>返回 op 执行器，包含算子计算流程。</td>
   <td>-</td>
@@ -253,43 +254,42 @@ aclnnStatus aclnnQuantConvolutionWeightNz(
     <col style="width:1050px">
     </colgroup>
    <thead>
-
-  <tr>
-  <td>返回值</td>
-  <td>错误码</td>
-  <td>描述</td>
-  </tr>
-  <tr>
-  <td align="left">ACLNN_ERR_PARAM_NULLPTR</td>
-  <td align="left">161001</td>
-  <td align="left">传入的指针类型入参是空指针。</td>
-  </tr>
-  <tr>
-  <td rowspan="11" align="left">ACLNN_ERR_PARAM_INVALID</td>
-  <td rowspan="11" align="left">161002</td>
-  <td align="left">input、weight、bias、scale、offset、output 数据类型和数据格式不在支持的范围之内。</td>
-  </tr>
-  <tr><td align="left">stride、padding、dilation 输入 shape 不对。</td></tr>
-  <tr><td align="left">groups 输入不对的情况。</td></tr>
-  <tr><td align="left">scale 和 bias 输入 shape 不对。</td></tr>
-  <tr><td align="left">output 的 shape 不满足 infershape 结果。</td></tr>
-  <tr><td align="left">传入 tensor 中任意维度为零的均不满足要求。</td></tr>
-  <tr><td align="left">input 空间尺度在 padding 操作后小于 weight(经过 dilation 扩张（如存在 dilation>1 的情况）)的空间尺度。</td></tr>
-  <tr><td align="left">weight 和 input 通道数不满足要求。</td></tr>
-  <tr><td align="left">weight的转化前后shape不满足转化关系。</td></tr>
-  <tr><td align="left">stride、dilation 小于 0 情况下不满足要求。</td></tr>
-  <tr><td align="left">当前处理器不支持卷积。</td></tr>
-  <tr>
-  <td align="left">ACLNN_ERR_INNER_NULLPTR</td>
-  <td align="left">561103</td>
-  <td align="left">API 内部校验错误，通常由于输入数据或属性的规格不在支持的范围之内导致。</td>
-  </tr>
-  <tr>
-  <td align="left">ACLNN_ERR_RUNTIME_ERROR</td>
-  <td align="left">361001</td>
-  <td align="left">API 调用 npu runtime 的接口异常，如 SocVersion 不支持。</td>
-  </tr>
-  </table>
+    <tr>
+    <td>返回值</td>
+    <td>错误码</td>
+    <td>描述</td> 
+    </tr></thead>
+    <tr>
+    <td align="left">ACLNN_ERR_PARAM_NULLPTR</td>
+    <td align="left">161001</td>
+    <td align="left">传入的指针类型入参是空指针。</td>
+    </tr>
+    <tr>
+    <td rowspan="11" align="left">ACLNN_ERR_PARAM_INVALID</td>
+    <td rowspan="11" align="left">161002</td>
+    <td align="left">input、weight、bias、scale、offset、output 数据类型和数据格式不在支持的范围之内。</td>
+    </tr>
+    <tr><td align="left">stride、padding、dilation 输入 shape 不对。</td></tr>
+    <tr><td align="left">groups 输入不对的情况。</td></tr>
+    <tr><td align="left">scale 和 bias 输入 shape 不对。</td></tr>
+    <tr><td align="left">output 的 shape 不满足 infershape 结果。</td></tr>
+    <tr><td align="left">传入 tensor 中任意维度为零的均不满足要求。</td></tr>
+    <tr><td align="left">input 空间尺度在 padding 操作后小于 weight(经过 dilation 扩张（如存在 dilation>1 的情况）)的空间尺度。</td></tr>
+    <tr><td align="left">weight 和 input 通道数不满足要求。</td></tr>
+    <tr><td align="left">weight的转化前后shape不满足转化关系。</td></tr>
+    <tr><td align="left">stride、dilation 小于 0 情况下不满足要求。</td></tr>
+    <tr><td align="left">当前处理器不支持卷积。</td></tr>
+    <tr>
+    <td align="left">ACLNN_ERR_INNER_NULLPTR</td>
+    <td align="left">561103</td>
+    <td align="left">API 内部校验错误，通常由于输入数据或属性的规格不在支持的范围之内导致。</td>
+    </tr>
+    <tr>
+    <td align="left">ACLNN_ERR_RUNTIME_ERROR</td>
+    <td align="left">361001</td>
+    <td align="left">API 调用 npu runtime 的接口异常，如 SocVersion 不支持。</td>
+    </tr>
+    </table>
 
 ## aclnnQuantConvolutionWeightNz
 
@@ -339,7 +339,7 @@ aclnnStatus aclnnQuantConvolutionWeightNz(
    <thead>
     <tr>
      <th><term>约束类型</term></th>
-     <th><term>Atlas A2 训练系列产品/Atlas 800I A2 推理产品/A200I A2 Box 异构组件</term>、<term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term></th>
+     <th><term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>、<term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term></th>
    </tr>
    </thead>
    <tbody>

@@ -32,15 +32,15 @@ protected:
     ge::graphStatus CalcOutputDtype();
     ge::graphStatus CalcInputDtype();
     ge::graphStatus CheckShape();
-    ge::graphStatus SetTilingData();
+    ge::graphStatus SetTilingData() const;
     ge::graphStatus SetAttr();
 
 private:
     gert::TilingContext* tilingContext;
-    ge::DataType outputDtype;
-    ge::DataType inputDtype;
-    ge::DataType inputDtype1;
-    ge::DataType inputDtype2;
+    ge::DataType outputDtype = ge::DT_UNDEFINED;
+    ge::DataType inputDtype = ge::DT_UNDEFINED;
+    ge::DataType inputDtype1 = ge::DT_UNDEFINED;
+    ge::DataType inputDtype2 = ge::DT_UNDEFINED;
     uint64_t dType = 0;
 };
 } // namespace optiling

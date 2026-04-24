@@ -8,13 +8,13 @@
 | <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>     |    √     |
 | <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term> |    √     |
 | <term>Atlas 200I/500 A2 推理产品</term>                      |    ×     |
-| <term>Atlas 推理系列产品 </term>                             |    ×     |
+| <term>Atlas 推理系列产品</term>                             |    ×     |
 | <term>Atlas 训练系列产品</term>                              |    ×     |
 
 ## 功能说明
 
 - 接口功能：完成张量self与张量mat2的矩阵乘计算，mat2仅支持NZ格式，只支持self为2维, mat2为4维。
-  相似接口有aclnnMatmul(mat2仅支持ND) aclnnMm（支持2维Tensor作为输入的矩阵乘）和aclnnBatchMatmul（仅支持3维的矩阵乘，其中第1维为batch）。
+  相似接口有aclnnMatmul（mat2仅支持ND）、 aclnnMm（支持2维Tensor作为输入的矩阵乘）和aclnnBatchMatmul（仅支持3维的矩阵乘，其中第1维为batch）。
 - 计算公式：
 
   $$
@@ -24,6 +24,7 @@
 ## 函数原型
 
 每个算子分为[两段式接口](../../../docs/zh/context/两段式接口.md)，必须先调用“aclnnMatmulWeightNzGetWorkspaceSize”接口获取计算所需workspace大小以及包含了算子计算流程的执行器，再调用“aclnnMatmulWeightNz”接口执行计算。
+
 ```cpp
 aclnnStatus aclnnMatmulWeightNzGetWorkspaceSize(
   const aclTensor *self,
@@ -33,6 +34,7 @@ aclnnStatus aclnnMatmulWeightNzGetWorkspaceSize(
   uint64_t        *workspaceSize,
   aclOpExecutor   **executor)
 ```
+
 ```cpp
 aclnnStatus aclnnMatmulWeightNz(
   void           *workspace,
@@ -42,6 +44,7 @@ aclnnStatus aclnnMatmulWeightNz(
 ```
 
 ## aclnnMatmulWeightNzGetWorkspaceSize
+
 - **参数说明**
   <table style="undefined;table-layout: fixed; width: 1508px"><colgroup>
     <col style="width: 151px">
@@ -69,9 +72,9 @@ aclnnStatus aclnnMatmulWeightNz(
         <td>self</td>
         <td>输入</td>
         <td>表示矩阵乘的第一个矩阵，公式中的self。</td>
-        <td>数据类型需要与mat2满足数据类型推导规则（参见<a href="../../../docs/zh/context/互推导关系.md">互推导关系</a>和<a href="#约束说明">约束说明</a>）。</br>
-        - 在self不转置的情况下各个维度表示:（m，k）</br>
-        - 在self转置的情况下各个维度表示:（k，m）</br></td>
+        <td>数据类型需要与mat2满足数据类型推导规则（参见<a href="../../../docs/zh/context/互推导关系.md">互推导关系</a>和<a href="#约束说明">约束说明</a>）。<br>
+        - 在self不转置的情况下各个维度表示:（m，k）<br>
+        - 在self转置的情况下各个维度表示:（k，m）<br></td>
         <td>BFLOAT16、FLOAT16</td>
         <td>ND</td>
         <td>2</td>
@@ -81,22 +84,22 @@ aclnnStatus aclnnMatmulWeightNz(
         <td>mat2</td>
         <td>输入</td>
         <td>表示矩阵乘的第二个矩阵，公式中的mat2。</td>
-        <td>数据类型需要与self满足数据类型推导规则（参见<a href="../../../docs/zh/context/互推导关系.md">互推导关系</a>和<a href="#约束说明">约束说明</a>）。</br>
-        mat2的Reduce维度需要与self的Reduce维度大小相等。</br>
-        当B矩阵不转置时， NZ格式各个维度表示：（n1，k1，k0，n0），其中k0 = 16， n0为16。self shape中的k和mat2 shape中的k1需要满足以下关系：ceil（k，k0） = k1, mat2 shape中的n1与out的n满足以下关系: ceil(n, n0) = n1。</br>
-        当B矩阵转置时， NZ格式各个维度表示：（k1，n1，n0，k0），其中n0 = 16， k0为16。self shape中的k和mat2 shape中的k1需要满足以下关系：ceil（k，k0） = k1, mat2 shape中的n1与out的n满足以下关系: ceil(n, n0) = n1。</br>
+        <td>数据类型需要与self满足数据类型推导规则（参见<a href="../../../docs/zh/context/互推导关系.md">互推导关系</a>和<a href="#约束说明">约束说明</a>）。<br>
+        mat2的Reduce维度需要与self的Reduce维度大小相等。<br>
+        当B矩阵不转置时， NZ格式各个维度表示：（n1，k1，k0，n0），其中k0 = 16， n0为16。self shape中的k和mat2 shape中的k1需要满足以下关系：ceil（k，k0） = k1, mat2 shape中的n1与out的n满足以下关系: ceil(n, n0) = n1。<br>
+        当B矩阵转置时， NZ格式各个维度表示：（k1，n1，n0，k0），其中n0 = 16， k0为16。self shape中的k和mat2 shape中的k1需要满足以下关系：ceil（k，k0） = k1, mat2 shape中的n1与out的n满足以下关系: ceil(n, n0) = n1。<br>
         </td>
-        <td>BFLOAT16、FLOAT16</td>
+        <td>BFLOAT16、FLOAT16、FLOAT32</td>
         <td>NZ</td>
         <td>4</td>
-        <td>√</td>
+        <td>-</td>
       </tr>
       <tr>
         <td>out</td>
         <td>输出</td>
         <td>表示矩阵乘的输出矩阵，公式中的out。</td>
-        <td>数据类型需要与self与mat2推导之后的数据类型保持一致（参见<a href="../../../docs/zh/context/互推导关系.md">互推导关系</a>和<a href="#约束说明">约束说明</a>）。</br> 各个维度表示：（m，n），m与self的m一致，n与mat2的n1以及n0满足ceil(n / n0) = n1的关系。</td>
-        <td>BFLOAT16、FLOAT16</td>
+        <td>数据类型需要与self与mat2推导之后的数据类型保持一致（参见<a href="../../../docs/zh/context/互推导关系.md">互推导关系</a>和<a href="#约束说明">约束说明</a>）。<br> 各个维度表示：（m，n），m与self的m一致，n与mat2的n1以及n0满足ceil(n / n0) = n1的关系。</td>
+        <td>BFLOAT16、FLOAT16、FLOAT32</td>
         <td>ND</td>
         <td>2</td>
         <td>-</td>
@@ -177,9 +180,10 @@ aclnnStatus aclnnMatmulWeightNz(
     </tr>
     <tr>
       <td>self和mat2无法做数据类型推导。</td>
+    </tr>
     <tr>
       <td>推导出的数据类型无法转换为指定输出out的类型。</td>
-    <tr>
+    </tr>
   </tbody>
   </table>
 
@@ -187,14 +191,13 @@ aclnnStatus aclnnMatmulWeightNz(
 
 - **参数说明**
 
-
   <div style="overflow-x: auto;">
   <table style="undefined;table-layout: fixed; width: 1030px"><colgroup>
   <col style="width: 250px">
   <col style="width: 130px">
   <col style="width: 650px">
   </colgroup>
-  <table><thead>
+  <thead>
     <tr>
       <th>参数名</th>
       <th>输入/输出</th>
@@ -225,12 +228,12 @@ aclnnStatus aclnnMatmulWeightNz(
   </table>
   </div>
 
-
 - **返回值**
 
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 
 ## 约束说明
+
 - 确定性说明：
   - <term>Atlas 训练系列产品</term>、<term>Atlas 推理系列产品</term>、<term>Ascend 950PR/Ascend 950DT</term>：aclnnMatmulWeightNz默认确定性实现。
 
@@ -243,11 +246,13 @@ aclnnStatus aclnnMatmulWeightNz(
 - 不支持两个输入分别为BFLOAT16和FLOAT16的数据类型推导。
 - self只支持2维, mat2只支持昇腾私有格式，调用此接口之前，必须完成mat2从ND到昇腾私有格式的转换。
 - 不支持mat2最后两根轴其中一根轴为1，即k=1或者n=1。
+- 建议使用场景：建议在mte2 bound场景下使用，例如M轴较小，A矩阵存在重复搬运，B矩阵无重复搬运的情况。
 
 ## 调用示例
 
 - <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>、<term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>：
   self和mat2数据类型为float16，mat2为NZ格式场景下的示例代码如下，仅供参考，具体编译和执行过程请参考[编译与运行样例](../../../docs/zh/context/编译与运行样例.md)。
+  
   ```Cpp
   #include <iostream>
   #include <vector>
@@ -472,6 +477,7 @@ aclnnStatus aclnnMatmulWeightNz(
 
 - <term>Ascend 950PR/Ascend 950DT</term>：
   self和mat2数据类型为bfloat16，mat2为NZ格式场景下的示例代码如下，仅供参考，具体编译和执行过程请参考[编译与运行样例](../../../docs/zh/context/编译与运行样例.md)。
+
   ```Cpp
     #include <iostream>
     #include <vector>

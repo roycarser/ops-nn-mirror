@@ -38,12 +38,14 @@ constexpr uint32_t UB_TWO_BANK_ELEMS_B32 = 128U;
 constexpr uint32_t UB_SUB_BANK_ELEMS_B32 = 64U; // SUB0: 64, SUB1: 64
 constexpr uint32_t UB_SUB_BANK_NUM = 2U;
 constexpr uint16_t AIC_SYNC_AIV_MODE_4 = 4U;
+constexpr uint16_t DIM_SIZE_THREE = 3U;
 constexpr int MNK_M = 0;
 constexpr int MNK_N = 1;
 constexpr int MNK_K = 2;
 constexpr int MNK_B = 3;
 constexpr int MNK_M0 = 4;
 constexpr int MNK_N0 = 5;
+constexpr int EVEN_NUMBER = 2;
 
 constexpr static uint64_t A_FULL_LOAD_MODE = 1UL;
 constexpr static uint64_t B_FULL_LOAD_MODE = 2UL;
@@ -52,6 +54,9 @@ constexpr static int64_t PER_BLOCK_SIZE = 128LL;
 constexpr int32_t MXFP_DIVISOR_SIZE = 64;
 constexpr int32_t MXFP_MULTI_BASE_SIZE = 2;
 constexpr uint32_t C0_SIZE_B8 = 32UL;
+constexpr uint32_t C0_SIZE_B4 = 64UL;
+constexpr uint64_t CUBE_OUT_VECTOR_IN = 1;
+constexpr uint64_t ONLY_VECTOR_IN = 2;
 // FusedMatMul OpType
 constexpr static uint64_t OP_TYPE_EMPTY = 0UL;
 constexpr static uint64_t OP_TYPE_ADD = 1UL;
@@ -114,7 +119,7 @@ __aicore__ inline uint64_t Align(uint64_t a, uint64_t b)
  */
 __aicore__ inline uint32_t GetAicAivTaskRation()
 {
-#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 2201 || __NPU_ARCH__ == 3101)
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 2201 || __NPU_ARCH__ == 3510)
     return 2U; // 2: aic:aiv = 1:2
 #else
     return 1U;
@@ -125,7 +130,7 @@ template <typename CType, typename AType>
 __aicore__ inline constexpr static bool IsQuantSenario()
 {
     using L0cT = typename AscendC::GetMmDstType<AType>::Type;
-#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3101)
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
     if constexpr (
         !AscendC::IsTypeOneOfV<AType, int8_t, hifloat8_t, fp8_e4m3fn_t, fp8_e5m2_t, fp4x2_e2m1_t, fp4x2_e1m2_t> &&
         AscendC::IsTypeOneOfV<CType, half, bfloat16_t>) {

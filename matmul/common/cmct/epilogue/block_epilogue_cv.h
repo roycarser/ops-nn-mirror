@@ -15,7 +15,7 @@
 
 #ifndef EPILOGUE_BLOCK_EPILOGUE_CV_H
 #define EPILOGUE_BLOCK_EPILOGUE_CV_H
-#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3101)
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
 #if ASC_DEVKIT_MAJOR >= 9
 #include "kernel_basic_intf.h"
 #else
@@ -93,25 +93,30 @@ public:
 
         // 一次计算最多取Min(baseM/2 * baseN, stageSize_)
         int64_t stageSize = AscendC::Std::min(stageSize_, inputSize) / blockShapeNAlign * blockShapeNAlign;
-        ASCENDC_ASSERT(stageSize > 0, {
-            KERNEL_LOG(KERNEL_EORROR, "stageSize size limit %ld, %ld, %ld!", stageSize_, blockShapeM, blockShapeN);
-        });
+        // m轴为1场景第二个vec直接返回
+        if (stageSize <= 0) {
+            AscendC::CrossCoreSetFlag<AIC_SYNC_AIV_MODE_4, PIPE_V>(flagId);
+            return;
+        }
         int64_t loop = 0;
         int64_t stageOffset = 0;
         int64_t N = Get<MNK_N>(problemShape_);
+        int64_t M = Get<MNK_M>(problemShape_);
         while (stageOffset < inputSize) {
             int64_t offset = dstOffset + loop * stageSize / blockShapeNAlign * N;
             // aiv1需要多偏移aiv0所处理的数据
             offset += AscendC::GetSubBlockIdx() * halfBlockShapeM * N;
             stageSize = AscendC::Std::min(stageSize, inputSize - stageOffset);
             // Do add or mul in ub: x3 + cLocal_[stageOffset] -> cLocal_  in stage 1
-            fusionOp_(offset, stageSize / blockShapeNAlign, blockShapeN, N, stageSize, stageOffset, 1);
+            fusionOp_(offset, stageSize / blockShapeNAlign, blockShapeN, N, M, blockShapeNAlign,
+                stageSize, stageOffset, CUBE_OUT_VECTOR_IN);
             if (stageOffset + stageSize >= inputSize) {
                 // Notify aic
                 AscendC::CrossCoreSetFlag<AIC_SYNC_AIV_MODE_4, PIPE_V>(flagId);
             }
             // CopyOut in stage 2
-            fusionOp_(offset, stageSize / blockShapeNAlign, blockShapeN, N, stageSize, stageOffset, 2);
+            fusionOp_(offset, stageSize / blockShapeNAlign, blockShapeN, N, M, blockShapeNAlign,
+                stageSize, stageOffset, ONLY_VECTOR_IN);
             stageOffset += stageSize;
             loop++;
         }

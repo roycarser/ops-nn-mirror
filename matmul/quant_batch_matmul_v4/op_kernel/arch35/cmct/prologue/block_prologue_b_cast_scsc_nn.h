@@ -16,7 +16,7 @@
 #ifndef QUANT_BATCH_MATMUL_V4_ARCH35_CMCT_PROLOGUE_BLOCK_PROLOGUE_B_CAST_SCSC_NN_H
 #define QUANT_BATCH_MATMUL_V4_ARCH35_CMCT_PROLOGUE_BLOCK_PROLOGUE_B_CAST_SCSC_NN_H
 #include "cmct/prologue/block_prologue_b_cast_scsc.h"
-#include "../../quant_batch_matmul_v4_tiling_data.h"
+#include "../../quant_batch_matmul_v4_tiling_data_apt.h"
 
 namespace QuantBatchMatmulV4 {
 namespace Prologue {
@@ -37,7 +37,7 @@ public:
         const qbmmv4_tiling::QuantBatchMatmulV4TilingDataParams* tiling)
     {
         auto stepKa = static_cast<uint32_t>(tiling->matmulTiling.stepKa);
-        auto stepKb = static_cast<uint32_t>(tiling->matmulTiling.stepKa);
+        auto stepKb = static_cast<uint32_t>(tiling->matmulTiling.stepKb);
         auto baseK = static_cast<uint32_t>(tiling->matmulTiling.baseK);
         auto baseM = static_cast<uint32_t>(tiling->matmulTiling.baseM);
         auto baseN = static_cast<uint32_t>(tiling->matmulTiling.baseN);

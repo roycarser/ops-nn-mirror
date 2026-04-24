@@ -17,7 +17,7 @@
 
 #include "log/log.h"
 
-#include "tiling_base/tiling_templates_registry.h"
+#include "op_host/tiling_templates_registry.h"
 #include "../../../../common/op_host/op_tiling/tiling_type.h"
 #include "ut_op_util.h"
 #include "exe_graph/runtime/storage_format.h"
@@ -226,9 +226,11 @@ static void TestOneParamCase(const QuantBatchMatmulV4TilingTestParam &param)
         groupM = static_cast<int64_t>((group & 0xFFFF00000000) >> 32); // 32-47bit group_m
         int64_t groupNum = (k + group - 1) / group;
         if (!hasX2Table) {
-            x1ScaleShape.MutableStorageShape() = gert::Shape({m, groupNum});
+            x1ScaleShape.MutableStorageShape() =
+                x1ScaleDtype == ge::DT_FLOAT8_E8M0 ? gert::Shape({m, groupNum / 2, 2}) : gert::Shape({m, groupNum});
             if (transB) {
-                x2ScaleShape.MutableStorageShape() = gert::Shape({n, groupNum});
+                x2ScaleShape.MutableStorageShape() =
+                    x2ScaleDtype == ge::DT_FLOAT8_E8M0 ? gert::Shape({n, groupNum / 2, 2}) : gert::Shape({n, groupNum});
             } else {
                 x2ScaleShape.MutableStorageShape() = gert::Shape({groupNum, n});
             }
@@ -396,6 +398,8 @@ static QuantBatchMatmulV4TilingTestParam casesParams[] = {
     {"UT-A8W4-PerGroup-NZ-Testcase-error-14_Ascend950_16_64_64_0_0_32_ND_NZ_FP8-E4M3_FP4-E2M1_BF16_NULL_BF16_UINT64_NULL_FP16_32_64", 32, ge::GRAPH_FAILED, 268UL},
     // x2 NZ不支持转置
     {"UT-A8W4-PerGroup-NZ-Testcase-error-15_Ascend950_16_64_64_0_1_32_ND_NZ_FP8-E4M3_FP4-E2M1_BF16_NULL_BF16_UINT64_NULL_BF16_32_64", 32, ge::GRAPH_FAILED, 268UL},
+    // aic:aiv != 1:2
+    {"UT-A8W4-PerGroup-NZ-Testcase-error-16_Ascend950_192_3648_64_0_0_32_ND_NZ_FP8-E4M3_FP4-E2M1_NULL_NULL_BF16_UINT64_NULL_BF16_32_32", 12, ge::GRAPH_FAILED, 268UL},
 
     // MX NZ ERROR
     // X2: dtype != FP4-E2M1

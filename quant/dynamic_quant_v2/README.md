@@ -15,7 +15,7 @@
 
 ## 功能说明
 
-- 算子功能：为输入张量进行per-token对称/非对称动态量化。在MOE场景下，每个专家的smooth_scales是不同的，根据输入的group_index进行区分。
+- 算子功能：为输入张量进行pertoken/pertensor/perchannel对称/非对称动态量化。在MOE场景下，每个专家的smooth_scales是不同的，根据输入的group_index进行区分。
 
 - 计算公式：
   - 对称量化：
@@ -138,8 +138,15 @@
     <tr>
       <td>quant_mode</td>
       <td>可选属性</td>
-      <td><ul><li>指定量化模式。支持"pertoken"、"pertensor"。</li><li>默认值为"pertoken"。</li></ul></td>
+      <td><ul><li>指定量化模式。支持"pertoken"、"pertensor"、"perchannel"。</li><li>默认值为"pertoken"。</li></ul></td>
       <td>STRING</td>
+      <td>-</td>
+    </tr>
+    <tr>
+      <td>dst_type_max</td>
+      <td>可选属性</td>
+      <td><ul><li>指定量化输出的范围，仅在Hifloat8场景生效。支持0，15，56，224，32768。</li><li>默认值为0。</li></ul></td>
+      <td>FLOAT</td>
       <td>-</td>
     </tr>
     <tr>
@@ -171,6 +178,11 @@
   - 输入`smooth_scales`、`group_index`为预留参数，当前版本不参与计算。
   - 输入`dst_type`：只支持配置为2。
 - <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>、<term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>：输出`y`的数据类型仅支持INT8、INT4。
+
+- Kirin X90/Kirin 9030 处理器系列产品:
+  - 输入`x`：数据类型不支持BFLOAT16。
+  - 可选输入`smooth_scales`：数据类型不支持BFLOAT16。
+  - 输出`y`：数据类型不支持INT4、FLOAT8_E5M2、FLOAT8_E4M3FN、HIFLOAT8。
 
 ## 约束说明
 

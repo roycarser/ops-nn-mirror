@@ -22,8 +22,6 @@ namespace optiling {
 namespace batch_matmul_v3_advanced {
 using namespace strategy;
 MM_REGISTER_TILING_TEMPLATE(BatchMatMulV3, BatchMatMulV3IterBatchTiling, DAV_3510, ITER_BATCH);
-//supportMmadS8S4平台
-MM_REGISTER_TILING_TEMPLATE(BatchMatMulV3, BatchMatMulV3IterBatchTiling, DAV_RESV, ITER_BATCH);
 
 ge::graphStatus BatchMatMulV3IterBatchTiling::DoOpTiling()
 {
@@ -69,6 +67,10 @@ ge::graphStatus BatchMatMulV3IterBatchTiling::DoOpTiling()
 
 bool BatchMatMulV3IterBatchTiling::IsCapable()
 {
+    if (args_.aFormat == ge::FORMAT_FRACTAL_NZ || args_.bFormat == ge::FORMAT_FRACTAL_NZ) {
+        OP_LOGD(args_.opName, "[iterbatch] The NZ format is not supported in this strategy.");
+        return false;
+    }
     bool isNotEqualBatch = batchInfo_->batchA0 != batchInfo_->batchB0 || batchInfo_->batchA1 != batchInfo_->batchB1 ||
                            batchInfo_->batchA2 != batchInfo_->batchB2 || batchInfo_->batchA3 != batchInfo_->batchB3;
     if (isNotEqualBatch)  {

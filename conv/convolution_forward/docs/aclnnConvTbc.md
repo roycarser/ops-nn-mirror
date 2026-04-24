@@ -1,5 +1,7 @@
 # aclnnConvTbc
 
+[📄 查看源码](https://gitcode.com/cann/ops-nn/tree/master/conv/convolution_forward)
+
 ## 产品支持情况
 
 | 产品                                                         | 是否支持 |
@@ -32,7 +34,7 @@ aclnnStatus aclnnConvTbcGetWorkspaceSize(
     const aclTensor       *self,
     const aclTensor       *weight,
     const aclTensor       *bias,
-    int64_t                pad,
+    const int64_t          pad,
     aclTensor             *out,
     int8_t                 cubeMathType,
     uint64_t              *workspaceSize,
@@ -63,17 +65,17 @@ aclnnStatus aclnnConvTbc(
   <th style="width:145px">非连续 Tensor</th>
   </tr>
   <tr>
-  <td>self（const aclTensor*）</td>
+  <td>self（aclTensor*）</td>
   <td>输入</td>
   <td>公式中的 self，表示卷积输入。</td>
-  <td><ul></li><li>支持空 Tensor。</li><li>数据类型与 weight 的数据类型需满足数据类型推导规则（参见<a href="../../../docs/zh/context/互推导关系.md">互推导关系</a>）。<li>shape 为（N,C<sub>in</sub>,H<sub>in</sub>）。</li></li><li>N≥0，C≥1，H≥0。</li></ul></td>
+  <td><ul><li>支持空 Tensor。</li><li>数据类型与 weight 的数据类型需满足数据类型推导规则（参见<a href="../../../docs/zh/context/互推导关系.md">互推导关系</a>）。<li>shape 为（N,C<sub>in</sub>,H<sub>in</sub>）。</li></li><li>N≥0，C≥1，H≥0。</li></ul></td>
   <td>FLOAT、FLOAT16、BFLOAT16、HIFLOAT8</td>
   <td>ND、NCL</td>
   <td>3</td>
   <td style="text-align:center">√</td>
   </tr>
   <tr>
-  <td>weight（const aclTensor*）</td>
+  <td>weight（aclTensor*）</td>
   <td>输入</td>
   <td>公式中的 weight，表示卷积权重。</td>
   <td><ul><li>支持空 Tensor。</li><li>数据类型与 self 的数据类型需满足数据类型推导规则（参见<a href="../../../docs/zh/context/互推导关系.md">互推导关系</a>）。</li><li>shape 为（C<sub>out</sub>,C<sub>in</sub>,K）。</li><li>所有维度≥1。</li></ul></td>
@@ -83,7 +85,7 @@ aclnnStatus aclnnConvTbc(
   <td style="text-align:center">√</td>
   </tr>
   <tr>
-  <td>bias（const aclTensor*）</td>
+  <td>bias（aclTensor*）</td>
   <td>输入</td>
   <td>公式中的 bias，表示卷积偏置。</td>
   <td><ul><li>数据类型与 self、weight 一致。</li><li>一维且与 weight 第一维相等，不允许传入空指针。</li></ul></td>
@@ -156,12 +158,11 @@ aclnnStatus aclnnConvTbc(
     <col style="width:1050px">
     </colgroup>
    <thead>
-
   <tr>
   <td>返回值</td>
   <td>错误码</td>
   <td>描述</td>
-  </tr>
+  </tr></thead>
   <tr>
   <td align="left">ACLNN_ERR_PARAM_NULLPTR</td>
   <td align="left">161001</td>
@@ -288,7 +289,7 @@ aclnnStatus aclnnConvTbc(
           <li>为 1（ALLOW_FP32_DOWN_PRECISION）时，当输入是 FLOAT 允许转换为 HFLOAT32 计算。</li>
           <li>为 2（USE_FP16）时，当输入是 BFLOAT16 不支持该选项。</li>
           <li>为 3（USE_HF32）时，当输入是 FLOAT 转换为 HFLOAT32 计算。</li>
-        <ul>
+        </ul>
      </td>
      <td>
         <ul>

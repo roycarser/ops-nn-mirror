@@ -23,10 +23,10 @@
 #include "tiling/tiling_api.h"
 #include "log/log.h"
 #include "register/tilingdata_base.h"
-#include "tiling_base/tiling_util.h"
+#include "op_host/tiling_util.h"
 #include "platform/platform_info.h"
 #include "register/op_impl_registry.h"
-#include "tiling_base/tiling_templates_registry.h"
+#include "op_host/tiling_templates_registry.h"
 #include "tiling/platform/platform_ascendc.h"
 #include "util/math_util.h"
 #include "../../op_kernel/arch35/nll_loss_tiling_key.h"
@@ -185,13 +185,13 @@ static void Tiling4NLLLossSimd(gert::TilingContext* context, NLLLossACTilingPara
     }
     uint32_t remain = tilingParams.tailSize % ALIGN_SIZE;
     tilingParams.padSize = remain == 0 ? 0 : ALIGN_SIZE - remain;
-    tilingParams.loopNum1 = std::pow(POW, (int32_t)(log2(tilingParams.loopInCore + 1)));
+    tilingParams.loopNum1 = std::pow(POW, static_cast<int32_t>(log2(tilingParams.loopInCore + 1)));
     tilingParams.tailNum1 = tilingParams.loopInCore + 1 - tilingParams.loopNum1;
     tilingParams.tailMoveSize =
         tilingParams.tailNum1 == 0 ? tilingParams.tailSize : tilingParams.mainReduceSize + tilingParams.tailSize;
-    tilingParams.tailMainReduceSize = std::pow(POW, (int32_t)(log2(tilingParams.tailMoveSize + tilingParams.padSize)));
+    tilingParams.tailMainReduceSize = std::pow(POW, static_cast<int32_t>(log2(tilingParams.tailMoveSize + tilingParams.padSize)));
     tilingParams.tailRemainSize = tilingParams.tailMoveSize + tilingParams.padSize - tilingParams.tailMainReduceSize;
-    tilingParams.loopNum3 = std::pow(POW, (int32_t)(log2(tilingParams.loopInCore)));
+    tilingParams.loopNum3 = std::pow(POW, static_cast<int32_t>(log2(tilingParams.loopInCore)));
     tilingParams.tailNum3 = tilingParams.loopInCore - tilingParams.loopNum3;
 
     tilingParams.coreNum =
@@ -349,7 +349,7 @@ static ge::graphStatus Tiling4NLLLossAC(gert::TilingContext* context, uint32_t m
 static ge::graphStatus NLLLossTiling(gert::TilingContext* context)
 {
     OP_LOGD(context->GetNodeName(), "NLLLossTiling running begin");
-    auto compileInfo = reinterpret_cast<const NLLLossCompileInfo*>(context->GetCompileInfo());
+    auto compileInfo = static_cast<const NLLLossCompileInfo*>(context->GetCompileInfo());
     OP_CHECK_NULL_WITH_CONTEXT(context, compileInfo);
     OP_LOGD(context->GetNodeName(), "NLLLossTiling tik compile_info is Null! Running simt tiling!");
     uint32_t maxCoreNum = compileInfo->maxCoreNum;

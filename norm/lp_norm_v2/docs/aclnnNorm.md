@@ -13,7 +13,6 @@
 | <term>Atlas 推理系列产品</term>                             |    √     |
 | <term>Atlas 训练系列产品</term>                              |    √     |
 
-
 ## 功能说明
 
 - 接口功能：返回给定张量的矩阵范数或者向量范数。
@@ -61,6 +60,7 @@ aclnnStatus aclnnNormGetWorkspaceSize(
   uint64_t            *workspaceSize,
   aclOpExecutor      **executor)
 ```
+
 ```Cpp
 aclnnStatus aclnnNorm(
   void*           workspace,
@@ -71,7 +71,7 @@ aclnnStatus aclnnNorm(
 
 ## aclnnNormGetWorkspaceSize
 
-- **参数说明：**
+- **参数说明**
 
   <table style="undefined;table-layout: fixed; width: 1550px"><colgroup>
   <col style="width: 170px">
@@ -109,7 +109,7 @@ aclnnStatus aclnnNorm(
       <td>pScalar（aclScalar*）</td>
       <td>输入</td>
       <td>表示范数的类型，公式中的p。</td>
-      <td>支持0/1/2/3范数、无穷范数。</td>
+      <td>-</td>
       <td>FLOAT32</td>
       <td>-</td>
       <td>-</td>
@@ -136,23 +136,10 @@ aclnnStatus aclnnNorm(
       <td>-</td>
     </tr>
     <tr>
-      <td>relType（aclDataType）</td>
-      <td>输入</td>
-      <td>预留参数，暂不支持使用。</td>
-      <td>-</td>
-      <td>-</td>
-      <td>-</td>
-      <td>-</td>
-      <td>-</td>
-    </tr>
-    <tr>
       <td>out（aclTensor*）</td>
       <td>输出</td>
       <td>公式中的out。</td>
-      <td>
-        若keepdim为true，除dim指定维度上的size为1以外，其余维度的shape需要与self保持一致；<br>
-        若keepdim为false，reduce轴的维度不保留，其余维度shape需要与self一致。
-      </td>
+      <td><ul><li>若keepdim为true，除dim指定维度上的size为1以外，其余维度的shape需要与self保持一致。</li><li>若keepdim为false，reduce轴的维度不保留，其余维度shape需要与self一致。</li></ul></td>
       <td>
         FLOAT32、FLOAT16、BFLOAT16
       </td>
@@ -183,9 +170,7 @@ aclnnStatus aclnnNorm(
   </tbody>
   </table>
 
-  - <term>Atlas 推理系列产品</term>、<term>Atlas 训练系列产品</term>、<term>Atlas 200I/500 A2 推理产品</term>：数据类型不支持BFLOAT16。
-
-- **返回值**：
+- **返回值**
 
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
   
@@ -212,7 +197,7 @@ aclnnStatus aclnnNorm(
     <tr>
       <td rowspan="6">ACLNN_ERR_PARAM_INVALID</td>
       <td rowspan="6">161002</td>
-      <td>self的数据类型和数据格式不在支持的范围之内。</td>
+      <td>self的数据格式不在支持的范围之内。</td>
     </tr>
     <tr>
       <td>dim和keepdim的数据类型和数据格式不符合接口入参要求。</td>
@@ -233,7 +218,7 @@ aclnnStatus aclnnNorm(
 
 ## aclnnNorm
 
-- **参数说明：**
+- **参数说明**
 
   <table style="undefined;table-layout: fixed; width: 953px"><colgroup>
   <col style="width: 173px">
@@ -270,7 +255,7 @@ aclnnStatus aclnnNorm(
   </tbody>
   </table>
 
-- **返回值：**
+- **返回值**
 
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 
@@ -387,7 +372,7 @@ int main()
     dim = aclCreateIntArray(dimData.data(), 1);
     CHECK_RET(dim != nullptr, return ret);
 
-    // 3. 调用CANN算子库API，需要修改为具体的Api名称
+    // 3. 调用CANN算子库API，需要修改为具体的API名称
     uint64_t workspaceSize = 0;
     aclOpExecutor* executor;
     // 调用aclnnNorm第一段接口

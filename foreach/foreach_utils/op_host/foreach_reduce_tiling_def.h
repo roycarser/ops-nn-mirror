@@ -15,16 +15,16 @@
 
 #ifndef AIR_CXX_RUNTIME_V2_OP_IMPL_FOREACH_COMMON_REDUCE_DEF_H_
 #define AIR_CXX_RUNTIME_V2_OP_IMPL_FOREACH_COMMON_REDUCE_DEF_H_
-#include "tiling_base/tiling_util.h"
+#include "op_host/tiling_util.h"
 #include "register/tilingdata_base.h"
-#include "tiling_base/tiling_templates_registry.h"
+#include "op_host/tiling_templates_registry.h"
 #include "foreach_tiling_common.h"
 
 namespace optiling {
 constexpr uint16_t MAX_TENSOR_CONT = 256;
 constexpr uint16_t MAX_CORE_CONT = 64;
-constexpr uint16_t MAX_TENSOR_CONT_910D = 256;
-constexpr uint16_t MAX_CORE_CONT_910D = 80;
+constexpr uint16_t MAX_TENSOR_CONT_950 = 256;
+constexpr uint16_t MAX_CORE_CONT_950 = 80;
 struct ForeachNormCompileInfo {
     uint32_t coreNum;
 };
@@ -48,13 +48,13 @@ TILING_DATA_FIELD_DEF(uint32_t, needCoreNum);
 TILING_DATA_FIELD_DEF(uint32_t, totalTensorCount);
 TILING_DATA_FIELD_DEF(uint16_t, maxTensorNumPerCore);
 TILING_DATA_FIELD_DEF_ARR(uint64_t, MAX_TENSOR_CONT, tensorDataCountList);
-TILING_DATA_FIELD_DEF_ARR(uint16_t, MAX_CORE_CONT_910D, tensorStartList);
-TILING_DATA_FIELD_DEF_ARR(uint16_t, MAX_CORE_CONT_910D, tensorEndList);
-TILING_DATA_FIELD_DEF_ARR(uint64_t, MAX_CORE_CONT_910D, tensorStartOffsetList);
-TILING_DATA_FIELD_DEF_ARR(uint64_t, MAX_CORE_CONT_910D, tensorEndOffsetList);
+TILING_DATA_FIELD_DEF_ARR(uint16_t, MAX_CORE_CONT_950, tensorStartList);
+TILING_DATA_FIELD_DEF_ARR(uint16_t, MAX_CORE_CONT_950, tensorEndList);
+TILING_DATA_FIELD_DEF_ARR(uint64_t, MAX_CORE_CONT_950, tensorStartOffsetList);
+TILING_DATA_FIELD_DEF_ARR(uint64_t, MAX_CORE_CONT_950, tensorEndOffsetList);
 TILING_DATA_FIELD_DEF_ARR(uint16_t, MAX_TENSOR_CONT, tensorMiddleCountList);
 TILING_DATA_FIELD_DEF_ARR(uint16_t, MAX_TENSOR_CONT, tensorMiddleStartList);
-TILING_DATA_FIELD_DEF_ARR(uint16_t, MAX_CORE_CONT_910D, coreMiddleOffsetList);
+TILING_DATA_FIELD_DEF_ARR(uint16_t, MAX_CORE_CONT_950, coreMiddleOffsetList);
 END_TILING_DATA_DEF;
 
 #define REDUCE_MEMBASE_TILING(OP_NAME)                                                            \

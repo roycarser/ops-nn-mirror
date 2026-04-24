@@ -254,7 +254,7 @@ __aicore__ inline void ReduceKInUb(GM_ADDR cGM, GM_ADDR mmGM, uint64_t coreSize,
             pingpongEventIdWS = 1;
             gmSrc = gmSrcPong;
         }
-#if defined(__DAV_C310__)
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
         WaitEvent<PIPE_S>(AIC_SYNC_AIV_FLAG + pingpongEventIdWS);
 #elif defined(__CCE_AICORE__) && __CCE_AICORE__ == 220
         WaitEvent(AIC_SYNC_AIV_FLAG + pingpongEventIdWS);
@@ -388,7 +388,7 @@ __aicore__ inline void ReduceKNzInUb(GM_ADDR cGM, GM_ADDR mmGM, uint64_t coreSiz
             pingpongEventIdWS = 1;
             gmSrc = gmSrcPong;
         }
-#if defined(__DAV_C310__)
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
         WaitEvent<PIPE_S>(AIC_SYNC_AIV_FLAG + pingpongEventIdWS);
 #elif defined(__CCE_AICORE__) && __CCE_AICORE__ == 220
         WaitEvent(AIC_SYNC_AIV_FLAG + pingpongEventIdWS);
@@ -507,9 +507,9 @@ __aicore__ inline void MatMulMultiCoreSplitKDivide(GM_ADDR aGM, GM_ADDR bGM, GM_
     constexpr static MatmulQuantParams quantParams = {false, false};
     constexpr static MatmulBatchParams batchParams = {false, BatchMode::NONE};
     constexpr static MatmulFuncParams funcParamsMK{false, false, false, false, 2, IterateOrder::UNDEF,
-        ScheduleType::INNER_PRODUCT, true, true}; // 2 preload左矩阵
+        ScheduleType::INNER_PRODUCT, true, true}; // 2 N方向preload
     constexpr static MatmulFuncParams funcParamsNK{false, false, false, false, 1, IterateOrder::UNDEF,
-        ScheduleType::INNER_PRODUCT, true, true}; // 1 preload右矩阵
+        ScheduleType::INNER_PRODUCT, true, true}; // 1 M方向preload
     constexpr MatmulConfig mmStaticConfigMK = GetMMConfig<configMode>(shapeParams, quantParams, batchParams, funcParamsMK);
     constexpr MatmulConfig mmStaticConfigNK = GetMMConfig<configMode>(shapeParams, quantParams, batchParams, funcParamsNK);
     constexpr static MatmulApiStaticTiling staticTilingMK =
@@ -610,7 +610,7 @@ __aicore__ inline void MatMulMultiCoreSplitKDivide(GM_ADDR aGM, GM_ADDR bGM, GM_
             cGlobal = cGlobalPong;
         }
         if (outIndex > 1) {
-#if defined(__DAV_C310__)
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
             WaitEvent<PIPE_S>(AIV_SYNC_AIC_FLAG + pingpongEventId);
             WaitEvent<PIPE_S>(AIV_SYNC_AIC_FLAG + pingpongEventId + FLAG_ID_MAX);
 #elif defined(__CCE_AICORE__) && __CCE_AICORE__ == 220
@@ -669,7 +669,7 @@ __aicore__ inline void MatMulMultiCoreSplitKDivide(GM_ADDR aGM, GM_ADDR bGM, GM_
                 }
             }
         }
-#if defined(__DAV_C310__)
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
         NotifyEvent<PIPE_FIX>(AIC_SYNC_AIV_FLAG + pingpongEventId + FLAG_ID_MAX);
         NotifyEvent<PIPE_FIX>(AIC_SYNC_AIV_FLAG + pingpongEventId);
 #elif defined(__CCE_AICORE__) && __CCE_AICORE__ == 220
@@ -841,7 +841,7 @@ __aicore__ inline void ReduceKInUbNzL2cache(GM_ADDR cGM, GM_ADDR mmGM, uint64_t 
             pingpongEventIdWS = (pingpongEventIdWS + 1) & 1;
             gmSrc = pingpongEventIdWS ? gmSrcPong : gmSrcPing;
 
-#if defined(__DAV_C310__)
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
             WaitEvent<PIPE_S>(AIC_SYNC_AIV_FLAG + pingpongEventIdWS);
 #elif defined(__CCE_AICORE__) && __CCE_AICORE__ == 220
             CrossCoreWaitFlag(AIC_SYNC_AIV_FLAG + pingpongEventIdWS);
@@ -982,7 +982,7 @@ __aicore__ inline void ReduceKInUbL2cache(GM_ADDR cGM, GM_ADDR mmGM, uint64_t co
             pingpongEventIdWS = (pingpongEventIdWS + 1) & 1;
             gmSrc = pingpongEventIdWS ? gmSrcPong : gmSrcPing;
 
-#if defined(__DAV_C310__)
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
             WaitEvent<PIPE_S>(AIC_SYNC_AIV_FLAG + pingpongEventIdWS);
 #elif defined(__CCE_AICORE__) && __CCE_AICORE__ == 220
             CrossCoreWaitFlag(AIC_SYNC_AIV_FLAG + pingpongEventIdWS);
@@ -1105,9 +1105,9 @@ __aicore__ inline void MatMulMultiCoreSplitKDivideL2cache(GM_ADDR aGM, GM_ADDR b
     constexpr static MatmulQuantParams quantParams = {false, false};
     constexpr static MatmulBatchParams batchParams = {false, BatchMode::NONE};
     constexpr static MatmulFuncParams funcParamsMK{false, false, false, false, 2, IterateOrder::UNDEF,
-        ScheduleType::INNER_PRODUCT, true, true}; // 2 preload左矩阵
+        ScheduleType::INNER_PRODUCT, true, true}; // 2 N方向preload
     constexpr static MatmulFuncParams funcParamsNK{false, false, false, false, 1, IterateOrder::UNDEF,
-        ScheduleType::INNER_PRODUCT, true, true}; // 1 preload右矩阵
+        ScheduleType::INNER_PRODUCT, true, true}; // 1 M方向preload
     constexpr MatmulConfig mmStaticConfigMK = GetMMConfig<configMode>(shapeParams, quantParams, batchParams, funcParamsMK);
     constexpr MatmulConfig mmStaticConfigNK = GetMMConfig<configMode>(shapeParams, quantParams, batchParams, funcParamsNK);
     constexpr static MatmulApiStaticTiling staticTilingMK =
@@ -1242,7 +1242,7 @@ __aicore__ inline void MatMulMultiCoreSplitKDivideL2cache(GM_ADDR aGM, GM_ADDR b
                 nOffset = inIndex * tiling.singleCoreN; // 如果是NK就需要对mOffset重新计算
             }
             if (count > 1){
-#if defined(__DAV_C310__)
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
             WaitEvent<PIPE_S>(AIV_SYNC_AIC_FLAG + pingpongEventId);
             WaitEvent<PIPE_S>(AIV_SYNC_AIC_FLAG + pingpongEventId + FLAG_ID_MAX);
 #elif defined(__CCE_AICORE__) && __CCE_AICORE__ == 220
@@ -1275,7 +1275,7 @@ __aicore__ inline void MatMulMultiCoreSplitKDivideL2cache(GM_ADDR aGM, GM_ADDR b
                     mmMN.IterateAll(cGlobal[offsetC], kIndex != index);
                 }
             }
-#if defined(__DAV_C310__)
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
             NotifyEvent<PIPE_FIX>(AIC_SYNC_AIV_FLAG + pingpongEventId + FLAG_ID_MAX);
             NotifyEvent<PIPE_FIX>(AIC_SYNC_AIV_FLAG + pingpongEventId);
 #elif defined(__CCE_AICORE__) && __CCE_AICORE__ == 220
@@ -1371,7 +1371,7 @@ __aicore__ inline void MatMulKernelDeterministicSplitK(GM_ADDR aGM, GM_ADDR bGM,
 
     if ASCEND_IS_AIC {
         if (GetBlockIdx() >= tiling.usedCoreNum) {
-#if defined(__DAV_C310__)
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
             NotifyEvent<PIPE_FIX>(AIC_SYNC_AIV_FLAG + FLAG_ID_MAX);
             NotifyEvent<PIPE_FIX>(AIC_SYNC_AIV_FLAG);
 #elif defined(__CCE_AICORE__) && __CCE_AICORE__ == 220
@@ -1382,51 +1382,51 @@ __aicore__ inline void MatMulKernelDeterministicSplitK(GM_ADDR aGM, GM_ADDR bGM,
         }
         GM_ADDR mmOffsetGM = reinterpret_cast<GM_ADDR>(mmGM + GetBlockIdx() * singleSize * NUM_TWO * sizeof(float));
         using cType = MatmulType<C_TYPE::pos, C_TYPE::format, float, C_TYPE::isTrans>;
-        if (isL2cacheSplit) {
-            if (!matmulTilingData.matmulRunInfo.isNzA && !matmulTilingData.matmulRunInfo.isNzB) {
-                MatMulMultiCoreSplitKDivideL2cache<A_TYPE, B_TYPE, cType, BIAS_TYPE>(aGM, bGM, biasGM, mmOffsetGM, singleSize,
-                                                                    matmulTilingData.matmulRunInfo.isHf32,
-                                                                    &que, tiling, tiling.isBias);
-            } else if (matmulTilingData.matmulRunInfo.isNzA && !matmulTilingData.matmulRunInfo.isNzB) {
-                using aType = MatmulType<A_TYPE::pos, CubeFormat::NZ, typename A_TYPE::T, A_TYPE::isTrans>;
-                MatMulMultiCoreSplitKDivideL2cache<aType, B_TYPE, cType, BIAS_TYPE>(aGM, bGM, biasGM, mmOffsetGM, singleSize,
-                                                                    matmulTilingData.matmulRunInfo.isHf32,
-                                                                    &que, tiling, tiling.isBias);
-            } else if (!matmulTilingData.matmulRunInfo.isNzA && matmulTilingData.matmulRunInfo.isNzB) {
-                using bType = MatmulType<B_TYPE::pos, CubeFormat::NZ, typename B_TYPE::T, B_TYPE::isTrans>;
-                MatMulMultiCoreSplitKDivideL2cache<A_TYPE, bType, cType, BIAS_TYPE>(aGM, bGM, biasGM, mmOffsetGM, singleSize,
-                                                                    matmulTilingData.matmulRunInfo.isHf32,
-                                                                    &que, tiling, tiling.isBias);
-            } else {
-                using aType = MatmulType<A_TYPE::pos, CubeFormat::NZ, typename A_TYPE::T, A_TYPE::isTrans>;
-                using bType = MatmulType<B_TYPE::pos, CubeFormat::NZ, typename B_TYPE::T, B_TYPE::isTrans>;
-                MatMulMultiCoreSplitKDivideL2cache<aType, bType, cType, BIAS_TYPE>(aGM, bGM, biasGM, mmOffsetGM, singleSize,
-                                                                    matmulTilingData.matmulRunInfo.isHf32,
-                                                                    &que, tiling, tiling.isBias);
-            }
+        if (isL2cacheSplit) {	 
+            if (!matmulTilingData.matmulRunInfo.isNzA && !matmulTilingData.matmulRunInfo.isNzB) {	 
+                MatMulMultiCoreSplitKDivideL2cache<A_TYPE, B_TYPE, cType, BIAS_TYPE>(aGM, bGM, biasGM, mmOffsetGM, singleSize,	 
+                                                                    matmulTilingData.matmulRunInfo.isHf32,	 
+                                                                    &que, tiling, tiling.isBias); 
+            } else if (matmulTilingData.matmulRunInfo.isNzA && !matmulTilingData.matmulRunInfo.isNzB) { 
+                using aType = MatmulType<A_TYPE::pos, CubeFormat::NZ, typename A_TYPE::T, A_TYPE::isTrans>; 
+                MatMulMultiCoreSplitKDivideL2cache<aType, B_TYPE, cType, BIAS_TYPE>(aGM, bGM, biasGM, mmOffsetGM, singleSize, 
+                                                                    matmulTilingData.matmulRunInfo.isHf32, 
+                                                                    &que, tiling, tiling.isBias); 
+            } else if (!matmulTilingData.matmulRunInfo.isNzA && matmulTilingData.matmulRunInfo.isNzB) { 
+                using bType = MatmulType<B_TYPE::pos, CubeFormat::NZ, typename B_TYPE::T, B_TYPE::isTrans>; 
+                MatMulMultiCoreSplitKDivideL2cache<A_TYPE, bType, cType, BIAS_TYPE>(aGM, bGM, biasGM, mmOffsetGM, singleSize, 
+                                                                    matmulTilingData.matmulRunInfo.isHf32, 
+                                                                    &que, tiling, tiling.isBias); 
+            } else { 
+                using aType = MatmulType<A_TYPE::pos, CubeFormat::NZ, typename A_TYPE::T, A_TYPE::isTrans>; 
+                using bType = MatmulType<B_TYPE::pos, CubeFormat::NZ, typename B_TYPE::T, B_TYPE::isTrans>; 
+                MatMulMultiCoreSplitKDivideL2cache<aType, bType, cType, BIAS_TYPE>(aGM, bGM, biasGM, mmOffsetGM, singleSize, 
+                                                                    matmulTilingData.matmulRunInfo.isHf32, 
+                                                                    &que, tiling, tiling.isBias); 
+            } 
         } else {
-            if (!matmulTilingData.matmulRunInfo.isNzA && !matmulTilingData.matmulRunInfo.isNzB) {
-                MatMulMultiCoreSplitKDivide<A_TYPE, B_TYPE, cType, BIAS_TYPE>(aGM, bGM, biasGM, mmOffsetGM, singleSize,
-                                                                    matmulTilingData.matmulRunInfo.isHf32,
-                                                                    &que, tiling, tiling.isBias);
-            } else if (matmulTilingData.matmulRunInfo.isNzA && !matmulTilingData.matmulRunInfo.isNzB) {
-                using aType = MatmulType<A_TYPE::pos, CubeFormat::NZ, typename A_TYPE::T, A_TYPE::isTrans>;
-                MatMulMultiCoreSplitKDivide<aType, B_TYPE, cType, BIAS_TYPE>(aGM, bGM, biasGM, mmOffsetGM, singleSize,
-                                                                    matmulTilingData.matmulRunInfo.isHf32,
-                                                                    &que, tiling, tiling.isBias);
-            } else if (!matmulTilingData.matmulRunInfo.isNzA && matmulTilingData.matmulRunInfo.isNzB) {
-                using bType = MatmulType<B_TYPE::pos, CubeFormat::NZ, typename B_TYPE::T, B_TYPE::isTrans>;
-                MatMulMultiCoreSplitKDivide<A_TYPE, bType, cType, BIAS_TYPE>(aGM, bGM, biasGM, mmOffsetGM, singleSize,
-                                                                    matmulTilingData.matmulRunInfo.isHf32,
-                                                                    &que, tiling, tiling.isBias);
-            } else {
-                using aType = MatmulType<A_TYPE::pos, CubeFormat::NZ, typename A_TYPE::T, A_TYPE::isTrans>;
-                using bType = MatmulType<B_TYPE::pos, CubeFormat::NZ, typename B_TYPE::T, B_TYPE::isTrans>;
-                MatMulMultiCoreSplitKDivide<aType, bType, cType, BIAS_TYPE>(aGM, bGM, biasGM, mmOffsetGM, singleSize,
-                                                                    matmulTilingData.matmulRunInfo.isHf32,
-                                                                    &que, tiling, tiling.isBias);
-            }
-        }
+        if (!matmulTilingData.matmulRunInfo.isNzA && !matmulTilingData.matmulRunInfo.isNzB) {	 
+                MatMulMultiCoreSplitKDivide<A_TYPE, B_TYPE, cType, BIAS_TYPE>(aGM, bGM, biasGM, mmOffsetGM, singleSize,	 
+                                                                    matmulTilingData.matmulRunInfo.isHf32,	 
+                                                                    &que, tiling, tiling.isBias); 
+            } else if (matmulTilingData.matmulRunInfo.isNzA && !matmulTilingData.matmulRunInfo.isNzB) { 
+                using aType = MatmulType<A_TYPE::pos, CubeFormat::NZ, typename A_TYPE::T, A_TYPE::isTrans>; 
+                MatMulMultiCoreSplitKDivide<aType, B_TYPE, cType, BIAS_TYPE>(aGM, bGM, biasGM, mmOffsetGM, singleSize, 
+                                                                    matmulTilingData.matmulRunInfo.isHf32, 
+                                                                    &que, tiling, tiling.isBias); 
+            } else if (!matmulTilingData.matmulRunInfo.isNzA && matmulTilingData.matmulRunInfo.isNzB) { 
+                using bType = MatmulType<B_TYPE::pos, CubeFormat::NZ, typename B_TYPE::T, B_TYPE::isTrans>; 
+                MatMulMultiCoreSplitKDivide<A_TYPE, bType, cType, BIAS_TYPE>(aGM, bGM, biasGM, mmOffsetGM, singleSize, 
+                                                                    matmulTilingData.matmulRunInfo.isHf32, 
+                                                                    &que, tiling, tiling.isBias); 
+            } else { 
+                using aType = MatmulType<A_TYPE::pos, CubeFormat::NZ, typename A_TYPE::T, A_TYPE::isTrans>; 
+                using bType = MatmulType<B_TYPE::pos, CubeFormat::NZ, typename B_TYPE::T, B_TYPE::isTrans>; 
+                MatMulMultiCoreSplitKDivide<aType, bType, cType, BIAS_TYPE>(aGM, bGM, biasGM, mmOffsetGM, singleSize, 
+                                                                    matmulTilingData.matmulRunInfo.isHf32, 
+                                                                    &que, tiling, tiling.isBias); 
+            } 
+        }	 
         return;
     }
 }

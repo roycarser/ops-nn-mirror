@@ -13,8 +13,8 @@
  * \brief
  */
 
-#ifndef INCLUDE_COMMON_FUNC_H
-#define INCLUDE_COMMON_FUNC_H
+#ifndef INCLUDE_KERNEL_UTILS_COMMON_FUNC_H
+#define INCLUDE_KERNEL_UTILS_COMMON_FUNC_H
 
 #include <limits>
 #include <type_traits>
@@ -23,7 +23,7 @@
 #include "stub_def.h"
 #include "stub_fun.h"
 #else
-#include "kernel_macros.h"
+#include "kernel_operator_atomic_intf.h"
 #endif
 namespace PpMatMulNS {
 template <uint32_t ALIGN, typename T = uint32_t>

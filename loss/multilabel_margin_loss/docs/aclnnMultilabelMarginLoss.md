@@ -50,6 +50,7 @@ self为输入，shape为(N,C)或者(C)，其中N表示batch size，C表示类别
   $$
 
 ## 函数原型
+
 每个算子分为[两段式接口](../../../docs/zh/context/两段式接口.md)，必须先调用“aclnnMultilabelMarginLossGetWorkspaceSize”接口获取计算所需workspace大小以及包含了算子计算流程的执行器，再调用“aclnnMultilabelMarginLoss”接口执行计算。
 
 ```Cpp
@@ -75,16 +76,15 @@ aclnnStatus aclnnMultilabelMarginLoss(
 
 - **参数说明**
 
-  </style>
-  <table class="tg" style="undefined;table-layout: fixed; width: 1215px"><colgroup>
-  <col style="width: 194px">
-  <col style="width: 87px">
-  <col style="width: 253px">
-  <col style="width: 234px">
-  <col style="width: 118px">
-  <col style="width: 113px">
-  <col style="width: 108px">
-  <col style="width: 108px">
+  <table class="tg" style="undefined;table-layout: fixed; width: 1475px"><colgroup>
+  <col style="width: 205px">
+  <col style="width: 120px">
+  <col style="width: 320px">
+  <col style="width: 320px">
+  <col style="width: 130px">
+  <col style="width: 115px">
+  <col style="width: 120px">
+  <col style="width: 145px">
   </colgroup>
   <thead>
     <tr>
@@ -111,7 +111,7 @@ aclnnStatus aclnnMultilabelMarginLoss(
     <tr>
       <td class="tg-0pky">target（aclTensor*）</td>
       <td class="tg-0pky">输入</td>
-      <td class="tg-0pky">真是标签，公式中的输入y。</td>
+      <td class="tg-0pky">真实标签，公式中的输入y。</td>
       <td class="tg-0pky">shape为(N，C) 或者(C)，其中每个元素的取值范围是[-1, C - 1]，用-1填充，即首个-1之前的标签代表样本所属真实标签。</td>
       <td class="tg-0pky">INT32、INT64</td>
       <td class="tg-0pky">ND</td>
@@ -132,7 +132,7 @@ aclnnStatus aclnnMultilabelMarginLoss(
       <td class="tg-0lax">out（aclTensor*）</td>
       <td class="tg-0lax">输出</td>
       <td class="tg-0lax">输出的loss，公式中的ℓ(x,y)。</td>
-      <td class="tg-0lax">shape(N)为或者()</td>
+      <td class="tg-0lax">shape为(N)为或者()</td>
       <td class="tg-0lax">与self、isTarget保持一致</td>
       <td class="tg-0lax">ND</td>
       <td class="tg-0lax">0、1</td>
@@ -175,11 +175,11 @@ aclnnStatus aclnnMultilabelMarginLoss(
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 
   第一段接口完成入参校验，出现以下场景时报错：
-  </style>
-  <table class="tg" style="undefined;table-layout: fixed; width: 991px"><colgroup>
+
+  <table class="tg" style="undefined;table-layout: fixed; width: 1150px"><colgroup>
   <col style="width: 269px">
-  <col style="width: 90px">
-  <col style="width: 632px">
+  <col style="width: 120px">
+  <col style="width: 761px">
   </colgroup>
   <thead>
     <tr>
@@ -217,10 +217,10 @@ aclnnStatus aclnnMultilabelMarginLoss(
 
 - **参数说明：**
 
-    <table style="undefined;table-layout: fixed; width: 1244px"><colgroup>
-      <col style="width: 200px">
-      <col style="width: 162px">
-      <col style="width: 882px">
+  <table style="undefined;table-layout: fixed; width: 1151px"><colgroup>
+  <col style="width: 184px">
+  <col style="width: 134px">
+  <col style="width: 833px">
       </colgroup>
       <thead>
         <tr>
@@ -237,7 +237,7 @@ aclnnStatus aclnnMultilabelMarginLoss(
         <tr>
           <td>workspaceSize</td>
           <td>输入</td>
-          <td>在Device侧申请的workspace大小，由第一段接口aclnnBinaryCrossEntropyGetWorkspaceSize获取。</td>
+          <td>在Device侧申请的workspace大小，由第一段接口aclnnMultilabelMarginLossGetWorkspaceSize获取。</td>
         </tr>
         <tr>
           <td>executor</td>
@@ -424,4 +424,3 @@ int main() {
   return 0;
 }
 ```
-

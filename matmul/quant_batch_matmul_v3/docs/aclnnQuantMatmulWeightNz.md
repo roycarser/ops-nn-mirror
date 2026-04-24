@@ -13,13 +13,14 @@
 
 ## 功能说明
 
-- 接口功能：完成量化的矩阵乘计算。相似接口有aclnnMm（仅支持2维Tensor作为输入的矩阵乘）和aclnnBatchMatMul（仅支持三维的矩阵乘，其中第一维是Batch维度）。支持T-C、T-T、K-C、K-T、mx[量化模式](../../../docs/zh/context/量化介绍.md)。
+- 接口功能：完成量化的矩阵乘计算。相似接口有aclnnMm（仅支持2维Tensor作为输入的矩阵乘）和aclnnBatchMatMul（仅支持三维的矩阵乘，其中第一维是Batch维度）。支持T-C、T-T、K-C、K-T、mx [量化模式](../../../docs/zh/context/量化介绍.md)。
 
 - 计算公式：
+
     <details>
     <summary><term>Atlas 推理系列产品</term>、<term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>、<term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>、<term>Ascend 950PR/Ascend 950DT</term></summary>
 
-    - 无x1Scale无bias：
+    - 无x1Scale、无bias：
 
     $$
     out = x1@x2 * x2Scale + x2Offset
@@ -30,6 +31,19 @@
     $$
     out = (x1@x2 + bias) * x2Scale + x2Offset
     $$
+
+    - 有x1Scale无bias
+
+    $$
+    out = x1@x2 * x2Scale * x1Scale
+    $$
+
+    - 有x1Scale，bias INT32
+
+    $$
+    out = (x1@x2 + bias) * x2Scale * x1Scale
+    $$
+
     </details>
 
     <details>
@@ -41,23 +55,30 @@
     out = x1@x2 * x2Scale + bias
     $$
 
-    - x1Scale无bias：
+    - x1Scale、无bias：
 
     $$
     out = x1@x2 * x2Scale * x1Scale
     $$
 
-    - x1Scale， bias INT32(此场景无x2Offset)：
+    - x1Scale、bias INT32（此场景无x2Offset）：
 
     $$
     out = (x1@x2 + bias) * x2Scale * x1Scale
     $$
 
-    - x1Scale， bias BFLOAT16/FLOAT16/FLOAT32（此场景无x2Offset）：
+    - x1Scale、bias BFLOAT16/FLOAT16/FLOAT32（此场景无x2Offset）：
 
     $$
     out = x1@x2 * x2Scale * x1Scale + bias
     $$
+
+    - x1为INT8，x2为INT32，x1Scale为FLOAT32，x2Scale为UINT64，yOffset为FLOAT32：
+
+    $$
+    out = ((x1 @ (x2*x2Scale)) + yOffset) * x1Scale
+    $$
+
     </details>
 
     <details>
@@ -69,9 +90,8 @@
         out[m,n] = \sum_{j=0}^{kLoops-1} ((\sum_{k=0}^{gsK-1} (x1Slice * x2Slice))* (x1Scale[m/gsM, j] * x2Scale[j, n/gsN]))+bias[n]
         $$
         
-        其中，gsM，gsN和gsK分别代表groupSizeM，groupSizeN和groupSizeK；x1Slice代表x1第m行长度为groupSizeK的向量，x2Slice代表x2第n列长度为groupSizeK的向量；K轴均从j*groupSizeK起始切片，j的取值范围[0, kLoops], kLoops = ceil(K / groupSizeK)，K为K轴长度，支持最后的切片长度不足groupSizeK。
+        其中，gsM，gsN和gsK分别代表groupSizeM，groupSizeN和groupSizeK；x1Slice代表x1第m行长度为groupSizeK的向量，x2Slice代表x2第n列长度为groupSizeK的向量；K轴均从j*groupSizeK起始切片，j的取值范围为[0, kLoops)，kLoops = ceil(K / groupSizeK)，K为K轴长度，支持最后的切片长度不足groupSizeK。
     </details>
-
 
 ## 函数原型
 
@@ -107,7 +127,7 @@ aclnnStatus aclnnQuantMatmulWeightNz(
 ## aclnnQuantMatmulWeightNzGetWorkspaceSize
 
 - **参数说明：**
-  <table style="undefined;table-layout: fixed; width: 1552px"><colgroup>
+  <table style="table-layout: fixed; width: 1552px"><colgroup>
   <col style="width: 198px">
   <col style="width: 121px">
   <col style="width: 220px">
@@ -140,7 +160,7 @@ aclnnStatus aclnnQuantMatmulWeightNz(
               <li>在transposeX1为true情况下各个维度表示：(batch, k, m)，batch可不存在。</li>
           </ul>
         </td>
-        <td>INT4<sup>1、3</sup>、INT8、FLOAT8_E4M3FN<sup>1、2</sup></td>
+        <td>INT4<sup>1、3</sup>、INT8、FLOAT8_E4M3FN<sup>1、2</sup>、FLOAT4_E2M1<sup>1、2</sup></td>
         <td>ND</td>
         <td>2-6</td>
         <td>✓</td>
@@ -153,13 +173,13 @@ aclnnStatus aclnnQuantMatmulWeightNz(
           <ul>
               <li>在transposeX2为true情况下各个维度表示：(batch, k1, n1, n0, k0)，batch可不存在，k0 = 32， n0 = 16。</li>
               <li>在transposeX2为false情况下各个维度表示：(batch, n1, k1, k0, n0)，batch可不存在，k0 = 16， n0 = 32。</li>
-              <li>x1 shape中的k和x2 shape中的k1需要满足ceil(k / k0) = k1, </br>x2 shape中的n1与out的n需要满足ceil(n / n0) = n1。</li>
+              <li>x1 shape中的k和x2 shape中的k1需要满足ceil(k / k0) = k1，<br>x2 shape中的n1与out的n需要满足ceil(n / n0) = n1。</li>
           </ul>
         </td>
-        <td>INT4<sup>1、3</sup>、INT8、FLOAT4_E2M1<sup>1、2</sup>、FLOAT32<sup>1、2</sup>、FLOAT8_E4M3FN<sup>1、2</sup></td>
+        <td>INT4<sup>1、3</sup>、INT8、INT32<sup>1、3</sup>、FLOAT4_E2M1<sup>1、2</sup>、FLOAT32<sup>1、2</sup>、FLOAT8_E4M3FN<sup>1、2</sup></td>
         <td>NZ</td>
         <td>4-8</td>
-        <td>✓</td>
+        <td>-</td>
     </tr>
     <tr>
         <td>x1Scale</td>
@@ -167,8 +187,8 @@ aclnnStatus aclnnQuantMatmulWeightNz(
         <td>可选的量化参数，公式中的输入x1Scale。</td>
         <td>
           <ul>     
-              <li>x1Scale是FLOAT8_E8M0时，x2Scale为3维，各个维度表示：transposeX1为false时为(m, ceil(k / 64), 2)，transposeX1为true时为(ceil(k / 64), m, 2)。</li>
-              <li>x1Scale时FLOAT32时，shape是1维(t, )，t = m，其中m与x1的m一致。</li>
+              <li>x1Scale是FLOAT8_E8M0时，x1Scale为3维，各个维度表示：transposeX1为false时为(m, ceil(k / 64), 2)，transposeX1为true时为(ceil(k / 64), m, 2)。</li>
+              <li>x1Scale是FLOAT32时，shape是1维(t, )，t = m，其中m与x1的m一致。</li>
           </ul>
         </td>
         <td>FLOAT32<sup>1</sup>、FLOAT8_E8M0<sup>1、2</sup></td>
@@ -183,11 +203,11 @@ aclnnStatus aclnnQuantMatmulWeightNz(
         <td>
           <ul>     
               <li>x2Scale是FLOAT8_E8M0时，x2Scale为3维，各个维度表示：transposeX2为false时为(ceil(k / 64), n, 2)，transposeX2为true时为(n, ceil(k / 64), 2)。</li>
-              <li>x2Scale是其他dtype时。shape是1维(t, )，t = 1或n，其中n与x2的n一致。</li>
+              <li>x2Scale是其他 dtype 时，shape是1维(t, )，t = 1或n，其中n与x2的n一致。</li>
               <li>当原始输入类型不满足<a href="#约束说明">约束说明</a>中组合时，需提前调用TransQuantParamV2算子的aclnn接口来将scale转成INT64、UINT64数据类型。</li>
           </ul>
         </td>
-        <td>UINT64、INT64、FLOAT32<sup>1</sup>、BFLOAT16<sup>1</sup>、FLOAT8_E8M0<sup>1、2</sup></td>
+        <td>UINT64、INT64、FLOAT32<sup>1</sup>、BFLOAT16<sup>1</sup>、FLOAT8_E8M0<sup>1、2</sup>、FLOAT16<sup>1、2</sup></td>
         <td>ND</td>
         <td>1、3</td>
         <td>-</td>
@@ -209,7 +229,7 @@ aclnnStatus aclnnQuantMatmulWeightNz(
         <td>输入</td>
         <td>预留参数。</td>
         <td>
-            当前版本不支持，需要传入nullptr或者空tensor。
+            当前版本不支持，需要传入nullptr或空tensor。
         </td>
         <td>-</td>
         <td>-</td>
@@ -231,16 +251,13 @@ aclnnStatus aclnnQuantMatmulWeightNz(
     <tr>
         <td>yOffset</td>
         <td>输入</td>
-        <td>预留参数。</td>
-        <td>
-            当前版本不支持，需要传入nullptr或者空tensor。
-        </td>
+        <td>公式中的输入yOffset。</td>
         <td>-</td>
-        <td>-</td>
-        <td>-</td>
+        <td>FLOAT32</td>
+        <td>ND</td>
+        <td>1</td>
         <td>-</td>
     </tr>
-    <tr>
     <tr>
         <td>bias</td>
         <td>输入</td>
@@ -337,8 +354,7 @@ aclnnStatus aclnnQuantMatmulWeightNz(
 
     - 上表数据类型列中的角标“1”代表该系列不支持的数据类型。
     - x2不支持[非连续的Tensor](../../../docs/zh/context/非连续的Tensor.md)。
-    - 不支持x1Scale。
-    - 不支持yScale
+    - 不支持yScale。
     - 不支持groupSize，groupSize传0。
     </details>
 
@@ -361,17 +377,16 @@ aclnnStatus aclnnQuantMatmulWeightNz(
     - 支持groupSize传非0。
     </details>
 
-
 - **返回值：**
 
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 
     第一段接口完成入参校验，出现以下场景时报错：
 
-    <table style="undefined;table-layout: fixed; width: 1030px"><colgroup>
-    <col style="width: 262px">
-    <col style="width: 121px">
-    <col style="width: 819px">
+    <table style="table-layout: fixed; width: 1149px"><colgroup>
+    <col style="width: 291px">
+    <col style="width: 135px">
+    <col style="width: 723px">
     </colgroup>
     <thead>
     <tr>
@@ -388,7 +403,7 @@ aclnnStatus aclnnQuantMatmulWeightNz(
     <tr>
       <td rowspan="6">ACLNN_ERR_PARAM_INVALID</td>
       <td rowspan="6">161002</td>
-      <td> x1、x2、bias、x2Scale、x2Offset或out的数据类型和数据格式不在支持的范围之内。</td>
+      <td>x1、x2、bias、x2Scale、x2Offset或out的数据类型和数据格式不在支持的范围之内。</td>
     </tr>
     <tr>
         <td>x1、x2、bias、x2Scale、x2Offset或out的shape不满足校验条件。</td>
@@ -408,15 +423,14 @@ aclnnStatus aclnnQuantMatmulWeightNz(
     </tbody>
     </table>
 
-
 ## aclnnQuantMatmulWeightNz
 
 - **参数说明：**
 
-  <table style="undefined;table-layout: fixed; width: 1030px"><colgroup>
-    <col style="width: 153px">
-    <col style="width: 121px">
-    <col style="width: 880px">
+    <table style="table-layout: fixed; width: 1151px"><colgroup>
+    <col style="width: 184px">
+    <col style="width: 134px">
+    <col style="width: 833px">
     </colgroup>
     <thead>
       <tr>
@@ -452,6 +466,7 @@ aclnnStatus aclnnQuantMatmulWeightNz(
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 
 ## 约束说明
+
 - 确定性说明：
   - aclnnQuantMatmulWeightNz默认确定性实现。
 
@@ -462,19 +477,25 @@ aclnnStatus aclnnQuantMatmulWeightNz(
 
   - 输入和输出支持以下数据类型组合：
 
-    | x1   | x2   | x1Scale      | x2Scale          | x2Offset      | bias                        | out      |
-    | ---- | ---- | ------------ | ---------------- | ------------- | --------------------------- | -------- |
-    | INT8 | INT8 | null         | UINT64/INT64     | null          | null/INT32                  | FLOAT16  |
-    | INT8 | INT8 | null         | UINT64/INT64     | null/FLOAT32  | null/INT32                  | INT8     |
-    | INT8 | INT8 | null/FLOAT32 | FLOAT32/BFLOAT16 | null          | null/INT32/BFLOAT16/FLOAT32 | BFLOAT16 |
-    | INT8 | INT8 | FLOAT32      | FLOAT32          | null          | null/INT32/FLOAT16/FLOAT32  | FLOAT16  |
-    | INT8 | INT8 | null         | FLOAT32/BFLOAT16 | null          | null/INT32                  | INT32    |
-    | INT4 | INT4 | null/FLOAT32 | BFLOAT16         | null/FLOAT32  | null/BFLOAT16               | BFLOAT16 |
-    | INT4 | INT4 | null/FLOAT32 | FLOAT32          | null/FLOAT32  | null/BFLOAT16               | BFLOAT16 |
- 	| INT4 | INT4 | null/FLOAT32 | UINT64           | null/FLOAT32  | null/INT32                  | FLOAT16  |
- 	| INT4 | INT4 | null/FLOAT32 | FLOAT32          | null/FLOAT32  | null/INT32                  | FLOAT16  |
+  | x1   | x2    | x1Scale      | x2Scale          | x2Offset      | yOffset | bias                        | out               |
+  | ---- | ----- | ------------ | ---------------- | ------------- | ------- | --------------------------- | ----------------- |
+
+    INT8 | INT8  | null         | UINT64/INT64     | null          | null    | null/INT32                  | FLOAT16           |
+  | INT8 | INT8  | null         | UINT64/INT64     | null/FLOAT32  | null    | null/INT32                  | INT8              |
+  | INT8 | INT8  | null/FLOAT32 | FLOAT32/BFLOAT16 | null          | null    | null/INT32/BFLOAT16/FLOAT32 | BFLOAT16          |
+  | INT8 | INT8  | FLOAT32      | FLOAT32          | null          | null    | null/INT32/FLOAT16/FLOAT32  | FLOAT16           |
+  | INT8 | INT8  | null         | FLOAT32/BFLOAT16 | null          | null    | null/INT32                  | INT32             |
+  | INT4 | INT4  | null/FLOAT32 | BFLOAT16         | null/FLOAT32  | null    | null/BFLOAT16               | BFLOAT16          |
+  | INT4 | INT4  | null/FLOAT32 | FLOAT32          | null/FLOAT32  | null    | null/BFLOAT16               | BFLOAT16          |
+  | INT4 | INT4  | null/FLOAT32 | UINT64           | null/FLOAT32  | null    | null/INT32                  | FLOAT16           |
+  | INT4 | INT4  | null/FLOAT32 | FLOAT32          | null/FLOAT32  | null    | null/INT32                  | FLOAT16           |
+  | INT8 | INT32 | UINT64       | FLOAT32          | null          | FLOAT32 | null                        | FLOAT16/BFLOAT16  |
+    
+  - x1的约束：当数据类型为INT8时，且x2的数据类型为INT32时，transposeX1为false。维度为：（m，k），要求k为偶数，并小于29576。
+  - yOffset的约束：shape支持1维（n）。为计算过程中离线计算的辅助结果，值要求为8 *x2* x2Scale，并在第1维累加。
 
 </details>
+
 <details>
 <summary><term>Atlas 推理系列产品</term></summary>
 
@@ -486,8 +507,12 @@ aclnnStatus aclnnQuantMatmulWeightNz(
     | ---- | ---- | ------- | ------------ | ------------- | ---------- | ------- |
     | INT8 | INT8 | null    | UINT64/INT64 | null          | null/INT32 | FLOAT16 |
     | INT8 | INT8 | null    | UINT64/INT64 | null/FLOAT32  | null/INT32 | INT8    |
+    | INT8 | INT8 | FLOAT   | FLOAT        | null          | null/INT32 | FLOAT16 |
+
+  - 当x1Scale不为null时，只支持K-C量化。
 
 </details>
+
 <details>
 <summary><term>Ascend 950PR/Ascend 950DT</term></summary>
 
@@ -499,6 +524,7 @@ aclnnStatus aclnnQuantMatmulWeightNz(
   <a id="T-C量化 && T-T量化"></a>
     - 输入和输出支持以下数据类型组合：
   <a id="输入和输出支持以下数据类型组合TC/TT"></a>
+
       | x1              | x2          | x1Scale     |   x2Scale         | x2Offset     | yScale | bias                       |   out                   |
       | --------------- | ----------- | ----------- |   --------------- | ------------ | -------| -------------------------- |   ----------------------|
       | INT8            | INT8        | null        | UINT64/ INT64     | null         | null   | null/INT32                 |   FLOAT16/ BFLOAT16     |
@@ -514,6 +540,7 @@ aclnnStatus aclnnQuantMatmulWeightNz(
   <a id="K-C量化 && K-T量化"></a>
     - 输入和输出支持以下数据类型组合：
   <a id="输入和输出支持以下数据类型组合KC/KT"></a>
+
       | x1                   | x2                   | x1Scale | x2Scale         | x2Offset | yScale |   bias                      | out             |
       | -------------------- | -------------------- | ------- | --------------- | -------- | -------|   ------------------------- | --------------- |
       | INT8                 | INT8                 | FLOAT32 | FLOAT32/BFLOAT16| null     | null   | null/INT32/FLOAT32/BFLOAT16 | BFLOAT16        |
@@ -526,27 +553,39 @@ aclnnStatus aclnnQuantMatmulWeightNz(
   <a id="mx量化"></a>
     - 输入和输出支持以下数据类型组合：
   <a id="输入和输出支持以下数据类型组合mx"></a>
+
       | x1            | x2            | x1Scale     | x2Scale     | x2Offset | yScale | bias         | out                         |
       |---------------| ------------- | ----------- | ----------- | -------- | ------ | -------------| --------------------------- |
       | FLOAT8_E4M3FN | FLOAT8_E4M3FN | FLOAT8_E8M0 | FLOAT8_E8M0 | null     | null   | null/FLOAT32 | FLOAT16/BFLOAT16/FLOAT32    |
+      | FLOAT4_E2M1 | FLOAT4_E2M1 | FLOAT8_E8M0 | FLOAT8_E8M0 | null     | null   | null/FLOAT32 | FLOAT16/BFLOAT16/FLOAT32    |
                                
     - x1数据类型、x2数据类型、x1、x2、x1Scale、x2Scale和groupSize的取值关系：
+
       |量化类型|x1数据类型|x2数据类型|x1 shape|x2 shape|x1Scale shape|x2Scale shape|bias shape|yScale shape|[groupSizeM, groupSizeN, groupSizeK]|groupSize|
       |-------|--------|--------|--------|--------|-------------|-------------|------------|---------------------------------------|--|--|
-      |mx 全量化|FLOAT8_E4M3FN|FLOAT8_E4M3FN|<li>非转置：(batch, m, k)</li><li>转置：(batch, k, m)</li>|<li>非转置：(batch, k, n)</li><li>转置：(batch, n, k)</li>|<li>非转置：(m, ceil(k / 64), 2)</li><li>转置：(ceil(k / 64), m, 2)</li>|<li>非转置：(ceil(k / 64), n, 2)</li><li>转置：(n, ceil(k / 64), 2)</li>|(n,)或(batch, 1, n)|null|[1, 1, 32]|4295032864|
+      |mx 全量化|FLOAT8_E4M3FN|FLOAT8_E4M3FN|<li>非转置：(batch, m, k)</li>|<li>非转置：(batch, k, n)</li><li>转置：(batch, n, k)</li>|<li>非转置：(m, ceil(k / 64), 2)</li>|<li>非转置：(ceil(k / 64), n, 2)</li><li>转置：(n, ceil(k / 64), 2)</li>|(n,)或(batch, 1, n)|null|[1, 1, 32]|4295032864|
+      |mx 全量化|FLOAT4_E2M1|FLOAT4_E2M1|<li>非转置：(batch, m, k)</li>|<li>非转置：(batch, k, n)</li><li>转置：(batch, n, k)</li>|<li>非转置：(m, ceil(k / 64), 2)</li>|<li>非转置：(ceil(k / 64), n, 2)</li><li>转置：(n, ceil(k / 64), 2)</li>|(n,)或(batch, 1, n)|null|[1, 1, 32]|4295032864|
 
-    - mx全量化场景下，当x1与x2数据类型为FLOAT8_E4M3FN时，x1和x1Scale的转置属性需要保持一致，x2和x2Scale的转置属性需要保持一致。
+    - mx全量化场景下，当x1与x2数据类型为FLOAT8_E4M3FN/FLOAT4_E2M1时，x1和x1Scale的转置属性需要保持一致，x2和x2Scale的转置属性需要保持一致。
+    - mx全量化场景下，当x1与x2数据类型为FLOAT4_E2M1时，需满足以下条件：
+      - x1和x2的内轴必须为偶数，且k必须大于2。
+      - transposeX1必须为false。
+      - 当transposeX2为false时，n必须大于2。
+      - 当transposeX2为true时，n必须大于1。
 
   - **伪量化场景下dtype和shape要求如下：**
-    |量化类型|x1 dtype       |x2 dtype     | x1Scale dtype  |x2Scale dtype |bias dtype   |x1 shape  | x2 shape| x1Scale shape | x2Scale shape     |bias shape | yScale shape| [groupSizeM, groupSizeN, groupSizeK]|
-    |---------------| ------------| -------------- |--------------|-------------|--------- | --------| --------------| ------------      |---------- | ------------| ---------------------------------------|-------|
-    | mx量化 |FLOAT8_E4M3FN  |FLOAT4_E2M1  |FLOAT8_E8M0     |FLOAT8_E8M0   |null/BFLOAT16|(m, k)  |(n, k)  |(m, k/32)    |(n, k/32)        |(1, n)    | null        | [0, 0, 32] / [1, 1, 32]                |
-    | mx量化 |FLOAT8_E4M3FN  |FLOAT32      |FLOAT8_E8M0     |FLOAT8_E8M0   |null/BFLOAT16|(m, k)  |(n, k/8)|(m, k/32)    |(n, k/32)        |(1, n)    | null        | [0, 0, 32] / [1, 1, 32]                |
-    | T-CG量化 |FLOAT8_E4M3FN  |FLOAT4_E2M1  |null            |BFLOAT16      |null         |(m, k)  |(k, n)  |null           |(k/32, n)        |null       |(1, n)      | [0, 0, 32] / [1, 1, 32]                |
-    | T-CG量化 |FLOAT8_E4M3FN  |FLOAT32      |null            |BFLOAT16      |null         |(m, k)  |(k, n/8)|null           |(k/32, n)        |null       |(1, n)      | [0, 0, 32] / [1, 1, 32]                |
+  
+    |量化类型|x1 dtype       |x2 dtype     | x1Scale dtype  |x2Scale dtype |bias dtype   | out dtype | x1 shape  | x2 shape| x1Scale shape | x2Scale shape     |bias shape | yScale shape| [groupSizeM, groupSizeN, groupSizeK]|
+    |---------------| ------------| -------------- |--------------|-------------|--------- | --------| ---------- | --------------| ------------      |---------- | ------------| ---------------------------------------|-------|
+    | mx量化 |FLOAT8_E4M3FN  |FLOAT4_E2M1  |FLOAT8_E8M0     |FLOAT8_E8M0   |null/BFLOAT16/FLOAT16|BFLOAT16/FLOAT16|(m, k)  |(n, k)  |(m, k/64, 2)    |(n, k/64, 2)        |(1, n)    | null        | [0, 0, 32] / [1, 1, 32]                |
+    | mx量化 |FLOAT8_E4M3FN  |FLOAT32      |FLOAT8_E8M0     |FLOAT8_E8M0   |null/BFLOAT16/FLOAT16|BFLOAT16/FLOAT16|(m, k)  |(n, k/8)|(m, k/64, 2)    |(n, k/64, 2)        |(1, n)    | null        | [0, 0, 32] / [1, 1, 32]                |
+    | T-CG量化 |FLOAT8_E4M3FN  |FLOAT4_E2M1  |null            |BFLOAT16      |BFLOAT16/FLOAT16|BFLOAT16/FLOAT16|null         |(m, k)  |(k, n)  |null           |(k/32, n)        |null       |(1, n)      | [0, 0, 32] / [1, 1, 32]                |
+    | T-CG量化 |FLOAT8_E4M3FN  |FLOAT32      |null            |BFLOAT16      |BFLOAT16/FLOAT16|BFLOAT16/FLOAT16|null         |(m, k)  |(k, n/8)|null           |(k/32, n)        |null       |(1, n)      | [0, 0, 32] / [1, 1, 32]                |
+
     - 约束说明：
-      - k, n大小要求64对齐。
+      - k要求32对齐, n要求8对齐。MX量化模式下k要求大于32，n大于等于8；T-CG量化模式下k要求大于等于64，n的要求大于等于8。
       - x1是FLOAT8_E4M3FN，x2是FLOAT32时, x2表示一个FLOAT32存储8个FLOAT4_E2M1的紧密排布的数据格式。
+      - MX量化模式下，bias数据类型与out数据类型需要一致；T-CG量化模式下，x2Scale的数据类型和out的数据类型需要一致。
 
 </details>  
 
@@ -555,9 +594,10 @@ aclnnStatus aclnnQuantMatmulWeightNz(
 示例代码如下，仅供参考，具体编译和执行过程请参考[编译与运行样例](../../../docs/zh/context/编译与运行样例.md)。
 
 - <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>、<term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>：
+
   x2为NZ格式场景下的示例代码如下(transposeX2=false)。
 
-  ```Cpp
+  ```cpp
   #include <iostream>
   #include <memory>
   #include <vector>
@@ -838,7 +878,7 @@ aclnnStatus aclnnQuantMatmulWeightNz(
 - <term>Atlas 推理系列产品</term>：
   x2为NZ格式场景下的示例代码如下(transposeX2=true)。
 
-  ```Cpp
+  ```cpp
   #include <iostream>
   #include <memory>
   #include <vector>
@@ -1149,7 +1189,7 @@ aclnnStatus aclnnQuantMatmulWeightNz(
 - <term>Ascend 950PR/Ascend 950DT</term>：
   x2为NZ格式场景下的示例代码如下(transposeX2=true)。
 
-  ```Cpp
+  ```cpp
   #include <iostream>
   #include <memory>
   #include <vector>
@@ -1233,7 +1273,7 @@ aclnnStatus aclnnQuantMatmulWeightNz(
       aclFinalize();
   }
 
-  // 将bloat16的uint16_t表示转换为float表示
+  // 将bfloat16的uint16_t表示转换为float表示
   float Bf16ToFloat(uint16_t h)
   {
       uint32_t sign = (h & 0x8000U) ? 0x80000000U : 0x00000000U; // sign bit
@@ -1246,15 +1286,32 @@ aclnnStatus aclnnQuantMatmulWeightNz(
       return *reinterpret_cast<float*>(&fBits);
   }
 
-  template <typename T>
-  int CreateAclTensorWithFormat(
-      const std::vector<T>& hostData, const std::vector<int64_t>& shape, int64_t** storageShape,
-      uint64_t* storageShapeSize, void** deviceAddr, aclDataType dataType, aclTensor** tensor, aclFormat format)
+  uint64_t GetStorageTensorSize(const int64_t* storageShape, uint64_t storageShapeSize, aclDataType dataType)
   {
-      auto size = hostData.size() * sizeof(T);
+      uint64_t elementCount = 1;
+      for (uint64_t i = 0; i < storageShapeSize; ++i) {
+          elementCount *= static_cast<uint64_t>(storageShape[i]);
+      }
+      if (dataType == aclDataType::ACL_FLOAT) {
+          return elementCount * sizeof(float);
+      }
+      if (dataType == aclDataType::ACL_FLOAT4_E2M1) {
+          return (elementCount + 1) / 2;
+      }
+      return 0;
+  }
+
+  int CreateAclTensorWithFormat(
+      const std::vector<int64_t>& shape, int64_t** storageShape, uint64_t* storageShapeSize, void** deviceAddr,
+      aclDataType dataType, aclTensor** tensor, aclFormat format)
+  {
+      auto size = GetStorageTensorSize(*storageShape, *storageShapeSize, dataType);
+      CHECK_RET(size > 0, LOG_PRINT("unsupported data type. ERROR: %d\n", static_cast<int>(dataType));
+                return ACL_ERROR_INVALID_PARAM);
       // 调用aclrtMalloc申请device侧内存
       auto ret = aclrtMalloc(deviceAddr, size, ACL_MEM_MALLOC_HUGE_FIRST);
       CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("aclrtMalloc failed. ERROR: %d\n", ret); return ret);
+      std::vector<uint8_t> hostData(size, 0);
       // 调用aclrtMemcpy将host侧数据拷贝到device侧内存上
       ret = aclrtMemcpy(*deviceAddr, size, hostData.data(), size, ACL_MEMCPY_HOST_TO_DEVICE);
       CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("aclrtMemcpy failed. ERROR: %d\n", ret); return ret);
@@ -1284,8 +1341,8 @@ aclnnStatus aclnnQuantMatmulWeightNz(
       int64_t groupSize = 32;
       std::vector<int64_t> x1Shape = {m, k};
       std::vector<int64_t> x2Shape = {n, k};
-      std::vector<int64_t> x1ScaleShape = {m, k / groupSize};
-      std::vector<int64_t> x2ScaleShape = {n, k / groupSize};
+      std::vector<int64_t> x1ScaleShape = {m, k / groupSize / 2, 2};
+      std::vector<int64_t> x2ScaleShape = {n, k / groupSize / 2, 2};
       std::vector<int64_t> outShape = {m, n};
       void* x1DeviceAddr = nullptr;
       void* x2DeviceAddr = nullptr;
@@ -1304,12 +1361,9 @@ aclnnStatus aclnnQuantMatmulWeightNz(
       std::vector<float> x2HostData(n * k, 1);                             // 输入为fp32，转Nz后再Cast成fp4
       std::vector<uint8_t> x1ScaleHostData(m * k / groupSize, 0b01111111); // float8_e8m0的1.0
       std::vector<uint8_t> x2ScaleHostData(n * k / groupSize, 0b10000101); // float8_e8m0的1.0*64，参考文档需要扩大64倍输入
-      std::vector<uint16_t> outHostData(m * k, 0);                         // 实际上是bfloat16
-      std::vector<int32_t> x2NzHostData(k * n, 0);
-      std::vector<int32_t> x2NzFp4HostData(k * n, 0);
+      std::vector<uint16_t> outHostData(m * n, 0);                         // 实际上是bfloat16
       int64_t* dstShape = nullptr;
       uint64_t dstShapeSize = 0;
-      void* dstDeviceAddr = nullptr;
       aclTensor* x2Nz = nullptr;
       aclTensor* x2NzFp4 = nullptr;
       int actualFormat;
@@ -1352,14 +1406,14 @@ aclnnStatus aclnnQuantMatmulWeightNz(
                 return ret);
 
       ret = CreateAclTensorWithFormat(
-          x2NzHostData, x2Shape, &dstShape, &dstShapeSize, &x2NzDeviceAddr, srcDtype, &x2Nz,
+          x2Shape, &dstShape, &dstShapeSize, &x2NzDeviceAddr, srcDtype, &x2Nz,
           static_cast<aclFormat>(actualFormat));
       std::unique_ptr<aclTensor, aclnnStatus (*)(const aclTensor*)> x2NzTensorPtr(x2Nz, aclDestroyTensor);
       std::unique_ptr<void, aclError (*)(void*)> x2NzDeviceAddrPtr(x2NzDeviceAddr, aclrtFree);
       CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("CreateAclTensorWithFormat failed. ERROR: %d\n", ret); return ret);
 
       ret = CreateAclTensorWithFormat(
-          x2NzFp4HostData, x2Shape, &dstShape, &dstShapeSize, &x2NzFp4DeviceAddr, aclDataType::ACL_FLOAT4_E2M1, &x2NzFp4,
+          x2Shape, &dstShape, &dstShapeSize, &x2NzFp4DeviceAddr, aclDataType::ACL_FLOAT4_E2M1, &x2NzFp4,
           static_cast<aclFormat>(actualFormat));
       std::unique_ptr<aclTensor, aclnnStatus (*)(const aclTensor*)> x2NzFp4TensorPtr(x2NzFp4, aclDestroyTensor);
       std::unique_ptr<void, aclError (*)(void*)> x2NzFp4DeviceAddrPtr(x2NzFp4DeviceAddr, aclrtFree);
@@ -1387,7 +1441,7 @@ aclnnStatus aclnnQuantMatmulWeightNz(
 
       // 调用cast把x2的fp32转为fp4_e2m1
       ret = aclnnCastGetWorkspaceSize(x2Nz, aclDataType::ACL_FLOAT4_E2M1, x2NzFp4, &workspaceSize, &executor);
-      CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("aclnnCastGetWorkspaceSize0 failed. ERROR: %d\n", ret); return ret);
+      CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("aclnnCastGetWorkspaceSize failed. ERROR: %d\n", ret); return ret);
       // 根据第一段接口计算出的workspaceSize申请device内存
       void* workspaceCastAddr = nullptr;
       std::unique_ptr<void, aclError (*)(void*)> workspaceCastAddrPtr(nullptr, aclrtFree);
@@ -1397,7 +1451,7 @@ aclnnStatus aclnnQuantMatmulWeightNz(
           workspaceCastAddrPtr.reset(workspaceCastAddr);
       }
       ret = aclnnCast(workspaceCastAddr, workspaceSize, executor, stream);
-      CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("aclnnCast0 failed. ERROR: %d\n", ret); return ret);
+      CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("aclnnCast failed. ERROR: %d\n", ret); return ret);
       ret = aclrtSynchronizeStream(stream);
       CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("aclrtSynchronizeStream failed. ERROR: %d\n", ret); return ret);
 

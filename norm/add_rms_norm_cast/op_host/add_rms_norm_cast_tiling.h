@@ -21,9 +21,9 @@
 #include "util/math_util.h"
 #include "tiling/platform/platform_ascendc.h"
 #include "platform/platform_infos_def.h"
-#include "tiling_base/tiling_base.h"
+#include "op_host/tiling_base.h"
 #include "op_common/op_host/util/platform_util.h"
-#include "tiling_base/tiling_templates_registry.h"
+#include "op_host/tiling_templates_registry.h"
 
 namespace optiling {
 BEGIN_TILING_DATA_DEF(AddRMSNormCastTilingData)
@@ -37,24 +37,25 @@ TILING_DATA_FIELD_DEF(float, avg_factor);
 END_TILING_DATA_DEF;
 
 BEGIN_TILING_DATA_DEF(AddRmsNormCastRegbaseTilingData)
-TILING_DATA_FIELD_DEF(uint64_t, numM);
 TILING_DATA_FIELD_DEF(uint64_t, numN);
-TILING_DATA_FIELD_DEF(uint64_t, baseM);
+TILING_DATA_FIELD_DEF(uint64_t, numM);
 TILING_DATA_FIELD_DEF(uint64_t, baseN);
-TILING_DATA_FIELD_DEF(uint64_t, baseNDtypeAlign);
+TILING_DATA_FIELD_DEF(uint64_t, baseM);
 TILING_DATA_FIELD_DEF(uint64_t, baseNReduceAlign);
-TILING_DATA_FIELD_DEF(uint64_t, powerSplit);
+TILING_DATA_FIELD_DEF(uint64_t, baseNDtypeAlign);
 TILING_DATA_FIELD_DEF(uint64_t, powerLoop);
-TILING_DATA_FIELD_DEF(uint64_t, mPerCore);
+TILING_DATA_FIELD_DEF(uint64_t, powerSplit);
 TILING_DATA_FIELD_DEF(uint64_t, mLastCore);
-TILING_DATA_FIELD_DEF(float, epsilon);
+TILING_DATA_FIELD_DEF(uint64_t, mPerCore);
 TILING_DATA_FIELD_DEF(float, avgFactor);
+TILING_DATA_FIELD_DEF(float, epsilon);
 TILING_DATA_FIELD_DEF(uint32_t, isNddma);
 END_TILING_DATA_DEF;
 
 constexpr uint32_t TILING_TYPE_NORMAL = 0;
 constexpr uint32_t TILING_TYPE_SPILT = 1;
 constexpr uint32_t TILING_TYPE_MAGIC_AND_WONDERFUL = 2;
+constexpr uint32_t TILING_TYPE_HIGN_PERFORMANCE = 3;
 constexpr uint32_t TILING_OFFSET_REGBASE = 100;
 constexpr uint64_t TILING_KEY_UNRUN = 199;
 
@@ -70,22 +71,23 @@ REGISTER_TILING_DATA_CLASS(AddRmsNormCast, AddRMSNormCastTilingData)
 REGISTER_TILING_DATA_CLASS(AddRmsNormCast_100, AddRmsNormCastRegbaseTilingData)
 REGISTER_TILING_DATA_CLASS(AddRmsNormCast_101, AddRmsNormCastRegbaseTilingData)
 REGISTER_TILING_DATA_CLASS(AddRmsNormCast_102, AddRmsNormCastRegbaseTilingData)
+REGISTER_TILING_DATA_CLASS(AddRmsNormCast_103, AddRmsNormCastRegbaseTilingData)
 REGISTER_TILING_DATA_CLASS(AddRmsNormCast_199, AddRmsNormCastRegbaseTilingData)
 
 struct AddRmsNormCastRegbaseTilingParams {
     // Platform
-    uint64_t maxUbSize{0};
     uint64_t totalCoreNum{0};
+    uint64_t maxUbSize{0};
     uint64_t vecLength{0};
     // Input Info
-    uint64_t numM{0};
     uint64_t numN{0};
+    uint64_t numM{0};
     uint64_t xDtypeSize{0};
     uint64_t xDtypeAlignNum{0};
     uint64_t xReduceAlignNum{0};
     // Cal params
-    uint64_t baseM{0};
     uint64_t baseN{0};
+    uint64_t baseM{0};
     uint64_t baseNDtypeAlign{0};
     uint64_t baseNReduceAlign{0};
     uint64_t powerSplit{0};
@@ -131,11 +133,11 @@ protected:
     // Order: GetShapeAttrsInfo->GetPlatformInfo->
     //        IsCapable->DoOpTiling->DoLibApiTiling->
     //        GetWorkspaceSize->PostTiling->GetTilingKey
-    ge::graphStatus GetShapeAttrsInfo() override;
     ge::graphStatus GetPlatformInfo() override;
+    ge::graphStatus GetShapeAttrsInfo() override;
     bool IsCapable() override;
-    ge::graphStatus DoOpTiling() override;
     ge::graphStatus DoLibApiTiling() override;
+    ge::graphStatus DoOpTiling() override;
     ge::graphStatus GetWorkspaceSize() override;
     ge::graphStatus PostTiling() override;
     uint64_t GetTilingKey() const override;

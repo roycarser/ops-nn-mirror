@@ -13,7 +13,6 @@
 |  <term>Kirin X90 处理器系列产品</term> | √ |
 |  <term>Kirin 9030 处理器系列产品</term> | √ |
 
-
 ## 功能说明
 
 - 算子功能：实现AddLayerNorm功能。
@@ -24,7 +23,7 @@
   $$
 
   $$
-  rstd = {{1}\over\sqrt {Var(x)+eps}}
+  rstd = {{1}\over\sqrt {Var(x)+epsilon}}
   $$
 
   $$
@@ -80,14 +79,14 @@
     <tr>
       <td>gamma</td>
       <td>输入</td>
-      <td>表示层归一化中的`gamma`参数，对应公式中的γ。shape与`x1`的norm的维度值相同。</td>
+      <td>表示层归一化中的`gamma`参数，对应公式中的`γ`。shape与`x1`的norm的维度值相同。</td>
       <td>FLOAT32、FLOAT16、BFLOAT16</td>
       <td>ND</td>
     </tr>
     <tr>
       <td>beta</td>
       <td>输入</td>
-      <td>表示层归一化中的`beta`参数，对应公式中的β。shape与`x1`的norm的维度值相同。</td>
+      <td>表示层归一化中的`beta`参数，对应公式中的`β`。shape与`x1`的norm的维度值相同。</td>
       <td>FLOAT32、FLOAT16、BFLOAT16</td>
       <td>ND</td>
     </tr>
@@ -101,7 +100,7 @@
     <tr>
       <td>epsilon</td>
       <td>可选属性</td>
-      <td><ul><li>添加到分母中的值，以确保数值稳定，对应公式中的eps。</li><li>默认值为1e-5f。</li></ul></td>
+      <td><ul><li>添加到分母中的值，以确保数值稳定，对应公式中的`epsilon`。</li><li>默认值为1e-5f。</li></ul></td>
       <td>FLOAT</td>
       <td>-</td>
     </tr>
@@ -122,7 +121,7 @@
     <tr>
       <td>mean</td>
       <td>输出</td>
-      <td>输出LayerNorm算过程中（x1 + x2 + bias）的结果的均值，对应公式中的x的平均值。shape需要与`x1`满足broadcast关系（前几维的维度和`x1`前几维的维度相同，后面的维度为1，总维度与`x1`维度相同，前几维指`x1`的维度减去gamma的维度，表示不需要norm的维度）。</td>
+      <td>输出LayerNorm算过程中（x1 + x2 + bias）的结果的均值，对应公式中的`x`的平均值。shape需要与`x1`满足broadcast关系（前几维的维度和`x1`前几维的维度相同，后面的维度为1，总维度与`x1`维度相同，前几维指`x1`的维度减去`gamma`的维度，表示不需要norm的维度）。</td>
       <td>FLOAT32</td>
       <td>ND</td>
     </tr>
@@ -146,6 +145,8 @@
   - 所有的输入参数和输出参数`y`、`x`的数据类型不支持BFLOAT16。
   - 在当前产品下的使用场景下，输出参数`mean`、`rstd`为无效参数，输出的值不生效。
   - x1、x2、beta、gamma、bias五个输入的尾轴长度必须大于等于32Bytes。
+
+- Kirin X90/Kirin 9030处理器系列产品：不支持BFLOAT16。
 
 ## 约束说明
 

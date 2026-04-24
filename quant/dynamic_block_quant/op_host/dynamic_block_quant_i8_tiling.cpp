@@ -35,6 +35,7 @@ constexpr int64_t INDEX_ATTR_ROUND_MODE = 1;
 constexpr int64_t INDEX_ATTR_DST_DTYPE = 2;
 constexpr int64_t INDEX_ATTR_BLOCK_SIZE_ROW = 3;
 constexpr int64_t INDEX_ATTR_BLOCK_SIZE_COL = 4;
+constexpr int64_t INDEX_ATTR_DST_DTYPE_MAX = 5;
 constexpr int64_t BLOCK_SIZE_1 = 1;
 constexpr int64_t BLOCK_SIZE_128 = 128;
 constexpr int64_t DIM_TWO = 2;
@@ -150,6 +151,12 @@ ge::graphStatus DynamicBlockQuantI8::GetAttr(DynamicBlockQuantTilingParam& tilin
         (tilingParam.dstType != 2),
         OP_LOGE(context, "invalid dst_type: %ld. only support DT_INT8", tilingParam.dstType), return ge::GRAPH_FAILED);
 
+    auto* attrDstTypeMax = attrs->GetAttrPointer<float>(INDEX_ATTR_DST_DTYPE_MAX);
+    tilingParam.dstTypeMax = (attrDstTypeMax != nullptr) ? static_cast<float>(*attrDstTypeMax) : 0;
+    OP_CHECK_IF((tilingParam.dstTypeMax != 0.0),
+            OP_LOGE(context, "invalid dst_type_max: %f. dst_type_max only supported 0.0", tilingParam.dstTypeMax),
+            return ge::GRAPH_FAILED);
+
     return GetAttrBlock(tilingParam);
 }
 
@@ -196,6 +203,10 @@ ge::graphStatus DynamicBlockQuantI8::CheckShape(DynamicBlockQuantTilingParam& ti
         static_cast<int64_t>(xShape.GetDimNum() != DIM_TWO && xShape.GetDimNum() != DIM_THREE),
         OP_LOGE(context, "The shape of x dim should be 2 or 3, please check."), return ge::GRAPH_FAILED);
 
+    OP_CHECK_IF(
+        static_cast<int64_t>(xShape.GetDimNum()) != static_cast<int64_t>(scaleShape.GetDimNum()),
+        OP_LOGE(context, "The shape of x dim must be same with shape of scale, please check."),
+        return ge::GRAPH_FAILED);
     if (xShape.GetDimNum() == DIM_TWO) {
         OP_CHECK_IF(
             (static_cast<int64_t>(scaleShape.GetDim(0)) !=
@@ -330,6 +341,7 @@ void DynamicBlockQuantI8::SetTilingData(
     tilingData.set_dstType(tilingParam.dstType);
     tilingData.set_blockSizeRow(tilingParam.blockSizeRow);
     tilingData.set_blockSizeCol(tilingParam.blockSizeCol);
+    tilingData.set_dstTypeMax(tilingParam.dstTypeMax);
     tilingData.set_rowNum(tilingParam.rowNum);
     tilingData.set_colNum(tilingParam.colNum);
     tilingData.set_usedCoreNum(tilingParam.usedCoreNum);

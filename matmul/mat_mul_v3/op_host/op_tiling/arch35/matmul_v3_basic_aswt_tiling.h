@@ -26,8 +26,8 @@ public:
     MatMulV3BasicAswtTiling(gert::TilingContext *context, MatMulTilingCfg &cfg)
         : MatMulV3AswTiling(context, cfg) {};
     ~MatMulV3BasicAswtTiling() override = default;
-    bool CheckBL1FullLoadDav3510(uint64_t kAlignedValue, uint64_t nAlignedValue);
-    bool CheckAL1FullLoadDav3510(uint64_t kAlignedValue, uint64_t mAlignedValue);
+    bool CheckBL1FullLoadDav3510(const uint64_t kAlignedValue, const uint64_t nAlignedValue) const;
+    bool CheckAL1FullLoadDav3510(const uint64_t kAlignedValue, const uint64_t mAlignedValue) const;
     void AdjustBL1Tiling3510Basic(uint64_t biasBatchDimAll);
     void AdjustAL1Tiling3510Basic(uint64_t biasBatchDimAll);
 
@@ -46,8 +46,8 @@ private:
     uint64_t GetAFullLoadBasicNL1() const;
     void CalcTailBasicBlockBL1Full();
     void CalcTailBasicBlockAL1Full();
-    bool CheckBL1FullLoad();
-    bool CheckAL1FullLoad();
+    bool CheckBL1FullLoad() const;
+    bool CheckAL1FullLoad() const;
 
     uint64_t biasSize_ {0};
     bool isSingleRound_ {false};

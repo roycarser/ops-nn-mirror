@@ -17,7 +17,11 @@
 #define DEQUANT_SWIGLU_QUANT_H
 
 #include "kernel_tiling/kernel_tiling.h"
-#include "kernel_operator.h"
+#if ASC_DEVKIT_MAJOR >= 9
+    #include "basic_api/kernel_vec_intf.h"
+#else
+    #include "kernel_operator.h"
+#endif
 #include "dequant_swiglu_quant_common.h"
 
 namespace DequantSwigluQuantV35Ops {
@@ -228,7 +232,6 @@ __aicore__ inline void DequantSwigluQuantBase<TActScale, TQuantScale, TGroup, TB
       uint32_t biasTailSupply = CeilDivision(tl_->inDimy, BLOCK_SIZE * 4) * BLOCK_SIZE * 4 -  tl_->inDimy;
       pipe_->InitBuffer(biasQueue_, 1, (biasUbAlign_ * 2) * sizeof(TBias) + biasTailSupply * sizeof(TBias));
     }
-    
   }
 }
 
@@ -309,8 +312,8 @@ __aicore__ inline void DequantSwigluQuantBase<TActScale, TQuantScale, TGroup, TB
     }
     return;
   }
-
 }
+
 template <typename TActScale, typename TQuantScale, typename TGroup, typename TBias, typename TXtype, typename TYtype>
 __aicore__ inline void DequantSwigluQuantBase<TActScale, TQuantScale, TGroup, TBias, TXtype, TYtype>::ProcessSingleGroupPerCore(int64_t groupIdx, int64_t xDimPerCore, int64_t coreDimxOffset)
 {
@@ -342,7 +345,6 @@ __aicore__ inline void DequantSwigluQuantBase<TActScale, TQuantScale, TGroup, TB
         dataCopyWeightScaleParams.dstStride = 0;
         DataCopyPad(inScaleLocal[0], weightScaleGm_[groupIdx * tl_->inDimy], dataCopyWeightScaleParams, padParams);
       }
-      
     }
 
     // copy_in: quant_scale(G, H)

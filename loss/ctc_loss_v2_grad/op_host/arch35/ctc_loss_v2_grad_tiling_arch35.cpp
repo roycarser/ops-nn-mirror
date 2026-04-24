@@ -40,6 +40,8 @@ constexpr int64_t INPUT_LOSS_IDX = 5;
 constexpr int64_t INPUT_LOG_ALPHA_IDX = 6;
 constexpr int64_t LOSS_DIM_NUM = 1;
 constexpr int64_t GRAD_DIM_NUM = 3;
+constexpr int64_t ATTR_BLANK_IDX = 0;
+constexpr int64_t ATTR_ZERO_INFINITY_IDX = 2;
 
 constexpr int64_t FLOAT_DSIZE = 4;
 
@@ -88,16 +90,16 @@ private:
     bool InitTargetLengths();
     bool InitNegLogLikelihood();
     bool InitGrad();
-    void InitLogBetaThreadParams(int64_t maxThreadNum);
-    void InitUpdateLcabThreadParams(int64_t maxThreadNum);
-    void InitCalGradThreadParams(int64_t maxThreadNum);
+    void InitLogBetaThreadParams(const int64_t maxThreadNum);
+    void InitUpdateLcabThreadParams(const int64_t maxThreadNum);
+    void InitCalGradThreadParams(const int64_t maxThreadNum);
     void InitGmParams();
     bool IsLargeSize() const;
-    int64_t GetThreadNum();
+    int64_t GetThreadNum() const;
     ge::graphStatus InitSimtParams();
 
 private:
-    CTCLossV2GradTilingData4AscnedC tilingData;
+    CTCLossV2GradTilingData4AscendC tilingData;
     gert::TilingContext* context_ = nullptr;
     int64_t coreUsed = 0;
     int64_t coreNum = 0;
@@ -141,9 +143,9 @@ private:
     int64_t initTempGradGmSizePerBlock = 0;
     int64_t initTempGradGmSizeEndBlock = 0;
 
-    int64_t logBetaThreadNum;
-    int64_t updateLcabThreadNum;
-    int64_t calGradThreadNum;
+    int64_t logBetaThreadNum = 0;
+    int64_t updateLcabThreadNum = 0;
+    int64_t calGradThreadNum = 0;
 };
 
 void CTCLossV2GradTiling4AscendC::InitGmParams()
@@ -201,7 +203,7 @@ bool CTCLossV2GradTiling4AscendC::IsLargeSize() const
            (batchSize * logAlphaT * alphaLength > INT32_MAX);
 }
 
-int64_t CTCLossV2GradTiling4AscendC::GetThreadNum()
+int64_t CTCLossV2GradTiling4AscendC::GetThreadNum() const
 {
     if (IsLargeSize()) {
         return MAX_THREAD_NUM_512;
@@ -318,16 +320,16 @@ ge::graphStatus CTCLossV2GradTiling4AscendC::Init()
 
     auto* attrs = context_->GetAttrs();
     OP_CHECK_NULL_WITH_CONTEXT(context_, attrs);
-    const auto* blankPtr = attrs->GetAttrPointer<int64_t>(0);
+    const auto* blankPtr = attrs->GetAttrPointer<int64_t>(ATTR_BLANK_IDX);
     OP_CHECK_NULL_WITH_CONTEXT(context_, blankPtr);
     BLANK = *blankPtr;
     OP_CHECK_IF(
         BLANK < 0 || BLANK >= symbolSet,
         OP_LOGE(context_->GetNodeName(), "BLANK is out of the range, please input the right value."),
         return ge::GRAPH_FAILED);
-    const auto* zeroInfinityPtr = attrs->GetAttrPointer<int64_t>(2);
+    const auto* zeroInfinityPtr = attrs->GetAttrPointer<bool>(ATTR_ZERO_INFINITY_IDX);
     OP_CHECK_NULL_WITH_CONTEXT(context_, zeroInfinityPtr);
-    zeroInfinity = *zeroInfinityPtr;
+    zeroInfinity = (*zeroInfinityPtr) ? 1 : 0;
     return InitSimtParams();
 }
 

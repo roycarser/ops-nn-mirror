@@ -38,8 +38,9 @@ static const size_t PENULTIMATE_DIM = 2;
 static const size_t BATCH_TAILENDER_DIM = 3;
 static const size_t NZ_K1_INDEX = 3;
 static const size_t NZ_K1_INDEX_TRANS = 4;
-static const int64_t NZ_K0_VALUE_INT8 = 16;
+static const int64_t NZ_K0_VALUE_INT8_INT4 = 16;
 static const int64_t NZ_K0_VALUE_INT8_TRANS = 32;
+static const int64_t NZ_K0_VALUE_INT4_TRANS = 64;
 static constexpr int64_t OUTPUT_INFER_FAIL = -1L;
 static const int64_t PERGROUP_GROUP_SIZE = 32;
 static const int64_t PERGROUP_GROUPSIZEK_SIZE = 256;
@@ -181,6 +182,79 @@ static inline bool IsMicroScaling(const aclTensor *x1Scale, const aclTensor *x2S
     }
     return x1Scale->GetDataType() == op::DataType::DT_FLOAT8_E8M0 &&
            x2Scale->GetDataType() == op::DataType::DT_FLOAT8_E8M0;
+}
+
+struct GroupSizeMNK {
+    uint64_t m = 0;
+    uint64_t n = 0;
+    uint64_t k = 0;
+};
+
+static inline GroupSizeMNK DecodeGroupSizeMnk(int64_t groupSize)
+{
+    GroupSizeMNK groupSizeMnk;
+    groupSizeMnk.k = static_cast<uint64_t>(groupSize) & GROUP_MNK_BIT_SIZE;
+    groupSizeMnk.n = (static_cast<uint64_t>(groupSize) >> GROUP_N_OFFSET) & GROUP_MNK_BIT_SIZE;
+    groupSizeMnk.m = (static_cast<uint64_t>(groupSize) >> GROUP_M_OFFSET) & GROUP_MNK_BIT_SIZE;
+    return groupSizeMnk;
+}
+
+static inline int64_t EncodeGroupSizeMnk(const GroupSizeMNK &groupSizeMnk)
+{
+    return static_cast<int64_t>((groupSizeMnk.m << GROUP_M_OFFSET) | (groupSizeMnk.n << GROUP_N_OFFSET) | groupSizeMnk.k);
+}
+
+static inline bool CheckMxGroupSize(int64_t groupSize, const GroupSizeMNK &groupSizeMnk)
+{
+    if (groupSizeMnk.k != static_cast<uint64_t>(PERGROUP_GROUP_SIZE) ||
+        groupSizeMnk.m != 1ULL || groupSizeMnk.n != 1ULL) {
+        OP_LOGE(ACLNN_ERR_PARAM_INVALID,
+                "Unsupported groupSize. In mx quantification, input or infered groupSize should be \
+4295032864(for torch api, group_sizes should be [1, 1, 32]). Actual groupSize: %lu(for torch api \
+group_sizes is [%lu, %lu, %lu]).",
+                groupSize, groupSizeMnk.m, groupSizeMnk.n, groupSizeMnk.k);
+        return false;
+    }
+    return true;
+}
+
+static inline bool CheckA4W4PergroupNonSymmetricGroupSize(const GroupSizeMNK &groupSizeMnk)
+{
+    if (groupSizeMnk.k != static_cast<uint64_t>(PERGROUP_GROUPSIZEK_SIZE)) {
+        OP_LOGE(
+            ACLNN_ERR_PARAM_INVALID,
+            "Unsupported groupSize. In A4W4 pertoken-pergroup non-symmetric quantification, groupSize K should be "
+            "256 . Actual groupSize is [%lu].",
+            groupSizeMnk.k);
+        return false;
+    }
+    return true;
+}
+
+static inline bool CheckPerblockGroupSize(const GroupSizeMNK &groupSizeMnk)
+{
+    if (groupSizeMnk.k != PERBLOCK_BLOCK_SIZE) {
+        OP_LOGE(ACLNN_ERR_PARAM_INVALID,
+                "Unsupported groupSize. When quantification mode is G-B or B-B quantification, input or infered \
+groupSizeK(for torch api, group_size[2]) should be 128. Actual groupSizeK: %lu, groupSizeK = groupSize & 0xFFFF.",
+                groupSizeMnk.k);
+        return false;
+    }
+    if (groupSizeMnk.n != PERBLOCK_BLOCK_SIZE) {
+        OP_LOGE(ACLNN_ERR_PARAM_INVALID,
+                "Unsupported groupSize. When quantification mode is G-B or B-B quantification, input or infered \
+groupSizeN(for torch api, group_size[1]) should be 128. Actual groupSizeN: %lu, groupSizeN = (groupSize >> 16) & 0xFFFF.",
+                groupSizeMnk.n);
+        return false;
+    }
+    if (groupSizeMnk.m != PERBLOCK_BLOCK_SIZE && groupSizeMnk.m != 1UL) {
+        OP_LOGE(ACLNN_ERR_PARAM_INVALID,
+                "Unsupported groupSize. When quantification mode is G-B or B-B quantification, input or infered \
+groupSizeM(for torch api, group_size[0]) \
+should be 128 or 1. Actual groupSizeM: %lu, groupSizeM = (groupSize >> 32) & 0xFFFF.", groupSizeMnk.m);
+        return false;
+    }
+    return true;
 }
 
 static inline bool IsFp8Input(const aclTensor *x1, const aclTensor *x2) {
@@ -350,7 +424,12 @@ bool QuantMatmulChecker::CheckShapeForWeightNz() const
     const op::Shape x2Shape = x2_->GetStorageShape();
     auto x2DimNum = x2_->GetStorageShape().GetDimNum();
     int64_t x2K1Dim = transposeX2_ ? x2Shape[x2DimNum - NZ_K1_INDEX_TRANS] : x2Shape[x2DimNum - NZ_K1_INDEX];
-    int64_t aligneValue = transposeX2_ ? NZ_K0_VALUE_INT8_TRANS : NZ_K0_VALUE_INT8;
+    int64_t nz_k0_value_trans =
+        (x1_->GetDataType() == op::DataType::DT_INT32 || x1_->GetDataType() == op::DataType::DT_INT4 ||
+         x1_->GetDataType() == op::DataType::DT_FLOAT4_E2M1) ?
+            NZ_K0_VALUE_INT4_TRANS :
+            NZ_K0_VALUE_INT8_TRANS;
+    int64_t aligneValue = transposeX2_ ? nz_k0_value_trans : NZ_K0_VALUE_INT8_INT4;
     int64_t alignedX1K = ((x1KDim_ + aligneValue - 1) / aligneValue) * aligneValue;
     if (alignedX1K != x2K1Dim * aligneValue) {
         OP_LOGE(ACLNN_ERR_PARAM_INVALID,
@@ -361,23 +440,28 @@ bool QuantMatmulChecker::CheckShapeForWeightNz() const
     return true;
 }
 
-bool QuantMatmulChecker::CheckKDimValueFp4Fp8WeightNZMicroScaling() const
+bool QuantMatmulChecker::CheckMXFP4FP8ParamsNDOrNZ() const
 {
-    // fp4内轴偶数校验
-    if (IsFp4Input(x1_, x2_)) {
-        if (x1KDim_ % MICRO_SCALING_ALIGN_NUM != 0 || x2KDim_ % MICRO_SCALING_ALIGN_NUM != 0) {
-            OP_LOGE(ACLNN_ERR_PARAM_INVALID, "In mx quantification and x1 and x2 are FLOAT4, \
-matrix multiplication is (batchX1, m, k) @ transpose(batchX2, n, k) = (batch, m, n). \
-The k-dimension of x1 and x2 should both be even number, actual they are %ld and %ld.", x1KDim_, x2KDim_);
-            return false;
-        }
+    // fp4 内轴偶数校验
+    auto x1DimNum = x1_->GetViewShape().GetDimNum();
+    auto x1InnerAxis = x1_->GetViewShape().GetDim(x1DimNum - 1);
+    auto x2DimNum = x2_->GetViewShape().GetDimNum();
+    auto x2InnerAxis = x2_->GetViewShape().GetDim(x2DimNum - 1);
+    if (x1InnerAxis % MICRO_SCALING_ALIGN_NUM != 0 || x2InnerAxis % MICRO_SCALING_ALIGN_NUM != 0) {
+        OP_LOGE(
+            ACLNN_ERR_PARAM_INVALID,
+            "In mx quantification and x1 and x2 are FLOAT4_E2M1, the inner axis must be even. However, x1 and x2 have "
+            "inner axes of %ld and %ld now.",
+            x1InnerAxis, x2InnerAxis);
+        return false;
     }
-    if (CeilDiv(x1KDim_, PERGROUP_GROUP_SIZE) % MICRO_SCALING_ALIGN_NUM != 0) {
-        OP_LOGE(ACLNN_ERR_PARAM_INVALID,
-                "In mx quantification, when x1 and x2 are FLOAT4, matrix multiplication is  (batchX1, m, k) @ \
-transpose(batchX2, n, k) = (batch, m, n). The k-dimension should satisfy that ceil(k, 32) is an even \
-number. Actual k-dimension is %ld and ceil(k, 32) = %ld.",
-                x1KDim_, CeilDiv(x1KDim_, PERGROUP_GROUP_SIZE));
+    // fp4 k轴大于2校验
+    if (x1KDim_ <= 2 || x2KDim_ <= 2) {
+        OP_LOGE(
+            ACLNN_ERR_PARAM_INVALID,
+            "In mx quantification and x1 and x2 are FLOAT4_E2M1, the k-dimension of x1 and x2 should both be greater "
+            "than 2. However, they are % ld and % ld.",
+            x1KDim_, x2KDim_);
         return false;
     }
     return true;
@@ -420,7 +504,7 @@ actual last dimension of %s is %ld, actual last dimension of %s is %ld.",
         return false;
     }
     if (IsFp4Input(x1_, x2_)) {
-        CHECK_RET(CheckKDimValueFp4Fp8WeightNZMicroScaling(), false);
+        CHECK_RET(CheckMXFP4FP8ParamsNDOrNZ(), false);
     }
     return true;
 }
@@ -473,7 +557,7 @@ x2 need to satisfy the relationship: ceil(k_x2, 128) == k_x2Scale, actual k_x2 i
     return true;
 }
 
-bool QuantMatmulChecker::ReCalcGroupSize(int64_t inputSize, int64_t scaleSize, int64_t &groupSize,
+bool QuantMatmulChecker::ReCalcGroupSize(int64_t inputSize, int64_t scaleSize, uint64_t &groupSize,
                                          const char *dimensionName) const
 {
     if (scaleSize == 0ULL) {
@@ -500,54 +584,86 @@ the %s dimension of %s [%ld], the real groupSize in %s dimension can not be infe
     return true;
 }
 
-bool QuantMatmulChecker::InferGroupSize(int64_t &groupSize)
+bool QuantMatmulChecker::InferGroupSizeM(
+    const aclTensor* x1, const aclTensor* x1Scale, const aclTensor* x2Scale, bool transX1, uint64_t& groupSizeM) const
 {
-    auto &x1 = std::get<INDEX_X1_IN_INPUT_TUPLE>(inputTensors_);
-    auto &x2 = std::get<INDEX_X2_IN_INPUT_TUPLE>(inputTensors_);
-    auto &x1Scale = std::get<INDEX_X1_SCALE_IN_QUANT_TUPLE>(quantTensors_);
-    auto &x2Scale = std::get<INDEX_X2_SCALE_IN_QUANT_TUPLE>(quantTensors_);
+    auto x1DimNum = x1->GetViewShape().GetDimNum();
+    auto x1ScaleDimNum = x1Scale->GetViewShape().GetDimNum();
+    auto inputSizeM =
+        transX1 ? x1->GetViewShape().GetDim(x1DimNum - 1) : x1->GetViewShape().GetDim(x1DimNum - PENULTIMATE_DIM);
+    auto scaleSizeM = 0L;
+    if (IsMicroScaling(x1Scale, x2Scale)) {
+        scaleSizeM = x1Scale->GetViewShape().GetDim(transX1 ? 1 : 0);
+    } else {
+        scaleSizeM = transX1 ? x1Scale->GetViewShape().GetDim(x1ScaleDimNum - 1) :
+                               x1Scale->GetViewShape().GetDim(x1ScaleDimNum - PENULTIMATE_DIM);
+    }
+    return ReCalcGroupSize(inputSizeM, scaleSizeM, groupSizeM, "m");
+}
+
+bool QuantMatmulChecker::InferGroupSizeK(
+    const aclTensor* x1, const aclTensor* x1Scale, const aclTensor* x2Scale, bool transX1, uint64_t& groupSizeK) const
+{
+    auto x1DimNum = x1->GetViewShape().GetDimNum();
+    auto x1ScaleDimNum = x1Scale->GetViewShape().GetDimNum();
+    auto inputSizeK =
+        transX1 ? x1->GetViewShape().GetDim(x1DimNum - PENULTIMATE_DIM) : x1->GetViewShape().GetDim(x1DimNum - 1);
+    auto scaleSizeK = 0L;
+    if (IsMicroScaling(x1Scale, x2Scale)) {
+        // when scale type is e8m0, scalex1 shape is [m, k/2, 2] or [k/2, m, 2]
+        scaleSizeK = x1Scale->GetViewShape().GetDim(transX1 ? 0 : 1) * MICRO_SCALING_ALIGN_NUM;
+    } else {
+        scaleSizeK = transX1 ? x1Scale->GetViewShape().GetDim(x1ScaleDimNum - PENULTIMATE_DIM) :
+                               x1Scale->GetViewShape().GetDim(x1ScaleDimNum - 1);
+    }
+    return ReCalcGroupSize(inputSizeK, scaleSizeK, groupSizeK, "k");
+}
+
+bool QuantMatmulChecker::InferGroupSizeN(
+    const aclTensor* x2, const aclTensor* x1Scale, const aclTensor* x2Scale, bool transX2, uint64_t groupSizeK,
+    uint64_t& groupSizeN) const
+{
+    auto x2DimNum = x2->GetViewShape().GetDimNum();
+    auto x2ScaleDimNum = x2Scale->GetViewShape().GetDimNum();
+    auto inputSizeN =
+        transX2 ? x2->GetViewShape().GetDim(x2DimNum - PENULTIMATE_DIM) : x2->GetViewShape().GetDim(x2DimNum - 1);
+    auto scaleSizeN = 0L;
+    if (IsMicroScaling(x1Scale, x2Scale)) {
+        scaleSizeN = x2Scale->GetViewShape().GetDim(transX2 ? 0 : 1);
+    } else {
+        if (IsA4W4PergroupNonSymmetric(groupSizeK)) {
+            scaleSizeN = transX2 ? x2Scale->GetViewShape().GetDim(x2ScaleDimNum - 1) :
+                                   x2Scale->GetViewShape().GetDim(x2ScaleDimNum - PENULTIMATE_DIM);
+        } else {
+            scaleSizeN = transX2 ? x2Scale->GetViewShape().GetDim(x2ScaleDimNum - PENULTIMATE_DIM) :
+                                   x2Scale->GetViewShape().GetDim(x2ScaleDimNum - 1);
+        }
+    }
+    return ReCalcGroupSize(inputSizeN, scaleSizeN, groupSizeN, "n");
+}
+
+bool QuantMatmulChecker::InferGroupSize(int64_t& groupSize)
+{
+    auto& x1 = std::get<INDEX_X1_IN_INPUT_TUPLE>(inputTensors_);
+    auto& x2 = std::get<INDEX_X2_IN_INPUT_TUPLE>(inputTensors_);
+    auto& x1Scale = std::get<INDEX_X1_SCALE_IN_QUANT_TUPLE>(quantTensors_);
+    auto& x2Scale = std::get<INDEX_X2_SCALE_IN_QUANT_TUPLE>(quantTensors_);
     // when x1Scale and x2Scale dim num is less than 2, groupsize not used
     if (x1Scale == nullptr || x1Scale->GetViewShape().GetDimNum() < 2 || x2Scale->GetViewShape().GetDimNum() < 2) {
         return true;
     }
-    auto x1DimNum = x1->GetViewShape().GetDimNum();
-    auto x2DimNum = x2->GetViewShape().GetDimNum();
-    auto x1ScaleDimNum = x1Scale->GetViewShape().GetDimNum();
-    auto x2ScaleDimNum = x2Scale->GetViewShape().GetDimNum();
     auto transX1 = std::get<INDEX_X1_IN_INPUT_TUPLE>(boolsTrans_);
     auto transX2 = std::get<INDEX_X2_IN_INPUT_TUPLE>(boolsTrans_);
-    int64_t groupSizeK = static_cast<int64_t>(static_cast<uint64_t>(groupSize) & GROUP_MNK_BIT_SIZE);
-    int64_t groupSizeN = static_cast<int64_t>((static_cast<uint64_t>(groupSize) >> GROUP_N_OFFSET) & GROUP_MNK_BIT_SIZE);
-    int64_t groupSizeM = static_cast<int64_t>((static_cast<uint64_t>(groupSize) >> GROUP_M_OFFSET) & GROUP_MNK_BIT_SIZE);
-    auto inputSizeM = transX1 ? x1->GetViewShape().GetDim(x1DimNum - 1) : x1->GetViewShape().GetDim(x1DimNum - PENULTIMATE_DIM);
-    auto scaleSizeM = 0;
-    if (IsMicroScaling(x1Scale, x2Scale)) {
-        scaleSizeM = x1Scale->GetViewShape().GetDim(transX1 ? 1 : 0);
-    } else {
-        scaleSizeM = transX1 ? x1Scale->GetViewShape().GetDim(x1ScaleDimNum - 1)
-                             : x1Scale->GetViewShape().GetDim(x1ScaleDimNum - PENULTIMATE_DIM);
-    }
-    CHECK_RET(ReCalcGroupSize(inputSizeM, scaleSizeM, groupSizeM, "m"), false);
-    auto inputSizeK = transX1 ? x1->GetViewShape().GetDim(x1DimNum - PENULTIMATE_DIM) : x1->GetViewShape().GetDim(x1DimNum - 1);
-    auto scaleSizeK = 0;
-    if (IsMicroScaling(x1Scale, x2Scale)) {
-        scaleSizeK = x1Scale->GetViewShape().GetDim(transX1 ? 0 : 1) * 2; //when scale type is e8m0, scalex1 shape is [m, k/2, 2] or [k/2, m, 2]
-    } else {
-        scaleSizeK = transX1 ? x1Scale->GetViewShape().GetDim(x1ScaleDimNum - PENULTIMATE_DIM)
-                             : x1Scale->GetViewShape().GetDim(x1ScaleDimNum - 1);
-    }
-    CHECK_RET(ReCalcGroupSize(inputSizeK, scaleSizeK, groupSizeK, "k"), false);
-    auto inputSizeN = transX2 ? x2->GetViewShape().GetDim(x2DimNum - PENULTIMATE_DIM) : x2->GetViewShape().GetDim(x2DimNum - 1);
-    auto scaleSizeN = 0;
-    if (IsMicroScaling(x1Scale, x2Scale)) {
-        scaleSizeN = x2Scale->GetViewShape().GetDim(transX2 ? 0 : 1);
-    } else {
-        scaleSizeN = transX2 ? x2Scale->GetViewShape().GetDim(x2ScaleDimNum - PENULTIMATE_DIM)
-                             : x2Scale->GetViewShape().GetDim(x2ScaleDimNum - 1);
-    }
-    CHECK_RET(ReCalcGroupSize(inputSizeN, scaleSizeN, groupSizeN, "n"), false);
-    OP_LOGD("Infered groupSize: groupSizeM: %lu, groupSizeN: %lu, groupSizeK: %lu.", groupSizeM, groupSizeN, groupSizeK);
-    groupSize = static_cast<int64_t>((groupSizeM << GROUP_M_OFFSET) | (groupSizeN << GROUP_N_OFFSET) | groupSizeK);
+    auto groupSizeMnk = DecodeGroupSizeMnk(groupSize);
+
+    CHECK_RET(InferGroupSizeM(x1, x1Scale, x2Scale, transX1, groupSizeMnk.m), false);
+    CHECK_RET(InferGroupSizeK(x1, x1Scale, x2Scale, transX1, groupSizeMnk.k), false);
+    CHECK_RET(InferGroupSizeN(x2, x1Scale, x2Scale, transX2, groupSizeMnk.k, groupSizeMnk.n), false);
+
+    OP_LOGD(
+        "Infered groupSize: groupSizeM: %lu, groupSizeN: %lu, groupSizeK: %lu.", groupSizeMnk.m, groupSizeMnk.n,
+        groupSizeMnk.k);
+    groupSize = EncodeGroupSizeMnk(groupSizeMnk);
     return true;
 }
 
@@ -866,46 +982,20 @@ bool QuantMatmulChecker::CheckGroupSize() const
     if (npuArch_ != NpuArch::DAV_3510) {
         return true;
     }
-    uint64_t groupSizeM = (static_cast<uint64_t>(groupSize_) >> GROUP_M_OFFSET) & GROUP_MNK_BIT_SIZE;
-    uint64_t groupSizeN = (static_cast<uint64_t>(groupSize_) >> GROUP_N_OFFSET) & GROUP_MNK_BIT_SIZE;
-    uint64_t groupSizeK = static_cast<uint64_t>(groupSize_) & GROUP_MNK_BIT_SIZE;
-    if (IsMicroScaling(x1Scale_, x2Scale_)) {
-        if (groupSizeK != static_cast<uint64_t>(PERGROUP_GROUP_SIZE) || groupSizeM != 1ULL || groupSizeN != 1ULL) {
-            OP_LOGE(ACLNN_ERR_PARAM_INVALID,
-                    "Unsupported groupSize. In mx quantification, input or infered groupSize should be \
-4295032864(for torch api, group_sizes should be [1, 1, 32]). Actual groupSize: %lu(for torch api \
-group_sizes is [%lu, %lu, %lu]).",
-                    groupSize_, groupSizeM, groupSizeN, groupSizeK);
-            return false;
-        }
+    const GroupSizeMNK groupSizeMnk = DecodeGroupSizeMnk(groupSize_);
+    if (IsA4W4PergroupNonSymmetric(groupSizeMnk.k)) {
+        CHECK_RET(CheckA4W4PergroupNonSymmetricGroupSize(groupSizeMnk), false);
+    } else if (IsMicroScaling(x1Scale_, x2Scale_)) {
+        CHECK_RET(CheckMxGroupSize(groupSize_, groupSizeMnk), false);
     } else if (IsPerblock(x1_, x2_, x1Scale_, x2Scale_)) {
-        if (groupSizeK != PERBLOCK_BLOCK_SIZE) {
-            OP_LOGE(ACLNN_ERR_PARAM_INVALID,
-                    "Unsupported groupSize. When quantification mode is G-B or B-B quantification, input or infered \
-groupSizeK(for torch api, group_size[2]) should be 128. Actual groupSizeK: %lu, groupSizeK = groupSize & 0xFFFF.",
-                    groupSizeK);
-            return false;
-        }
-        if (groupSizeN != PERBLOCK_BLOCK_SIZE) {
-            OP_LOGE(ACLNN_ERR_PARAM_INVALID,
-                    "Unsupported groupSize. When quantification mode is G-B or B-B quantification, input or infered \
-groupSizeN(for torch api, group_size[1]) should be 128. Actual groupSizeN: %lu, groupSizeN = (groupSize >> 16) & 0xFFFF.",
-                    groupSizeN);
-            return false;
-        }
-        if (groupSizeM != PERBLOCK_BLOCK_SIZE && groupSizeM != 1UL) {
-            OP_LOGE(ACLNN_ERR_PARAM_INVALID,
-                    "Unsupported groupSize. When quantification mode is G-B or B-B quantification, input or infered \
-groupSizeM(for torch api, group_size[0]) \
-should be 128 or 1. Actual groupSizeM: %lu, groupSizeM = (groupSize >> 32) & 0xFFFF.", groupSizeM);
-            return false;
-        }
+        CHECK_RET(CheckPerblockGroupSize(groupSizeMnk), false);
     } else if (groupSize_ != 0UL) {
-        OP_LOGE(ACLNN_ERR_PARAM_INVALID,
-                "Unsupported groupSize. When quantification mode is not G-B or B-B or mx quantification, \
+        OP_LOGE(
+            ACLNN_ERR_PARAM_INVALID,
+            "Unsupported groupSize. When quantification mode is not G-B or B-B or mx quantification, \
 groupSize should be 0(torch api group_sizes should be [0, 0, 0] or None). \
 Actual groupSize: %lu(torch api group_sizes is [%lu, %lu, %lu]).",
-                groupSize_, groupSizeM, groupSizeN, groupSizeK);
+            groupSize_, groupSizeMnk.m, groupSizeMnk.n, groupSizeMnk.k);
         return false;
     }
     OP_LOGD("QuantMatmul check group_size success.");
@@ -954,7 +1044,11 @@ bool QuantMatmulChecker::CheckFormatInt4() const
                 op::ToString(x1_->GetStorageFormat()).GetString());
         return false;
     }
-    if (x2_->GetStorageFormat() != op::Format::FORMAT_ND) {
+    if (isWeightNz_ && x2_->GetStorageFormat() != op::Format::FORMAT_FRACTAL_NZ) {
+        OP_LOGE(ACLNN_ERR_PARAM_INVALID, "Input x2 only support NZ in a4w4 weightNz scenario, but now is %s.",
+                op::ToString(x2_->GetStorageFormat()).GetString());
+        return false;
+    } else if (!isWeightNz_ && x2_->GetStorageFormat() != op::Format::FORMAT_ND) {
         OP_LOGE(ACLNN_ERR_PARAM_INVALID, "Input x2 only support ND in a4w4 scenario, but now is %s.",
                 op::ToString(x2_->GetStorageFormat()).GetString());
         return false;
@@ -964,11 +1058,15 @@ bool QuantMatmulChecker::CheckFormatInt4() const
 
 bool QuantMatmulChecker::CheckDtype4WeightNz() const
 {
-    if (!(x1_->GetDataType() == op::DataType::DT_INT8 || (x1_->GetDataType() == op::DataType::DT_FLOAT8_E4M3FN &&
-                                                          x2_->GetDataType() == op::DataType::DT_FLOAT8_E4M3FN))) {
-        OP_LOGE(ACLNN_ERR_PARAM_INVALID,
-                "When format of x2 is FRACTAL_NZ, input dtype must be INT8/FLOAT8_E4M3FN, actual x1 is %s, x2 is %s.",
-                op::ToString(x1_->GetDataType()).GetString(), op::ToString(x2_->GetDataType()).GetString());
+    if (!(x1_->GetDataType() == op::DataType::DT_INT8 ||
+          (x1_->GetDataType() == op::DataType::DT_FLOAT8_E4M3FN &&
+           x2_->GetDataType() == op::DataType::DT_FLOAT8_E4M3FN) ||
+          (x1_->GetDataType() == op::DataType::DT_FLOAT4_E2M1 && x2_->GetDataType() == op::DataType::DT_FLOAT4_E2M1))) {
+        OP_LOGE(
+            ACLNN_ERR_PARAM_INVALID,
+            "When format of x2 is FRACTAL_NZ, input dtype must be INT8/FLOAT8_E4M3FN/FLOAT4_E2M1FN, actual x1 is %s, "
+            "x2 is %s.",
+            op::ToString(x1_->GetDataType()).GetString(), op::ToString(x2_->GetDataType()).GetString());
         return false;
     }
 
@@ -976,10 +1074,22 @@ bool QuantMatmulChecker::CheckDtype4WeightNz() const
          x2_->GetDataType() == op::DataType::DT_FLOAT8_E4M3FN) &&
         !(x1Scale_->GetDataType() == op::DataType::DT_FLOAT8_E8M0 &&
           x2Scale_->GetDataType() == op::DataType::DT_FLOAT8_E8M0)) {
-        OP_LOGE(ACLNN_ERR_PARAM_INVALID,
-                "When format of x2 is FRACTAL_NZ and input dtype is FLOAT8_E4M3FN, x1Scale and x2Scale are \
-FLOAT8_E8M0, actual x1Scale is %s, x2Scale is %s.",
-                op::ToString(x1Scale_->GetDataType()).GetString(), op::ToString(x2Scale_->GetDataType()).GetString());
+        OP_LOGE(
+            ACLNN_ERR_PARAM_INVALID,
+            "When format of x2 is FRACTAL_NZ and input dtype is FLOAT8_E4M3FN, x1Scale and x2Scale are FLOAT8_E8M0, "
+            "actual x1Scale is %s, x2Scale is %s.",
+            op::ToString(x1Scale_->GetDataType()).GetString(), op::ToString(x2Scale_->GetDataType()).GetString());
+        return false;
+    }
+
+    if ((x1_->GetDataType() == op::DataType::DT_FLOAT4_E2M1 && x2_->GetDataType() == op::DataType::DT_FLOAT4_E2M1) &&
+        !(x1Scale_->GetDataType() == op::DataType::DT_FLOAT8_E8M0 &&
+          x2Scale_->GetDataType() == op::DataType::DT_FLOAT8_E8M0)) {
+        OP_LOGE(
+            ACLNN_ERR_PARAM_INVALID,
+            "When format of x2 is FRACTAL_NZ and input dtype is FLOAT4_E2M1, x1Scale and x2Scale are FLOAT8_E8M0, "
+            "actual x1Scale is %s, x2Scale is %s.",
+            op::ToString(x1Scale_->GetDataType()).GetString(), op::ToString(x2Scale_->GetDataType()).GetString());
         return false;
     }
     return true;
@@ -988,7 +1098,11 @@ FLOAT8_E8M0, actual x1Scale is %s, x2Scale is %s.",
 bool QuantMatmulChecker::CheckFormat() const
 {
     auto x2StorageFormat = ge::GetPrimaryFormat(x2_->GetStorageFormat());
-    CHECK_RET(x1_->GetStorageFormat() == op::Format::FORMAT_ND, false);
+    if (x1Scale_ != nullptr && npuArch_ == NpuArch::DAV_2002) {
+        OP_LOGD("QuantMatmul pertoken mode in Arch 2002: x1 should be FORMAT_FRACTAL_NZ");
+    } else {
+        CHECK_RET(x1_->GetStorageFormat() == op::Format::FORMAT_ND, false);
+    }
     if (npuArch_ == NpuArch::DAV_2002) {
         CHECK_RET(x2_->GetStorageFormat() == op::Format::FORMAT_FRACTAL_NZ, false);
     } else {
@@ -1146,7 +1260,11 @@ aclnnStatus QuantMatmulChecker::CheckDtypeOnlyL0c2ub() const
                 "QuantBatchMatmul support for %s is not implemented in a4w4 senario.",
                 op::ToString(socVersion_).GetString());
     }
-    CHECK_RET(CheckL0c2outAndL0c2ubPertensorPerchannel(), ACLNN_ERR_PARAM_INVALID);
+    if (x1Scale_ != nullptr) {
+ 	    CHECK_RET(CheckOnlyL0c2ubPertoken(), ACLNN_ERR_PARAM_INVALID);
+ 	} else {
+ 	    CHECK_RET(CheckL0c2outAndL0c2ubPertensorPerchannel(), ACLNN_ERR_PARAM_INVALID);
+ 	}
     return ACLNN_SUCCESS;
 }
 
@@ -1211,7 +1329,7 @@ bool QuantMatmulChecker::CheckL0c2outOrL0c2ubPertensorPerchannel() const
         OP_LOGE(ACLNN_ERR_PARAM_INVALID, "When out is INT32, x1 and x2 should be INT8.");
         return false;
     }
-    if (IsInt8Input(x1_, x2_)) {
+    if (IsInt8Input(x1_, x2_) || IsInt4Input(x1_, x2_)) {
         CHECK_RET(CheckL0c2outOrL0c2ubPertensorPerchannel4Int8Input(), false);
     } else if (IsHif8Input(x1_, x2_) || IsFp8Input(x1_, x2_)) {
         CHECK_RET(
@@ -1244,7 +1362,7 @@ bool QuantMatmulChecker::CheckMicroScaling() const
 {
     if (!IsFp4Input(x1_, x2_) && !IsFp8Input(x1_, x2_)) {
         OP_LOGE(ACLNN_ERR_PARAM_INVALID,
-                "Invalid x1 or x2 dtype. When %s and %s are FLOAT8_E8M0, the dtype of x1 and x2 must be FLOAT4 or \
+                "Invalid x1 or x2 dtype. When %s and %s are FLOAT8_E8M0, the dtype of x1 and x2 must be FLOAT4_E2M1 or \
 FLOAT8. Actual x1 dtype: %s, x2 dtype: %s.",
                 GetX1ScaleName().c_str(), GetX2ScaleName().c_str(),
                 RemoveDtInDtype(op::ToString(x1_->GetDataType()).GetString()).c_str(),
@@ -1262,11 +1380,15 @@ FLOAT8. Actual x1 dtype: %s, x2 dtype: %s.",
                 GetX2OffsetName().c_str());
         return false;
     }
-    if (IsFp4Input(x1_, x2_) && (transposeX1_ || !transposeX2_)) {
-        OP_LOGE(ACLNN_ERR_PARAM_INVALID,
-                "Unsupported transpose. When %s and %s are FLOAT8_E8M0 and x1 and x2 are FLOAT4, transposeX1 should be \
-false and transposeX2 should be true. Actual transposeX1: %d, transposeX2: %d.",
-                GetX1ScaleName().c_str(), GetX2ScaleName().c_str(), transposeX1_, transposeX2_);
+    // MXFP4 NZ场景下，transposeX1必须为false
+    if (IsFp4Input(x1_, x2_) && ge::GetPrimaryFormat(x2_->GetStorageFormat()) == Format::FORMAT_FRACTAL_NZ &&
+        transposeX1_) {
+        OP_LOGE(
+            ACLNN_ERR_PARAM_INVALID,
+            "Unsupported transpose. When %s and %s are FLOAT8_E8M0, x1 and x2 are FLOAT4_E2M1 and x2 is FRACTAL_NZ "
+            "format, transposeX1 should "
+            "be false. Actual transposeX1: %s.",
+            GetX1ScaleName().c_str(), GetX2ScaleName().c_str(), transposeX1_ ? "true" : "false");
         return false;
     }
     return true;
@@ -1274,8 +1396,8 @@ false and transposeX2 should be true. Actual transposeX1: %d, transposeX2: %d.",
 
 bool QuantMatmulChecker::CheckL0c2outOrL0c2ubPertoken() const
 {
-    CHECK_RET(OpCheckDtypeNotMatch(interfaceType_, X1_NAME, x1_, op::DataType::DT_INT8), false);
-    CHECK_RET(OpCheckDtypeNotMatch(interfaceType_, X2_NAME, x2_, op::DataType::DT_INT8), false);
+    CHECK_RET(OpCheckDtypeNotSupport(interfaceType_, X1_NAME, x1_, {op::DataType::DT_INT4, op::DataType::DT_INT8}), false);
+    CHECK_RET(OpCheckDtypeNotSupport(interfaceType_, X2_NAME, x2_, {op::DataType::DT_INT4, op::DataType::DT_INT8}), false);
     CHECK_RET(OpCheckDtypeNotSupport(interfaceType_, OUT_NAME, out_, PERTOKEN_OUT_TYPE_SUPPORT_LIST), false);
     CHECK_RET(OpCheckDtypeNotMatch(interfaceType_, X1SCALE_NAME, x1Scale_, op::DataType::DT_FLOAT), false);
 
@@ -1302,6 +1424,28 @@ bool QuantMatmulChecker::CheckL0c2outOrL0c2ubPertoken() const
         }
     }
 
+    return true;
+}
+
+bool QuantMatmulChecker::CheckL0C2outOrL0C2ubPertokenPergroup() const {
+    if (x1_ == nullptr || x2_ == nullptr || out_ == nullptr ||
+        x1Scale_ == nullptr || x2Scale_ == nullptr || x2Offset_ == nullptr) {
+        return false;
+    }
+    CHECK_RET(OpCheckDtypeNotSupport(interfaceType_, X1_NAME, x1_, {op::DataType::DT_INT8, op::DataType::DT_INT4}), false);
+    CHECK_RET(OpCheckDtypeNotSupport(interfaceType_, X2_NAME, x2_, {op::DataType::DT_INT8, op::DataType::DT_INT4}), false);
+    CHECK_RET(OpCheckDtypeNotSupport(interfaceType_, OUT_NAME, out_, {op::DataType::DT_FLOAT16, op::DataType::DT_BF16}), false);
+    CHECK_RET(OpCheckDtypeNotSupport(interfaceType_, X1SCALE_NAME, x1Scale_, {op::DataType::DT_FLOAT}), false);
+    CHECK_RET(OpCheckDtypeNotSupport(interfaceType_, X2SCALE_NAME, x2Scale_, {op::DataType::DT_FLOAT}), false);
+    CHECK_RET(OpCheckDtypeNotSupport(interfaceType_, X2OFFSET_NAME, x2Offset_, {op::DataType::DT_FLOAT16}), false);
+
+    if (transposeX1_ != false || transposeX2_ != true) {
+        OP_LOGE(
+            ACLNN_ERR_PARAM_INVALID,
+            "In a4w4 scenario, only support transA=false and transB=true, but got transA=%s, transB=%s.",
+            transposeX1_ ? "true" : "false", transposeX2_ ? "true" : "false");
+        return false;
+    }
     return true;
 }
 
@@ -1339,11 +1483,6 @@ aclnnStatus QuantMatmulChecker::CheckDtypeL0c2outOrL0c2ub() const
     if (ge::GetPrimaryFormat(x2_->GetStorageFormat()) == op::Format::FORMAT_FRACTAL_NZ && !CheckDtype4WeightNz()) {
         return ACLNN_ERR_PARAM_INVALID;
     }
-    if (isA4W4_) {
-        OP_LOGE(ACLNN_ERR_RUNTIME_ERROR,
-                "QuantBatchMatmul support for %s is not implemented in a4w4 senario.",
-                op::ToString(socVersion_).GetString());
-    }
     if (outType_ == op::DataType::DT_INT32 && x1Scale_ != nullptr) { 
         OP_LOGE(ACLNN_ERR_PARAM_INVALID,"The pertokenScaleOptional/x1Scale(pertokenScale) should be nullptr when out is INT32."); 
         return ACLNN_ERR_PARAM_INVALID; 
@@ -1352,7 +1491,9 @@ aclnnStatus QuantMatmulChecker::CheckDtypeL0c2outOrL0c2ub() const
         CHECK_RET(CheckL0c2outOrL0c2ubPertensorPerchannel(), ACLNN_ERR_PARAM_INVALID);
     } else if (IsMicroScaling(x1Scale_, x2Scale_)) { // micro scaling
         CHECK_RET(CheckMicroScaling(), ACLNN_ERR_PARAM_INVALID);
-    } else if (IsInt8Input(x1_, x2_)) { // pertoken
+    } else if (IsInt4Input(x1_, x2_) && x2Offset_ != nullptr) { // pertoken
+        CHECK_RET(CheckL0C2outOrL0C2ubPertokenPergroup(), ACLNN_ERR_PARAM_INVALID);
+    } else if (IsInt8Input(x1_, x2_) || IsInt4Input(x1_, x2_)) { // pertoken
         CHECK_RET(CheckL0c2outOrL0c2ubPertoken(), ACLNN_ERR_PARAM_INVALID);
     } else if (IsHif8Input(x1_, x2_) ||
                IsFp8Input(x1_, x2_)) {  // double scale, pertensor-perchannel, fp8/hif8 pertoken, perblock/pertile
@@ -1367,6 +1508,31 @@ aclnnStatus QuantMatmulChecker::CheckDtypeL0c2outOrL0c2ub() const
     }
     return ACLNN_SUCCESS;
 }
+
+ bool QuantMatmulChecker::CheckOnlyL0c2ubPertoken() const
+ 	 {
+ 	     CHECK_RET(OpCheckDtypeNotMatch(interfaceType_, X1_NAME, x1_, op::DataType::DT_INT8), false);
+ 	     CHECK_RET(OpCheckDtypeNotMatch(interfaceType_, X2_NAME, x2_, op::DataType::DT_INT8), false);
+ 	     CHECK_RET(OpCheckDtypeNotMatch(interfaceType_, X1SCALE_NAME, x1Scale_, op::DataType::DT_FLOAT), false);
+ 	     if (outType_ == op::DataType::DT_FLOAT16) {
+ 	         CHECK_RET(OpCheckDtypeNotMatch(interfaceType_, X2SCALE_NAME,
+ 	                                          x2Scale_, op::DataType::DT_FLOAT), false);
+ 	         if (bias_ != nullptr) {
+ 	             CHECK_RET(OpCheckDtypeNotMatch(interfaceType_, BIAS_NAME,
+ 	                                              bias_,  op::DataType::DT_INT32), false);
+ 	         }
+ 	         if (x2Offset_ != nullptr) {
+ 	             OP_LOGE(ACLNN_ERR_PARAM_INVALID,
+ 	                     "When out dtype is FLOAT16, %s must be null, but it is not null.", GetX2OffsetName().c_str());
+ 	             return false;
+ 	         }
+ 	     } else {
+ 	         OP_LOGE(ACLNN_ERR_PARAM_INVALID, "When pertokenScaleOptional is not nullptr, out dtype should be FLOAT16, actual dtype is: %s.",
+ 	                 RemoveDtInDtype(op::ToString(outType_).GetString()).c_str());
+ 	         return false;
+ 	     }
+ 	     return true;
+ 	 }
 
 aclnnStatus QuantMatmulChecker::CheckDtype() const
 {

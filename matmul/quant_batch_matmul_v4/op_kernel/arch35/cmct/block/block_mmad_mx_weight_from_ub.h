@@ -16,7 +16,7 @@
 #define QUANT_BATCH_MATMUL_V4_CMCT_BLOCK_BLOCK_MMAD_MX_WEIGHT_FROM_UB_H
 
 #include "cmct/block/block_mmad.h"
-#include "../../quant_batch_matmul_v4_tiling_data.h"
+#include "../../quant_batch_matmul_v4_tiling_data_apt.h"
 
 namespace QuantBatchMatmulV4 {
 namespace Block {
@@ -41,7 +41,7 @@ public:
         qbmmv4_tiling::QuantBatchMatmulV4TilingDataParams const* tiling)
     {
         auto stepKa = static_cast<uint32_t>(tiling->matmulTiling.stepKa);
-        auto stepKb = static_cast<uint32_t>(tiling->matmulTiling.stepKa);
+        auto stepKb = static_cast<uint32_t>(tiling->matmulTiling.stepKb);
         auto baseK = static_cast<uint32_t>(tiling->matmulTiling.baseK);
         auto baseM = static_cast<uint32_t>(tiling->matmulTiling.baseM);
         auto baseN = static_cast<uint32_t>(tiling->matmulTiling.baseN);

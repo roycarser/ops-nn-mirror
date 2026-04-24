@@ -340,7 +340,7 @@ namespace RmsNorm {
             // first flod
             uint32_t firstFlodTial = static_cast<uint32_t>(colNum - colFlodFactor);
             uint16_t firstFlodAddLoops = static_cast<uint16_t>((firstFlodTial + VectorLenB32-1) / VectorLenB32);
-            uint16_t firstFlodWithOutAddLoops = static_cast<uint16_t>((colNumAlign + VectorLenB32-1) / VectorLenB32) - firstFlodAddLoops;
+            uint16_t firstFlodWithOutAddLoops = static_cast<uint16_t>((colFlodNum + VectorLenB32-1) / VectorLenB32) - firstFlodAddLoops;
 
             // first vcadd
             uint32_t firstVcaddNum = static_cast<uint32_t>((colFlodFactor + VectorLenB32-1 )/ VectorLenB32);
@@ -479,7 +479,7 @@ namespace RmsNorm {
         uint64_t curUbTails;
         uint32_t blockSize = GetUbBlockSize();
         uint32_t blockSizeB32 = GetUbBlockSize() / sizeof(float);
-        uint32_t VectorLenB32 = GetVRegSize() / sizeof(float);
+        static constexpr uint32_t VectorLenB32 = GetVRegSize() / sizeof(float);
         static constexpr float RMS_POS_INF = 3.40282366920938E+38;
         static constexpr float RMS_ZERO = 0.0f;
         static constexpr int32_t NUM_ONE = 1;

@@ -9,6 +9,7 @@
  */
 
 #include "convolutionbackward.h"
+#include "convolution_backward_white_list.h"
 #include "aclnn_kernels/common/op_error_check.h"
 #include "aclnn_kernels/transpose.h"
 #include "opdev/make_op_executor.h"
@@ -20,6 +21,7 @@
 #include "op_api/aclnn_util.h"
 #include "runtime/context.h"
 #include "aclnn_kernels/transpose.h"
+#include "acl/acl_rt.h"
 
 using namespace op;
 
@@ -30,7 +32,6 @@ const int64_t DIM_0 = 0;
 const int64_t DIM_1 = 1;
 const int64_t DIM_2 = 2;
 const int64_t DIM_3 = 3;
-const size_t CONV3D_BACKPROP_WHITE_LIST_CASE_SIZE = 26;
 const int64_t N_DIM_NCDHW_INDEX = 0;
 const int64_t C_DIM_NCDHW_INDEX = 1;
 const int64_t D_DIM_NCDHW_INDEX = 2;
@@ -38,6 +39,7 @@ const int64_t H_DIM_NCDHW_INDEX = 3;
 const int64_t W_DIM_NCDHW_INDEX = 4;
 const FVector<int64_t> OUTPUT_BACKPROP_N2H_SHAPE_DIMS = {3, 2, 0, 4, 1};
 const FVector<int64_t> WEIGHT_N2H_SHAPE_DIMS = {0, 2, 3, 4, 1};
+const FVector<int64_t> WEIGHT_TRANSPOSE_SHAPE_DIMS = {0, 2, 3, 4, 1};
 constexpr int64_t C1_DIM_NDC1HWC0_INDEX = 2;
 constexpr int64_t C0_DIM_NDC1HWC0_INDEX = 5;
 constexpr uint32_t BASIC_BLOCK_SIZE_128 = 128;
@@ -57,1019 +59,9 @@ constexpr int64_t W_IN_TRANSPOSE_N2H_RULE_MAX = 64;
 constexpr int64_t W_K_TRANSPOSE_N2H_RULE_MAX = 10;
 constexpr int64_t N2H_W_IN_SIXTY = 60;
 constexpr int64_t N2H_W_IN_FORTY = 40;
-
-const vector<vector<int64_t>> CONV2D_BACKPROP_INPUT_CAST_WHITE_LIST =
-{
-  {
-    DataType::DT_BF16,  // input data type
-    7, 4096, 1, 1,        // input shape
-    64, 1024, 1, 2,        // filter shape
-    7, 64, 1, 12,        // outBackprop shape
-    1, 5,                  // stride
-    0, 50,                  // padding
-    1, 45,                  // dilation
-    4                      // groups
-  },
-};
-
-const vector<vector<int64_t>> CONV2D_BACKPROP_INPUT_V2_WHITE_LIST =
-{
-  {
-    DataType::DT_FLOAT,  // input data type
-    4, 320, 80, 80,        // input shape
-    320, 320, 3, 3,        // filter shape
-    4, 320, 80, 80,        // outBackprop shape
-    1, 1,                  // stride
-    1, 1,                  // padding
-    1, 1,                  // dilation
-    1                      // groups
-  },
-  {
-    DataType::DT_FLOAT,  // input data type
-    3, 2, 3, 3,        // input shape
-    2, 2, 1, 1,        // filter shape
-    3, 2, 3, 3,        // outBackprop shape
-    1, 1,                  // stride
-    0, 0,                  // padding
-    1, 1,                  // dilation
-    1                      // groups
-  },
-  {
-    DataType::DT_FLOAT,  // input data type
-    1, 4, 1, 8,        // input shape
-    2, 4, 1, 4,        // filter shape
-    1, 2, 1, 5,        // outBackprop shape
-    1, 1,                  // stride
-    0, 0,                  // padding
-    1, 1,                  // dilation
-    1                      // groups
-  },
-  {
-    DataType::DT_FLOAT,  // input data type
-    1, 4, 1, 9,        // input shape
-    2, 4, 1, 4,        // filter shape
-    1, 2, 1, 8,        // outBackprop shape
-    1, 1,                  // stride
-    1, 1,                  // padding
-    1, 1,                  // dilation
-    1                      // groups
-  },
-  {
-    DataType::DT_FLOAT,  // input data type
-    4, 4, 4, 4,        // input shape
-    8, 4, 3, 3,        // filter shape
-    4, 8, 1, 1,        // outBackprop shape
-    3, 3,                  // stride
-    0, 0,                  // padding
-    1, 1,                  // dilation
-    1                      // groups
-  }
-};
-
-const vector<vector<int64_t>> CONV2D_BACKPROP_FILTER_V3_WHITE_LIST =
-{
-  {
-    DataType::DT_FLOAT16,  // input data type
-    1, 640, 104, 152,      // input shape
-    640, 640, 3, 3,        // filter shape
-    1, 640, 104, 152,      // outBackprop shape
-    1, 1,                  // stride
-    1, 1,                  // padding
-    1, 1,                  // dilation
-    1                      // groups
-  },
-  {
-    DataType::DT_FLOAT,  // input data type
-    4, 320, 80, 80,        // input shape
-    320, 320, 3, 3,        // filter shape
-    4, 320, 80, 80,        // outBackprop shape
-    1, 1,                  // stride
-    1, 1,                  // padding
-    1, 1,                  // dilation
-    1                      // groups
-  }
-};
-
-const vector<vector<int64_t>> CONV2D_BACKPROP_FILTER_DETERMINISTIC_WHITE_LIST =
-{
-  {
-    DataType::DT_BF16,     // input data type
-    2, 2304, 4098, 1,      // input shape
-    2304, 1, 3, 1,         // filter shape
-    2, 2304, 4096, 1,      // outBackprop shape
-    1, 1,                  // stride
-    0, 0,                  // padding
-    1, 1,                  // dilation
-    2304                   // groups
-  },
-  {
-    DataType::DT_BF16,     // input data type
-    2, 512, 1026, 1,      // input shape
-    512, 1, 3, 1,         // filter shape
-    2, 512, 1024, 1,      // outBackprop shape
-    1, 1,                  // stride
-    0, 0,                  // padding
-    1, 1,                  // dilation
-    512                   // groups
-  },
-  {
-    DataType::DT_BF16,     // input data type
-    2, 384, 1026, 1,      // input shape
-    384, 1, 3, 1,         // filter shape
-    2, 384, 1024, 1,      // outBackprop shape
-    1, 1,                  // stride
-    0, 0,                  // padding
-    1, 1,                  // dilation
-    384                   // groups
-  },
-  {
-    DataType::DT_FLOAT16,     // input data type
-    2, 2304, 4098, 1,      // input shape
-    2304, 1, 3, 1,         // filter shape
-    2, 2304, 4096, 1,      // outBackprop shape
-    1, 1,                  // stride
-    0, 0,                  // padding
-    1, 1,                  // dilation
-    2304                   // groups
-  },
-  {
-    DataType::DT_FLOAT16,     // input data type
-    2, 512, 1026, 1,      // input shape
-    512, 1, 3, 1,         // filter shape
-    2, 512, 1024, 1,      // outBackprop shape
-    1, 1,                  // stride
-    0, 0,                  // padding
-    1, 1,                  // dilation
-    512                   // groups
-  },
-  {
-    DataType::DT_FLOAT16,     // input data type
-    2, 384, 1026, 1,      // input shape
-    384, 1, 3, 1,         // filter shape
-    2, 384, 1024, 1,      // outBackprop shape
-    1, 1,                  // stride
-    0, 0,                  // padding
-    1, 1,                  // dilation
-    384                   // groups
-  }
-};
-
-const vector<vector<int64_t>> CONV3D_BACKPROP_INPUT_V2_WHITE_LIST =
-{
-  // ID_2
-  {
-    DataType::DT_BF16,  // input data type
-    1, 256, 62, 66, 66, // input shape
-    128, 256, 3, 3, 3,  // filter shape
-    1, 128, 60, 64, 64, // outBackprop shape
-    1, 1, 1,            // stide
-    0, 0, 0,            // padding
-    1, 1, 1,            // dilation
-    1                   // groups
-  },
-  // ID_4
-  {
-    DataType::DT_BF16,
-    1, 256, 60, 64, 64,
-    4, 256, 1, 1, 1,
-    1, 4, 60, 64, 64,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1
-  },
-  // ID_6
-  {
-    DataType::DT_BF16,
-    1, 256, 122, 130, 130,
-    256, 256, 4, 4, 4,
-    1, 256, 60, 64, 64,
-    2, 2, 2,
-    0, 0, 0,
-    1, 1, 1,
-    1
-  },
-  {
-    DataType::DT_BF16,   // input data type
-    4, 3, 17, 229, 229,  // input shape
-    64, 3, 7, 7, 7,      // filter shape
-    4, 64, 6, 112, 112,  // outBackprop shape
-    2, 2, 2,             // stide
-    0, 0, 0,             // padding
-    1, 1, 1,             // dilation
-    1                    // groups
-  },
-  // 15
-  {
-    DataType::DT_BF16,
-    1, 4, 5, 32, 32,
-    4, 4, 1, 1, 1,
-    1, 4, 5, 32, 32,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1
-  },
-  // 16
-  {
-    DataType::DT_BF16,  // input data type
-    1, 4, 7, 32, 32,    // input shape
-    512, 4, 3, 3, 3,    // filter shape
-    1, 512, 5, 32, 32,  // outBackprop shape
-    1, 1, 1,            // stide
-    0, 1, 1,            // padding
-    1, 1, 1,            // dilation
-    1                   // groups
-  },
-  // 17
-  {
-    DataType::DT_BF16,
-    1, 512, 5, 32, 32,
-    512, 512, 1, 1, 1,
-    1, 512, 5, 32, 32,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1
-  },
-  // 18
-  {
-    DataType::DT_BF16,
-    1, 512, 5, 65, 65,
-    512, 512, 1, 3, 3,
-    1, 512, 5, 32, 32,
-    1, 2, 2,
-    0, 0, 0,
-    1, 1, 1,
-    1
-  },
-  //19
-  {
-    DataType::DT_BF16,
-    1, 512, 7, 32, 32,
-    512, 512, 3, 3, 3,
-    1, 512, 5, 32, 32,
-    1, 1, 1,
-    0, 1, 1,
-    1, 1, 1,
-    1
-  },
-  // 20
-  {
-    DataType::DT_BF16,
-    1, 256, 5, 64, 64,
-    512, 256, 1, 1, 1,
-    1, 512, 5, 64, 64,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1
-  },
-  // 21
-  {
-    DataType::DT_BF16,
-    1, 256, 7, 64, 64,
-    512, 256, 3, 3, 3,
-    1, 512, 5, 64, 64,
-    1, 1, 1,
-    0, 1, 1,
-    1, 1, 1,
-    1
-  },
-  // 22
-  {
-    DataType::DT_BF16,
-    1, 512, 5, 64, 64,
-    512, 512, 1, 3, 3,
-    1, 512, 5, 64, 64,
-    1, 1, 1,
-    0, 1, 1,
-    1, 1, 1,
-    1
-  },
-  // 23
-  {
-    DataType::DT_BF16,
-    1, 512, 7, 64, 64,
-    512, 512, 3, 3, 3,
-    1, 512, 5, 64, 64,
-    1, 1, 1,
-    0, 1, 1,
-    1, 1, 1,
-    1
-  },
-  // 25
-  {
-    DataType::DT_BF16,
-    1, 512, 11, 64, 64,
-    512, 512, 3, 3, 3,
-    1, 512, 9, 64, 64,
-    1, 1, 1,
-    0, 1, 1,
-    1, 1, 1,
-    1
-  },
-  // 26
-  {
-    DataType::DT_BF16,
-    1, 512, 7, 32, 32,
-    8, 512, 3, 3, 3,
-    1, 8, 5, 32, 32,
-    1, 1, 1,
-    0, 1, 1,
-    1, 1, 1,
-    1
-  },
-  // 27
-  {
-    DataType::DT_BF16,  // input data type
-    1, 8, 5, 32, 32,    // input shape
-    8, 8, 1, 1, 1,      // filter shape
-    1, 8, 5, 32, 32,    // outBackprop shape
-    1, 1, 1,            // stide
-    0, 0, 0,            // padding
-    1, 1, 1,            // dilation
-    1                   // groups
-  },
-  {
-    DataType::DT_BF16,
-    2, 512, 19, 128, 128,
-    256, 512, 3, 3, 3,
-    2, 256, 17, 128, 128,
-    1, 1, 1,
-    0, 1, 1,
-    1, 1, 1,
-    1
-  },
-  {
-    DataType::DT_BF16,
-    2, 4, 5, 32, 32,
-    4, 4, 1, 1, 1,
-    2, 4, 5, 32, 32,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1
-  },
-  {
-    DataType::DT_BF16,  // input data type
-    2, 4, 7, 32, 32,    // input shape
-    512, 4, 3, 3, 3,    // filter shape
-    2, 512, 5, 32, 32,  // outBackprop shape
-    1, 1, 1,            // stide
-    0, 1, 1,            // padding
-    1, 1, 1,            // dilation
-    1                   // groups
-  },
-  {
-    DataType::DT_BF16,
-    2, 512, 5, 32, 32,
-    512, 512, 1, 1, 1,
-    2, 512, 5, 32, 32,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1
-  },
-  {
-    DataType::DT_BF16,
-    2, 512, 5, 65, 65,
-    512, 512, 1, 3, 3,
-    2, 512, 5, 32, 32,
-    1, 2, 2,
-    0, 0, 0,
-    1, 1, 1,
-    1
-  },
-  {
-    DataType::DT_BF16,
-    2, 512, 7, 32, 32,
-    512, 512, 3, 3, 3,
-    2, 512, 5, 32, 32,
-    1, 1, 1,
-    0, 1, 1,
-    1, 1, 1,
-    1
-  },
-  {
-    DataType::DT_BF16,
-    2, 256, 5, 64, 64,
-    512, 256, 1, 1, 1,
-    2, 512, 5, 64, 64,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1
-  },
-  {
-    DataType::DT_BF16,
-    2, 256, 7, 64, 64,
-    512, 256, 3, 3, 3,
-    2, 512, 5, 64, 64,
-    1, 1, 1,
-    0, 1, 1,
-    1, 1, 1,
-    1
-  },
-  {
-    DataType::DT_BF16,
-    2, 512, 5, 64, 64,
-    512, 512, 1, 3, 3,
-    2, 512, 5, 64, 64,
-    1, 1, 1,
-    0, 1, 1,
-    1, 1, 1,
-    1
-  },
-  {
-    DataType::DT_BF16,
-    2, 512, 7, 64, 64,
-    512, 512, 3, 3, 3,
-    2, 512, 5, 64, 64,
-    1, 1, 1,
-    0, 1, 1,
-    1, 1, 1,
-    1
-  },
-  {
-    DataType::DT_BF16,
-    2, 512, 11, 64, 64,
-    512, 512, 3, 3, 3,
-    2, 512, 9, 64, 64,
-    1, 1, 1,
-    0, 1, 1,
-    1, 1, 1,
-    1
-  },
-  {
-    DataType::DT_BF16,
-    2, 512, 7, 32, 32,
-    8, 512, 3, 3, 3,
-    2, 8, 5, 32, 32,
-    1, 1, 1,
-    0, 1, 1,
-    1, 1, 1,
-    1
-  },
-  {
-    DataType::DT_BF16,  // input data type
-    2, 8, 5, 32, 32,    // input shape
-    8, 8, 1, 1, 1,      // filter shape
-    2, 8, 5, 32, 32,    // outBackprop shape
-    1, 1, 1,            // stide
-    0, 0, 0,            // padding
-    1, 1, 1,            // dilation
-    1                   // groups
-  },
-  {
-    DataType::DT_BF16,
-    16, 128, 20, 64, 64,
-    128, 128, 1, 1, 1,
-    16, 128, 20, 64, 64,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    16, 128, 22, 66, 66,
-    128, 128, 3, 3, 3,
-    16, 128, 20, 64, 64,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    16, 256, 20, 32, 32,
-    256, 256, 1, 1, 1,
-    16, 256, 20, 32, 32,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    16, 682, 20, 32, 32,
-    256, 682, 1, 1, 1,
-    16, 256, 20, 32, 32,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    16, 256, 20, 32, 32,
-    1364, 256, 1, 1, 1,
-    16, 1364, 20, 32, 32,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    16, 512, 20, 16, 16,
-    512, 512, 1, 1, 1,
-    16, 512, 20, 16, 16,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    16, 1365, 20, 16, 16,
-    512, 1365, 1, 1, 1,
-    16, 512, 20, 16, 16,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    16, 512, 20, 16, 16,
-    2730, 512, 1, 1, 1,
-    16, 2730, 20, 16, 16,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    16, 512, 10, 16, 16,
-    512, 512, 1, 1, 1,
-    16, 512, 10, 16, 16,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    16, 512, 12, 18, 18,
-    512, 512, 3, 3, 3,
-    16, 512, 10, 16, 16,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    16, 512, 5, 16, 16,
-    512, 512, 1, 1, 1,
-    16, 512, 5, 16, 16,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    16, 512, 7, 18, 18,
-    512, 512, 3, 3, 3,
-    16, 512, 5, 16, 16,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    16, 1365, 5, 16, 16,
-    512, 1365, 1, 1, 1,
-    16, 512, 5, 16, 16,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    16, 512, 5, 16, 16,
-    2730, 512, 1, 1, 1,
-    16, 2730, 5, 16, 16,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    16, 1365,20, 16, 16,
-    512, 1365, 1, 1, 1,
-    16, 512, 20, 16, 16,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    16, 682, 20, 32, 32,
-    256, 682, 1, 1, 1,
-    16, 256, 20, 32, 32,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    16, 256, 22, 34, 34,
-    256, 256, 3, 3, 3,
-    16, 256, 20, 32, 32,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    16, 512, 22, 18, 18,
-    512, 512, 3, 3, 3,
-    16, 512, 20, 16, 16,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    8, 64, 22, 130, 130,
-    3, 64, 3, 3, 3,
-    8, 3, 20, 128, 128,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    8, 128, 20, 64, 64,
-    128, 128, 1, 1, 1,
-    8, 128, 20, 64, 64,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    8, 128, 22, 66, 66,
-    128, 128, 3, 3, 3,
-    8, 128, 20, 64, 64,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    8, 256, 20, 32, 32,
-    256, 256, 1, 1, 1,
-    8, 256, 20, 32, 32,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    8, 682, 20, 32, 32,
-    256, 682, 1, 1, 1,
-    8, 256, 20, 32, 32,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    8, 256, 20, 32, 32,
-    1364, 256, 1, 1, 1,
-    8, 1364, 20, 32, 32,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    8, 512, 20, 16, 16,
-    512, 512, 1, 1, 1,
-    8, 512, 20, 16, 16,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    8, 1365, 20, 16, 16,
-    512, 1365, 1, 1, 1,
-    8, 512, 20, 16, 16,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    8, 512, 20, 16, 16,
-    2730, 512, 1, 1, 1,
-    8, 2730, 20, 16, 16,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    8, 512, 10, 16, 16,
-    512, 512, 1, 1, 1,
-    8, 512, 10, 16, 16,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    8, 512, 12, 18, 18,
-    512, 512, 3, 3, 3,
-    8, 512, 10, 16, 16,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    8, 512, 5, 16, 16,
-    512, 512, 1, 1, 1,
-    8, 512, 5, 16, 16,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    8, 512, 7, 18, 18,
-    512, 512, 3, 3, 3,
-    8, 512, 5, 16, 16,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    8, 1365, 5, 16, 16,
-    512, 1365, 1, 1, 1,
-    8, 512, 5, 16, 16,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    8, 512, 5, 16, 16,
-    2730, 512, 1, 1, 1,
-    8, 2730, 5, 16, 16,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    1, 240, 6, 62, 62,
-    120, 240, 3, 3, 3,
-    1, 120, 4, 60, 60,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    1, 240, 4, 60, 60,
-    4, 240, 1, 1, 1,
-    1, 4, 4, 60, 60,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    1, 240, 6, 62, 62,
-    240, 240, 3, 3, 3,
-    1, 240, 4, 60, 60,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    1, 128, 4, 60, 60,
-    256, 128, 1, 1, 1,
-    1, 256, 4, 60, 60,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    1, 256, 6, 62, 62,
-    128, 256, 3, 3, 3,
-    1, 128, 4, 60, 60,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    1, 4, 4, 60, 60,
-    256, 4, 1, 1, 1,
-    1, 256, 4, 60, 60,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    1, 256, 4, 60, 60,
-    4, 256, 1, 1, 1,
-    1, 4, 4, 60, 60,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    1, 256, 6, 62, 62,
-    256, 256, 3, 3, 3,
-    1, 256, 4, 60, 60,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    1, 128, 60, 64, 64,
-    256, 128, 1, 1, 1,
-    1, 256, 60, 64, 64,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    1, 256, 62, 66, 66,
-    128, 256, 3, 3, 3,
-    1, 128, 60, 64, 64,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    1, 4, 60, 64, 64,
-    256, 4, 1, 1, 1,
-    1, 256, 60, 64, 64,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    1, 256, 60, 64, 64,
-    4, 256, 1, 1, 1,
-    1, 4, 60, 64, 64,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    1, 256, 62, 66, 66,
-    256, 256, 3, 3, 3,
-    1, 256, 60, 64, 64,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-  {
-    DataType::DT_BF16,
-    1, 256, 122, 130, 130,
-    256, 256, 4, 4, 4,
-    1, 256, 60, 64, 64,
-    2, 2, 2,
-    0, 0, 0,
-    1, 1, 1,
-    1,
-  },
-};
-
-const vector<vector<int64_t>> CONV3D_BACKPROP_FILTER_V2_WHITE_LIST =
-{
-  {
-    DataType::DT_BF16,
-    1, 128, 19, 256, 256,
-    3, 128, 3, 3, 3,
-    1, 3, 17, 256, 256,
-    1, 1, 1,
-    0, 1, 1,
-    1, 1, 1,
-    1
-  },
-  {
-    DataType::DT_BF16,
-    1, 512, 7, 32, 32,
-    8, 512, 3, 3, 3,
-    1, 8, 5, 32, 32,
-    1, 1, 1,
-    0, 1, 1,
-    1, 1, 1,
-    1
-  },
-  {
-    DataType::DT_BF16,
-    2, 128, 19, 256, 256,
-    3, 128, 3, 3, 3,
-    2, 3, 17, 256, 256,
-    1, 1, 1,
-    0, 1, 1,
-    1, 1, 1,
-    1
-  },
-  {
-    DataType::DT_BF16,
-    16, 64, 22, 130, 130,
-    3, 64, 3, 3, 3,
-    16, 3, 20, 128, 128,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1
-  },
-  {
-    DataType::DT_BF16,
-    16, 64, 22, 130, 130,
-    64, 64, 3, 3, 3,
-    16, 64, 20, 128, 128,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1
-  },
-  {
-    DataType::DT_BF16,
-    16, 3, 26, 134, 134,
-    64, 3, 7, 7, 7,
-    16, 64, 20, 128, 128,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1
-  },
-};
-
-const vector<vector<int64_t>> CONV3D_BACKPROP_FILTER_V2_TRANSDATA_MERGE_WHITE_LIST =
-{
-  {
-    DataType::DT_BF16,
-    1, 8, 5, 32, 32,
-    8, 8, 1, 1, 1,
-    1, 8, 5, 32, 32,
-    1, 1, 1,
-    0, 0, 0,
-    1, 1, 1,
-    1
-  }
-};
+constexpr int64_t C_IN_TRANSPOSE_LIMIT_MIN = 16;
+constexpr int64_t C_IN_TRANSPOSE_LIMIT_MAX = 32;
+constexpr float MAX_CIN_MULTIPLIER = 1.5f;
 
 static void AddAclIntArrayToCaseInfo(const aclIntArray &seg, vector<int64_t> &caseInfo)
 {
@@ -1321,8 +313,8 @@ bool IsConv2DBpFilterTo3Dcase(const ConvBackpropParams &params) {
   ConstructCaseInfo(params, caseInfo);
 
   int64_t deterministicValue = 0;
-  rtError_t retRts = rtCtxGetSysParamOpt(SYS_OPT_DETERMINISTIC, &deterministicValue);
-  if (retRts != RT_ERROR_NONE) {
+  aclError aclRet = aclrtGetSysParamOpt(ACL_OPT_DETERMINISTIC, &deterministicValue);
+  if (aclRet != ACL_SUCCESS) {
     deterministicValue = 0;
   }
   if (static_cast<bool>(deterministicValue) && 
@@ -1706,8 +698,8 @@ bool IsConv3DBackpropFilterV2(const ConvBackpropParams &params) {
   }
 
   int64_t deterministicValue = 0;
-  rtError_t retRts = rtCtxGetSysParamOpt(SYS_OPT_DETERMINISTIC, &deterministicValue);
-  if (retRts != RT_ERROR_NONE) {
+  aclError aclRet = aclrtGetSysParamOpt(ACL_OPT_DETERMINISTIC, &deterministicValue);
+  if (aclRet != ACL_SUCCESS) {
     deterministicValue = 0;
   }
   if (static_cast<bool>(deterministicValue)) {
@@ -1812,7 +804,6 @@ static aclnnStatus Conv3DBackpropFilterWithFlag(const aclTensor *input, const ac
                                                 const aclTensor *outBackprop, const aclIntArray *stride,
                                                 const aclIntArray *padding, const aclIntArray *dilation, int groups,
                                                 int64_t useHf32, aclTensor *&output, aclOpExecutor *executor) {
-  L0_DFX(Conv3DBackpropFilterWithFlag, input, weight, outBackprop, stride, padding, dilation, groups, useHf32);
   AdaptParam adptParams = {0};
   GetConv3DBackpropAdapterParam(input, stride, padding, dilation, executor, &adptParams);
   aclIntArray *stride5 = adptParams.adaptStride;
@@ -1863,7 +854,8 @@ static aclnnStatus Conv3DBackpropFilterWithFlag(const aclTensor *input, const ac
         oriDilationData[N_DIM_NCDHW_INDEX],oriDilationData[W_DIM_NCDHW_INDEX],oriDilationData[C_DIM_NCDHW_INDEX]};
         dilation5 = executor->AllocIntArray(newDilations.data(),CONV3D_DIM);
       }
-    }
+  }
+  L0_DFX(Conv3DBackpropFilterWithFlag, input, weight, outBackprop, stride, padding, dilation, groups, useHf32);
   ConvBackpropParams params = {input, weight, outBackprop, stride, padding, dilation, groups};
   bool useV2Flag = IsConv3DBackpropFilterV2(params);
   // useHf32Flag的值为0x40 : 表示HF32
@@ -1977,7 +969,7 @@ const aclTensor *Conv3DBackpropFilter(ConvolutionBackwardInputTensor &inputTenso
 OP_TYPE_REGISTER(Conv3DBackpropInput);
 OP_TYPE_REGISTER(Conv3DBackpropInputV2);
 
-static bool CheckN2HAttrAvailable(const aclIntArray *stride5, aclIntArray *dilation5, aclIntArray *pad6) {
+static bool CheckN2HAttrAvailable(const aclIntArray *stride5, const aclIntArray *dilation5, const aclIntArray *pad6) {
   if (stride5 == nullptr) {
     return false;
   }
@@ -2063,6 +1055,42 @@ static bool CheckN2HEnable(const aclTensor *weight, aclTensor *&output,
     return CheckN2HNativeAttrAvailable(weight, output);
 }
 
+static bool CheckWeightPreTransposeEnable(const aclTensor *weight, int groups) {
+    OP_LOGD("Enter CheckWeightPreTransposeEnable.");
+    if (GetCurrentPlatformInfo().GetCurNpuArch() != NpuArch::DAV_3510) {
+        return false;
+    }
+    if (groups > 1 || weight->GetOriginalFormat() != op::Format::FORMAT_NCDHW) {
+        return false;
+    }
+
+    auto dataType = weight->GetDataType();
+    if (dataType != op::DataType::DT_FLOAT && dataType != op::DataType::DT_FLOAT16 && dataType != op::DataType::DT_BF16) {
+        return false;
+    }
+
+    auto weightShape = weight->GetOriginalShape();
+    for (size_t i = 0; i < weightShape.GetDimNum(); i++) {
+        if (weightShape[i] <= 0) {
+            return false;
+        }
+    }
+
+    uint64_t cout = weightShape[N_DIM_NCDHW_INDEX];
+    uint64_t cin = weightShape[C_DIM_NCDHW_INDEX];
+    uint64_t dk = weightShape[D_DIM_NCDHW_INDEX];
+    uint64_t hk = weightShape[H_DIM_NCDHW_INDEX];
+    uint64_t wk = weightShape[W_DIM_NCDHW_INDEX];
+    if (dk * hk * wk <= 1) {
+        return false;
+    }
+
+    if ((cin != C_IN_TRANSPOSE_LIMIT_MIN && cin < C_IN_TRANSPOSE_LIMIT_MAX) || cin <= dk * hk * wk) {
+        return false;
+    }
+    return (cout > cin) ? (cout < MAX_CIN_MULTIPLIER * cin) : (cin < MAX_CIN_MULTIPLIER * cout);
+}
+
 static aclnnStatus N2HOptimize(const aclTensor *&weight, const aclTensor *&outBackprop,
                                aclTensor *&output, aclIntArray *&stride5, aclOpExecutor *executor) {
     OP_LOGD("Enable N2H optimize.");
@@ -2113,7 +1141,6 @@ static aclnnStatus Conv3DBackpropInputWithFlag(const aclTensor *input, const acl
                                               const aclIntArray *padding, const aclIntArray *dilation, int groups,
                                               int64_t useHf32Flag, aclTensor *&output, aclOpExecutor *executor)
 {
-  L0_DFX(Conv3DBackpropInputWithFlag, input, weight, outBackprop, stride, padding, dilation, groups, useHf32Flag, output);
   AdaptParam adptParams = {0};
   GetConv3DBackpropAdapterParam(input, stride, padding, dilation, executor, &adptParams);
   aclIntArray *stride5 = adptParams.adaptStride;   // Conv3d stride维度为5
@@ -2148,6 +1175,22 @@ static aclnnStatus Conv3DBackpropInputWithFlag(const aclTensor *input, const acl
           return ACLNN_ERR_INNER_NULLPTR;
       }
   }
+
+  if (CheckWeightPreTransposeEnable(weight, groups)) {
+      OP_LOGD("Conv3d backpropInput v2 support weight pre transpose.");
+      // transpose weight NCDHW -> NDHWC
+      auto permAfter = executor->AllocIntArray(WEIGHT_TRANSPOSE_SHAPE_DIMS.data(), WEIGHT_TRANSPOSE_SHAPE_DIMS.size());
+      CHECK_RET(permAfter != nullptr, ACLNN_ERR_INNER_NULLPTR);
+      weight = l0op::Transpose(weight, permAfter, executor);
+
+      // change weight format
+      CHECK_RET(weight != nullptr, ACLNN_ERR_INNER_NULLPTR);
+      const_cast<aclTensor*>(weight)->SetOriginalFormat(Format::FORMAT_NDHWC);
+      const_cast<aclTensor*>(weight)->SetStorageFormat(Format::FORMAT_NDHWC);
+      const_cast<aclTensor*>(weight)->SetViewFormat(Format::FORMAT_NDHWC);
+  }
+
+  L0_DFX(Conv3DBackpropInputWithFlag, input, weight, outBackprop, stride, padding, dilation, groups, useHf32Flag, output);
   if (useV2Flag) {
     bool enableHf32 = (outBackprop->GetDataType() == DataType::DT_FLOAT) && (useHf32Flag == 0x40);
  	  OP_LOGD("conv3ddx: enableHf32 is: %d, useHf32Flag is %ld", enableHf32, useHf32Flag);

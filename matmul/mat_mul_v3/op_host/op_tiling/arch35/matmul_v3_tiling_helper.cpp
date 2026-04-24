@@ -25,6 +25,9 @@ using namespace optiling::matmul_v3_advanced;
 void CalL1TilingDefault(const MatmulV3CompileInfo &compileInfo, const MatMulV3Args &args, MatMulV3RunInfo &runInfo)
 {
     uint64_t totalL1Size = compileInfo.l1Size;
+    if (args.hasScale) {
+        totalL1Size -= runInfo.baseN * sizeof(uint64_t);
+    }
     uint64_t reserveBTSize = args.hasBias ? BIAS_TABLE_NUM * DATA_SIZE_FP32 : 0UL;
     runInfo.depthA1 = totalL1Size / NUM_TWO / runInfo.baseM / runInfo.baseK / args.aDtypeSize;  // 2: half of l1
     runInfo.depthB1 = totalL1Size / NUM_TWO / runInfo.baseN / runInfo.baseK / args.bDtypeSize;  // 2: half of l1
@@ -155,7 +158,7 @@ MatMulV3L0C2Out GetL0C2OutDav3510(const MatmulV3CompileInfo &compileInfo, const 
     // 128: SMALL_SHAPE_LOWER_THRES
     bool isUnalignedN = args.nValue * cDtypeSize % 128UL != 0 && args.nValue * cDtypeSize > BASIC_BLOCK_SIZE_256;
     bool fixpipeBound = isValidMKN && isMultiRound && isUnalignedN;
-    if (!fixpipeBound) {
+    if (!fixpipeBound || (compileInfo.aivNum != (compileInfo.aicNum * NUM_TWO))) {
         return MatMulV3L0C2Out::ON_THE_FLY;
     }
     if (args.aType == ge::DT_FLOAT16 || args.aType == ge::DT_BF16) {
@@ -305,7 +308,9 @@ bool MatMulV3TilingHelper::IsSelfNonContiguous(const gert::TilingContext* contex
     size_t selfDimNum = selfShape.GetDimNum();
     size_t mat2DimNum = mat2Shape.GetDimNum();
     // createView with TensorV2 & storageShape 1d ->  non contiguous
-    return (context->InputIsView(0) && selfStorageShape.GetDimNum() == 1 && selfDimNum == 3 && mat2DimNum == 2);
+    return (
+        context->InputIsView(0) && selfStorageShape.GetDimNum() == NUM_ONE && selfDimNum == NUM_THREE &&
+        mat2DimNum == NUM_TWO);
 }
 }  // namespace matmul_v3_advanced
 }  // namespace optiling

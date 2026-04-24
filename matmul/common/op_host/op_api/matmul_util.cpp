@@ -114,11 +114,12 @@ static inline bool CheckNpuArchIsSupportBf16(void)
 
 static inline bool CheckMMV3NzNzNdSupport(MmOpInfo& mmOpInfo)
 {
-    if (mmOpInfo.ori_info.self_dtype != mmOpInfo.ori_info.mat2_dtype ||
-        ALIGN_UNIT_MAP.find(mmOpInfo.ori_info.self_dtype) == ALIGN_UNIT_MAP.end()) {
+    // 当前切换场景不支持输入self、mat2混精度场景，且输入类型只支持fp16、bf16、fp32
+    if (mmOpInfo.support_info.self_dtype != mmOpInfo.support_info.mat2_dtype ||
+        ALIGN_UNIT_MAP.find(mmOpInfo.support_info.self_dtype) == ALIGN_UNIT_MAP.end()) {
         return false;
     }
-    auto it = ALIGN_UNIT_MAP.find(mmOpInfo.ori_info.self_dtype);
+    auto it = ALIGN_UNIT_MAP.find(mmOpInfo.support_info.self_dtype);
     uint64_t alignUnit = it->second;
     return (op::GetCurrentPlatformInfo().GetCurNpuArch() == NpuArch::DAV_2201) &&
            (mmOpInfo.shapeInfo.nDim % alignUnit == 0);
@@ -353,7 +354,8 @@ static MmOpInfo GetMatmulOpInfoWithTrans(
     // 如果允许降精度处理， 则开启HF32模式（0x40），否则采用默认模式; 后续此字段配置需要按照字段表进行配置
     mmOpInfo.enableHf32 = (cubeMathType == ALLOW_FP32_DOWN_PRECISION) || (cubeMathType == USE_HF32);
     auto npuArch = op::GetCurrentPlatformInfo().GetCurNpuArch();
-    mmOpInfo.enableForceGrpAccForFp32 = cubeMathType == FORCE_GRP_ACC_FOR_FP32 && (npuArch == NpuArch::DAV_2201);
+    mmOpInfo.enableForceGrpAccForFp32 =
+        cubeMathType == FORCE_GRP_ACC_FOR_FP32 && (npuArch == NpuArch::DAV_2201 || npuArch == NpuArch::DAV_3510);
     mmOpInfo.opImplModeEnum = mmOpInfo.enableHf32 ? 0x40 : (mmOpInfo.enableForceGrpAccForFp32 ? 0x4 : 0x1);
     OP_LOGD(
         "opImplModeEnum=%ld, enableHf32=%d, enableForceGrpAccForFp32=%d cubeMathType=%d", mmOpInfo.opImplModeEnum,
@@ -434,10 +436,11 @@ static const bool CheckMatmulV3Support(
     bool enableForceGrpAccForFp32 =
         opImplModeEnum == 0x4 && mmOpInfo.shapeInfo.kDim >= 2048 && mmOpInfo.ori_info.self_dtype == DataType::DT_FLOAT;
     return CheckAscendCScenario(x1, x2, bias, mmOpInfo, transposeX1, transposeX2) ||
-           CheckAscendCScenario2(x1, x2, mmOpInfo, transposeX1, transposeX2) || enableForceGrpAccForFp32;
+           CheckAscendCScenario2(x1, x2, mmOpInfo, transposeX1, transposeX2) || enableForceGrpAccForFp32 ||
+           (mmOpInfo.support_info.mat2_format == ge::FORMAT_FRACTAL_NZ && mmOpInfo.support_info.mat2_dtype == DataType::DT_FLOAT);
 }
 
-static const bool CheckSupportInfoFormatNzNzNd(MmOpInfo& mmOpInfo)
+static const bool CheckSupportInfoFormatNzNzNd(const MmOpInfo& mmOpInfo)
 {
     return mmOpInfo.support_info.self_format == ge::FORMAT_FRACTAL_NZ &&
            mmOpInfo.support_info.mat2_format == ge::FORMAT_FRACTAL_NZ &&
@@ -782,6 +785,26 @@ bool CheckNonContiguousShapeSupport(MmOpInfo& mmOpInfo)
     return true;
 }
 
+bool CheckGemmV3WithAlphaBeta(const aclTensor* bias,
+                              const aclTensor* self,
+                              const aclTensor* mat2,
+                              int8_t cubeMathType)
+{
+    // cubeMathType需要为USE_FP32_ADDMM
+    if (cubeMathType != USE_FP32_ADDMM) {
+        return false;
+    }
+    // 仅支持fp16、bf16输入
+    if (!(bias->GetDataType() == op::DataType::DT_FLOAT16 && self->GetDataType() == op::DataType::DT_FLOAT16 &&
+          mat2->GetDataType() == op::DataType::DT_FLOAT16) &&
+        !(bias->GetDataType() == op::DataType::DT_BF16 && self->GetDataType() == op::DataType::DT_BF16 &&
+          mat2->GetDataType() == op::DataType::DT_BF16)) {
+        return false;
+    }
+    OP_LOGI("Check GemmV3WithAlphaBeta success.");
+    return true;
+}
+
 /*
    判断是否满足左矩阵非连续Slice
 */
@@ -985,7 +1008,8 @@ MmOpInfo GetMatmulOpInfo(const aclTensor* self, const aclTensor* mat2, int8_t cu
     // 如果允许降精度处理， 则开启HF32模式（0x40），否则采用默认模式; 后续此字段配置需要按照字段表进行配置
     mmOpInfo.enableHf32 = (cubeMathType == ALLOW_FP32_DOWN_PRECISION) || (cubeMathType == USE_HF32);
     auto npuArch = op::GetCurrentPlatformInfo().GetCurNpuArch();
-    mmOpInfo.enableForceGrpAccForFp32 = cubeMathType == FORCE_GRP_ACC_FOR_FP32 && (npuArch == NpuArch::DAV_2201);
+    mmOpInfo.enableForceGrpAccForFp32 =
+        cubeMathType == FORCE_GRP_ACC_FOR_FP32 && (npuArch == NpuArch::DAV_2201 || npuArch == NpuArch::DAV_3510);
     mmOpInfo.opImplModeEnum = mmOpInfo.enableHf32 ? 0x40 : (mmOpInfo.enableForceGrpAccForFp32 ? 0x4 : 0x1);
     OP_LOGD(
         "opImplModeEnum=%ld, enableHf32=%d, enableForceGrpAccForFp32=%d cubeMathType=%d, inputFp32Flag= %d", mmOpInfo.opImplModeEnum,
@@ -995,8 +1019,20 @@ MmOpInfo GetMatmulOpInfo(const aclTensor* self, const aclTensor* mat2, int8_t cu
     return mmOpInfo;
 }
 
-aclnnStatus CreateMatmulOpInfo(const aclTensor* self, const aclTensor* mat2, const aclTensor* bias,
-            const aclTensor* out, int8_t cubeMathType, MmOpInfo& mmOpInfo, bool isSelfSlice = false){
+std::shared_ptr<NpuArchMatMulRuleBase> BuildRule()
+{
+    auto npuArch = op::GetCurrentPlatformInfo().GetCurNpuArch();
+    if ((npuArch == NpuArch::DAV_2201) || (npuArch == NpuArch::DAV_3510)) {
+        return std::make_shared<Dav2201MatMulRule>(npuArch);
+    } else {
+        return std::make_shared<DefaultMatMulRule>(npuArch);
+    }
+}
+
+aclnnStatus CreateMatmulOpInfo(
+    const aclTensor* self, const aclTensor* mat2, const aclTensor* bias, const aclTensor* out, int8_t cubeMathType,
+    MmOpInfo& mmOpInfo, bool isSelfSlice = false)
+{
     // 获取m、k、n轴的大小
     op::Shape selfShape = self->GetViewShape();
     op::Shape mat2Shape = mat2->GetViewShape();
@@ -1026,7 +1062,7 @@ aclnnStatus CreateMatmulOpInfo(const aclTensor* self, const aclTensor* mat2, con
         mmOpInfo.shapeInfo.dtypeBSize);
 
     // 解析当前规格matmulop支持的dtype能力
-    std::shared_ptr<NpuArchMatMulRuleBase> archRule = NpuArchMatMulRule::getInstance();
+    std::shared_ptr<NpuArchMatMulRuleBase> archRule = BuildRule();
     aclnnStatus status = archRule -> PromoteDtype(self, mat2, bias, out, cubeMathType, mmOpInfo);
     CHECK_RET(status == ACLNN_SUCCESS, status);
 
@@ -1042,8 +1078,9 @@ aclnnStatus CreateMatmulOpInfo(const aclTensor* self, const aclTensor* mat2, con
                          mmOpInfo.support_info.mat2_dtype == DataType::DT_FLOAT;
     // 如果允许降精度处理， 则开启HF32模式（0x40），否则采用默认模式; 后续此字段配置需要按照字段表进行配置
     mmOpInfo.enableHf32 = (cubeMathType == ALLOW_FP32_DOWN_PRECISION) || (cubeMathType == USE_HF32);
-    mmOpInfo.enableForceGrpAccForFp32 = (cubeMathType == FORCE_GRP_ACC_FOR_FP32) &&
-                                        (op::GetCurrentPlatformInfo().GetCurNpuArch() == NpuArch::DAV_2201);
+    auto npuArch = op::GetCurrentPlatformInfo().GetCurNpuArch();
+    mmOpInfo.enableForceGrpAccForFp32 =
+        cubeMathType == FORCE_GRP_ACC_FOR_FP32 && (npuArch == NpuArch::DAV_2201 || npuArch == NpuArch::DAV_3510);
     mmOpInfo.opImplModeEnum = mmOpInfo.enableHf32 ? 0x40 : (mmOpInfo.enableForceGrpAccForFp32 ? 0x4 : 0x1);
     OP_LOGD(
         "opImplModeEnum=%ld, enableHf32=%d, enableForceGrpAccForFp32=%d cubeMathType=%d, inputFp32Flag= %d", mmOpInfo.opImplModeEnum,
@@ -2194,7 +2231,7 @@ aclnnStatus NpuArchMatMulRuleBase::GetUpperDtype(
 
     PromoteResult result = GetUpperDtypeByLookUpTable(inputCase, cubeMathType);
     // process result
-    if (result.isError) {
+    if (result.logMessage != nullptr && result.isError) {
         OP_LOGE(ACLNN_ERR_PARAM_INVALID, "%s", result.logMessage);
         return ACLNN_ERR_PARAM_INVALID;
     }
@@ -2231,6 +2268,7 @@ aclnnStatus Dav2201MatMulRule::PromoteDtype(
         mmOpInfo.ori_info.self_dtype = matA->GetDataType();
         mmOpInfo.ori_info.mat2_dtype = matB->GetDataType();
         mmOpInfo.ori_info.output_dtype = out->GetDataType();
+        mmOpInfo.ori_info.bias_dtype = DataType::DT_UNDEFINED;
         if (bias != nullptr){
             mmOpInfo.ori_info.bias_dtype = bias->GetDataType();
         }
@@ -2296,14 +2334,14 @@ NpuArchMatMulRuleBase::PromoteResult Dav2201MatMulRule::GetUpperDtypeByLookUpTab
             }
         }
 
-        static constexpr NpuArchMatMulRuleBase::PromoteResult promoteResultTable[][6] = {
-            /* cubeMathType:   KEEP_DTYPE,            ALLOW_FP32_DOWN_P,    USE_FP16,              USE_HF32,            FORCE_GRP_ACC_FOR_FP32,  USE_HIGH_PREC_MODE */
-            /*0: FP32+FP32*/ {{FP32, false, ""},     {FP32, false, ""},    {FP16, false, ""},     {FP32, false, ""},    {FP32, false, ""},       {FP32, false, ""}},
-            /*1: FP32+FP16*/ {{FP32, false, ""},     {FP32, false, ""},    {FP16, false, ""},     {FP32, false, ""},    {FP32, false, ""},       {FP32, false, ""}},
-            /*2: FP16+FP16*/ {{FP16, false, ""},     {FP16, false, ""},    {FP16, false, ""},     {FP16, false, WARN0}, {FP16, false, ""},       {FP16, false, ""}},
-            /*3: FP32+BF16*/ {{FP32, false, ""},     {FP32, false, ""},    {FP16, false, WARN6},  {FP32, false, ""},    {FP32, false, ""},       {FP32, false, ""}},
-            /*4: FP16+BF16*/ {{FP32, false, WARN1},  {FP32, false, WARN5}, {FP16, false, WARN3},  {FP32, false, WARN4}, {FP32, false, ""},       {FP32, false, ""}},
-            /*5: BF16+BF16*/ {{BF16, false, ""},     {BF16, false, ""},    {BF16, false, WARN2},  {BF16, false, WARN0}, {BF16, false, ""},       {BF16, false, ""}}
+        static constexpr NpuArchMatMulRuleBase::PromoteResult promoteResultTable[][7] = {
+            /* cubeMathType:   KEEP_DTYPE,            ALLOW_FP32_DOWN_P,    USE_FP16,              USE_HF32,            FORCE_GRP_ACC_FOR_FP32,   USE_FP32_ADDMM,       USE_HIGH_PREC_MODE */
+            /*0: FP32+FP32*/ {{FP32, false, ""},     {FP32, false, ""},    {FP16, false, ""},     {FP32, false, ""},    {FP32, false, ""},       {FP32, false, ""},     {FP32, false, ""}},
+            /*1: FP32+FP16*/ {{FP32, false, ""},     {FP32, false, ""},    {FP16, false, ""},     {FP32, false, ""},    {FP32, false, ""},       {FP32, false, ""},     {FP32, false, ""}},
+            /*2: FP16+FP16*/ {{FP16, false, ""},     {FP16, false, ""},    {FP16, false, ""},     {FP16, false, WARN0}, {FP16, false, ""},       {FP16, false, ""},     {FP16, false, ""}},
+            /*3: FP32+BF16*/ {{FP32, false, ""},     {FP32, false, ""},    {FP16, false, WARN6},  {FP32, false, ""},    {FP32, false, ""},       {FP32, false, ""},     {FP32, false, ""}},
+            /*4: FP16+BF16*/ {{FP32, false, WARN1},  {FP32, false, WARN5}, {FP16, false, WARN3},  {FP32, false, WARN4}, {FP32, false, ""},       {FP32, false, ""},     {FP32, false, ""}},
+            /*5: BF16+BF16*/ {{BF16, false, ""},     {BF16, false, ""},    {BF16, false, WARN2},  {BF16, false, WARN0}, {BF16, false, ""},       {BF16, false, ""},     {BF16, false, ""}}
         };
 
         return promoteResultTable[inputCase][cubeMathType];
@@ -2358,6 +2396,7 @@ aclnnStatus DefaultMatMulRule::PromoteDtype(const aclTensor* matA, const aclTens
         mmOpInfo.ori_info.self_dtype = matA->GetDataType();
         mmOpInfo.ori_info.mat2_dtype = matB->GetDataType();
         mmOpInfo.ori_info.output_dtype = out->GetDataType();
+        mmOpInfo.ori_info.bias_dtype = DataType::DT_UNDEFINED;
         if (bias != nullptr){
             mmOpInfo.ori_info.bias_dtype = bias->GetDataType();
         }
@@ -2436,16 +2475,60 @@ op::DataType DefaultMatMulRule::PromoteOutputAndBiasDtype(op::DataType outputDty
         return op::DataType::DT_FLOAT16;
 }
 
-std::shared_ptr<NpuArchMatMulRuleBase> NpuArchMatMulRule::instance = nullptr;
+const aclTensor* ExecGemmV3WithAlphaBetaOp(const aclTensor* bias,
+                                           const aclTensor* self,
+                                           const aclTensor* mat2,
+                                           const aclScalar* alpha,
+                                           const aclScalar* beta,
+                                           aclOpExecutor* executor)
+{
+    auto transposeSelf = Ops::NN::IsTransposeLastTwoDims(self);
+    auto transposeMat2 = Ops::NN::IsTransposeLastTwoDims(mat2);
+    // reformat, 转成ND
+    auto reformatSelf = self;
+    reformatSelf = l0op::ReFormat(self, op::Format::FORMAT_ND);
+    // 左输入非连续转连续
+    auto contiguousSelf = reformatSelf;
+    if (transposeSelf) {
+        contiguousSelf = executor->CreateView(
+            reformatSelf, SwapLastTwoDimValue(reformatSelf->GetViewShape()), reformatSelf->GetViewOffset());
+    } else {
+        contiguousSelf = l0op::Contiguous(reformatSelf, executor);
+    }
+    CHECK_RET(contiguousSelf != nullptr, nullptr);
+    // reformat, 转成ND
+    auto reformatMat2 = mat2;
+    reformatMat2 = l0op::ReFormat(mat2, op::Format::FORMAT_ND);
+    // 右输入非连续转连续
+    auto contiguousMat2 = reformatMat2;
+    if (transposeMat2) {
+        contiguousMat2 = executor->CreateView(
+            reformatMat2, SwapLastTwoDimValue(reformatMat2->GetViewShape()), reformatMat2->GetViewOffset());
+    } else {
+        contiguousMat2 = l0op::Contiguous(reformatMat2, executor);
+    }
+    CHECK_RET(contiguousMat2 != nullptr, nullptr);
 
-std::shared_ptr<NpuArchMatMulRuleBase> NpuArchMatMulRule::BuildRule() {
-        auto npuArch = op::GetCurrentPlatformInfo().GetCurNpuArch();
-        if ((npuArch == NpuArch::DAV_2201) || (npuArch == NpuArch::DAV_3510)) {
-            return std::make_shared<Dav2201MatMulRule>(npuArch);
-        } else {
-            return std::make_shared<DefaultMatMulRule>(npuArch);
-        }
+    // bias非连续转连续
+    // reformat, 转成ND
+    auto reformatBias = bias;
+    reformatBias = l0op::ReFormat(bias, op::Format::FORMAT_ND);
+    auto contiguousBias = reformatBias;
+    contiguousBias = l0op::Contiguous(reformatBias, executor);
+    CHECK_RET(contiguousBias != nullptr, nullptr);
+
+    // 执行GemmV3NdWithAlphaBeta l0接口
+    OP_LOGI("Entering l0op::GemmV3NdWithAlphaBeta.");
+    const aclTensor* gemmV3OpOut = l0op::GemmV3NdWithAlphaBeta(contiguousSelf,
+                                                               contiguousMat2,
+                                                               contiguousBias,
+                                                               alpha->ToFloat(),
+                                                               beta->ToFloat(),
+                                                               transposeSelf,
+                                                               transposeMat2,
+                                                               false,
+                                                               executor);
+    return gemmV3OpOut;
 }
-
 } // namespace NN
 } // namespace Ops

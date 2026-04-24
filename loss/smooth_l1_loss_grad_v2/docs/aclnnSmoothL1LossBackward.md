@@ -63,18 +63,17 @@ aclnnStatus aclnnSmoothL1LossBackward(
 
 ## aclnnSmoothL1LossBackwardGetWorkspaceSize
 
-- **参数说明：**
+- **参数说明**
 
-  </style>
-  <table class="tg" style="undefined;table-layout: fixed; width: 1209px"><colgroup>
+  <table class="tg" style="undefined;table-layout: fixed; width: 1547px"><colgroup>
   <col style="width: 217px">
-  <col style="width: 87px">
-  <col style="width: 224px">
-  <col style="width: 234px">
-  <col style="width: 118px">
-  <col style="width: 113px">
-  <col style="width: 108px">
-  <col style="width: 108px">
+  <col style="width: 120px">
+  <col style="width: 280px">
+  <col style="width: 350px">
+  <col style="width: 200px">
+  <col style="width: 115px">
+  <col style="width: 120px">
+  <col style="width: 145px">
   </colgroup>
   <thead>
     <tr>
@@ -92,7 +91,7 @@ aclnnStatus aclnnSmoothL1LossBackward(
       <td class="tg-0pky">gradOutput（aclTensor*）</td>
       <td class="tg-0pky">输入</td>
       <td class="tg-0pky">梯度反向输入，公式中的SmoothL1Loss。</td>
-      <td class="tg-0pky">shape需要与self和target满足broadcast关系。<br>数据类型与self、target的数据类型需满足数据类型推导规则。</td>
+      <td class="tg-0pky">shape需要与self和target满足<a href="../../../docs/zh/context/broadcast关系.md" target="_blank">broadcast关系</a>。<br>数据类型与self、target的数据类型需满足数据类型推导规则。</td>
       <td class="tg-0pky">FLOAT、FLOAT16、BFLOAT16</td>
       <td class="tg-0pky">ND</td>
       <td class="tg-0pky">1-8</td>
@@ -102,7 +101,7 @@ aclnnStatus aclnnSmoothL1LossBackward(
       <td class="tg-0pky">self（aclTensor*）</td>
       <td class="tg-0pky">输入</td>
       <td class="tg-0pky">输入张量，公式中的输入x。</td>
-      <td class="tg-0pky">shape需要与gradOutput、target满足broadcast关系。<br>数据类型与gradOut、target的数据类型需满足数据类型推导规则。</td>
+      <td class="tg-0pky">shape需要与gradOutput、target满足<a href="../../../docs/zh/context/broadcast关系.md" target="_blank">broadcast关系</a>。<br>数据类型与gradOut、target的数据类型需满足数据类型推导规则。</td>
       <td class="tg-0pky">FLOAT、FLOAT16、BFLOAT16</td>
       <td class="tg-0pky">ND</td>
       <td class="tg-0pky">1-8</td>
@@ -112,7 +111,7 @@ aclnnStatus aclnnSmoothL1LossBackward(
       <td class="tg-0pky">target（aclTensor*）</td>
       <td class="tg-0pky">输入</td>
       <td class="tg-0pky">真实的标签，公式中的输入y。</td>
-      <td class="tg-0pky">shape需要与gradOutput、self满足broadcast关系。<br>数据类型与gradOut、target的数据类型需满足数据类型推导规则。</td>
+      <td class="tg-0pky">shape需要与gradOutput、self满足<a href="../../../docs/zh/context/broadcast关系.md" target="_blank">broadcast关系</a>。<br>数据类型与gradOut、target的数据类型需满足数据类型推导规则。</td>
       <td class="tg-0pky">FLOAT、FLOAT16、BFLOAT16</td>
       <td class="tg-0pky">ND</td>
       <td class="tg-0pky">1-8</td>
@@ -129,7 +128,7 @@ aclnnStatus aclnnSmoothL1LossBackward(
       <td class="tg-0pky">√</td>
     </tr>
     <tr>
-      <td class="tg-0pky">beta（bool）</td>
+      <td class="tg-0pky">beta（float）</td>
       <td class="tg-0pky">输入</td>
       <td class="tg-0pky">计算属性，指定在L1和L2损失之间更改的数值。</td>
       <td class="tg-0pky">该值必须是非负的。</td>
@@ -139,10 +138,10 @@ aclnnStatus aclnnSmoothL1LossBackward(
       <td class="tg-0pky">-</td>
     </tr>
     <tr>
-      <td class="tg-0pky">gradinput（aclTensor*）</td>
+      <td class="tg-0pky">gradInput（aclTensor*）</td>
       <td class="tg-0pky">输出</td>
       <td class="tg-0pky">计算输出。</td>
-      <td class="tg-0pky">shape为gradOut，self，target的broadcast结果</td>
+      <td class="tg-0pky">shape为gradOut，self，target的<a href="../../../docs/zh/context/broadcast关系.md" target="_blank">broadcast</a>结果</td>
       <td class="tg-0pky">FLOAT、FLOAT16、BFLOAT16</td>
       <td class="tg-0pky">ND</td>
       <td class="tg-0pky">1-8</td>
@@ -170,17 +169,16 @@ aclnnStatus aclnnSmoothL1LossBackward(
     </tr>
   </tbody></table>
 
-
 - **返回值：**
 
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 
   第一段接口完成入参校验，出现以下场景时报错：
-  </style>
-  <table class="tg" style="undefined;table-layout: fixed; width: 991px"><colgroup>
+  
+  <table class="tg" style="undefined;table-layout: fixed; width: 1150px"><colgroup>
   <col style="width: 269px">
-  <col style="width: 90px">
-  <col style="width: 632px">
+  <col style="width: 135px">
+  <col style="width: 746px">
   </colgroup>
   <thead>
     <tr>
@@ -206,7 +204,7 @@ aclnnStatus aclnnSmoothL1LossBackward(
       <td class="tg-0pky">reduction不符合约束。</td>
     </tr>
     <tr>
-      <td class="tg-0pky">self、target、isTarget的shape不满足参数说明中的要求。</td>
+      <td class="tg-0pky">self、target、gradOutput的shape不满足参数说明中的要求。</td>
     </tr>
   </tbody>
   </table>
@@ -235,7 +233,7 @@ aclnnStatus aclnnSmoothL1LossBackward(
         <tr>
           <td>workspaceSize</td>
           <td>输入</td>
-          <td>在Device侧申请的workspace大小，由第一段接口aclnnBinaryCrossEntropyGetWorkspaceSize获取。</td>
+          <td>在Device侧申请的workspace大小，由第一段接口aclnnSmoothL1LossBackwardGetWorkspaceSize获取。</td>
         </tr>
         <tr>
           <td>executor</td>
@@ -250,18 +248,19 @@ aclnnStatus aclnnSmoothL1LossBackward(
       </tbody>
     </table>
 
-
 - **返回值：**
   
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 
 ## 约束说明
-- 确定性计算： 
+
+- 确定性计算：
     - aclnnSmoothL1LossBackward默认确定性实现。
 
 ## 调用示例
 
 示例代码如下，仅供参考，具体编译和执行过程请参考[编译与运行样例](../../../docs/zh/context/编译与运行样例.md)。
+
 ```Cpp
 #include <iostream>
 #include <vector>
@@ -411,4 +410,3 @@ int main() {
   return 0;
 }
 ```
-

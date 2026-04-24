@@ -18,14 +18,16 @@
 #include "atvoss/elewise/elewise_tiling.h"
 #include "atvoss/broadcast/broadcast_tiling.h"
 #include "register/tilingdata_base.h"
+#include "activation/hardtanh_grad/op_kernel/arch35/hardtanh_grad_tilingdata.h"
 #include "activation/hardtanh_grad/op_kernel/arch35/hardtanh_grad_dag.h"
 #include "activation/hardtanh_grad/op_kernel/arch35/hardtanh_grad_struct.h"
 
 #include <iostream>
 
+namespace optiling {
 using namespace HardtanhGradOp;
-namespace optiling
-{
+using namespace Ops::Base;
+
 const uint64_t ASCEND_WORKSPACE = 16777216;
 const std::int32_t ATTR_HARDTANH_GRAD_MINVAL_POS = 0;
 const std::int32_t ATTR_HARDTANH_GRAD_MAXVAL_POS = 1;
@@ -50,9 +52,9 @@ private:
     uint64_t dType = 0;
     uint64_t schMode = 0;
     gert::TilingContext* tilingContext;
-    ge::DataType outputDtype;
-    ge::DataType inputDtype;
-    ge::DataType inputDtype1;
+    ge::DataType outputDtype = ge::DT_UNDEFINED;
+    ge::DataType inputDtype = ge::DT_UNDEFINED;
+    ge::DataType inputDtype1 = ge::DT_UNDEFINED;
 };
 
 ge::graphStatus HardtanhGradTiling::SetTilingData()

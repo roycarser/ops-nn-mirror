@@ -50,11 +50,11 @@ ge::graphStatus AddLayerNormQuantEmptyTiling::GetAttrs()
 
 ge::graphStatus AddLayerNormQuantEmptyTiling::CheckShapeAllPositive(gert::Shape& shape)
 {
-    for (size_t i = 0; i < shape.GetDimNum(); i++) {
+    for (size_t idx = 0; idx < shape.GetDimNum(); idx++) {
         OP_CHECK_IF(
-            shape.GetDim(i) < 0,
+            shape.GetDim(idx) < 0,
             OP_LOGE(
-                context_->GetNodeName(), "Dim %lu of input should be positive, but actual %ld.", i, shape.GetDim(i)),
+                context_->GetNodeName(), "Dim %lu of input should be positive, but actual %ld.", idx, shape.GetDim(idx)),
             return ge::GRAPH_FAILED);
     }
     return ge::GRAPH_SUCCESS;
@@ -153,7 +153,7 @@ ge::graphStatus AddLayerNormQuantEmptyTiling::CheckInputsShape()
 ge::graphStatus AddLayerNormQuantEmptyTiling::GetShapeAttrsInfo()
 {
     if (context_ == nullptr) {
-        OP_LOGE(context_->GetNodeName(), "Tiling context is null");
+        OP_LOGE("AddLayerNormQuantEmptyTiling", "Tiling context is null");
         return ge::GRAPH_FAILED;
     }
 

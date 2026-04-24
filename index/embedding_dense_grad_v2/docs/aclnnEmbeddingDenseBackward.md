@@ -8,11 +8,12 @@
 | <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>     |    √     |
 | <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>     |    √     |
 | <term>Atlas 200I/500 A2 推理产品</term>                      |    ×     |
-| <term>Atlas 推理系列产品 </term>                             |    ×     |
-| <term>Atlas 训练系列产品 </term>                              |    √     |
+| <term>Atlas 推理系列产品</term>                             |    ×     |
+| <term>Atlas 训练系列产品</term>                              |    √     |
+
 ## 功能说明
 
-实现[aclnnEmbedding](../../gather_v2/docs/aclnnEmbedding.md)的反向计算, 将相同索引`indices`对应`grad`的一行累加到`out`上。
+实现[aclnnEmbedding](../../../index/embedding/docs/aclnnEmbedding.md)的反向计算, 将相同索引`indices`对应`grad`的一行累加到`out`上。
 
 ## 函数原型
 

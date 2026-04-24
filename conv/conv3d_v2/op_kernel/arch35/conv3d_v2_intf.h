@@ -90,6 +90,7 @@ struct Conv3dIntf {
                                            formatWeight != ConvFormat::FRACTAL_Z;
     constexpr static bool groupOptNZFlag = false;
     constexpr static bool isConv3D = true;
+    constexpr static bool groupOptPreloadFlag = false;
 
     constexpr static uint8_t sizeOfFmap = sizeof(FmapT);
     constexpr static uint8_t sizeOfWeight = sizeof(WeightT);
@@ -195,11 +196,11 @@ public:
         }
     }
 
-    __aicore__ inline void SetOptGroupParams(uint64_t singleGroups, uint64_t singleGroupOpt)
+    __aicore__ inline void SetOptGroupParams(uint64_t singleGroups, uint64_t singleGroupOpt, uint64_t singleCoOpt)
     {
         using local = typename Ext::SetOptGroupParams;
-        if constexpr (CONV_CHECK_FUN(local, ConvFunc, this, singleGroups, singleGroupOpt)) {
-            local::call(this, singleGroups, singleGroupOpt);
+        if constexpr (CONV_CHECK_FUN(local, ConvFunc, this, singleGroups, singleGroupOpt, singleCoOpt)) {
+            local::call(this, singleGroups, singleGroupOpt, singleCoOpt);
         }
     }
 

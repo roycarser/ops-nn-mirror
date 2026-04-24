@@ -16,6 +16,7 @@
 ## 功能说明
 
 接口功能：对输入weight数据做预处理，实现低比特数据由稀疏存储到紧密存储的排布转换。输出weightInt4Pack的[数据格式](../../../docs/zh/context/数据格式.md)声明为FRACTAL_NZ时，该算子将[数据格式](../../../docs/zh/context/数据格式.md)从ND转为FRACTAL_NZ。
+
 - <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>、<term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>：将INT32类型的weight输入数据打包为紧密排布的INT4数据。
 - <term>Ascend 950PR/Ascend 950DT</term> ：将INT32类型的weight打包为紧密排布的INT4类型，将FLOAT类型的weight打包为紧密排布的FLOAT4_E2M1类型。
 
@@ -30,12 +31,13 @@ aclnnStatus aclnnConvertWeightToINT4PackGetWorkspaceSize(
   uint64_t        *workspaceSize, 
   aclOpExecutor   **executor)
 ```
+
 ```Cpp
 aclnnStatus aclnnConvertWeightToINT4Pack(
-  const aclTensor *weight,
-  aclTensor       *weightInt4Pack,
-  uint64_t        *workspaceSize, 
-  aclOpExecutor   **executor)
+  void            *workspace,
+  uint64_t         workspaceSize,
+  aclOpExecutor   *executor, 
+  aclrtStream      stream)
 ```
 
 ## aclnnConvertWeightToINT4PackGetWorkspaceSize
@@ -44,7 +46,7 @@ aclnnStatus aclnnConvertWeightToINT4Pack(
   <table style="undefined;table-layout: fixed; width: 1078px"><colgroup>
   <col style="width: 149px">
   <col style="width: 121px">
-  <col style="width: 264px">
+  <col style="width: 320px">
   <col style="width: 183px">
   <col style="width: 183px">
   <col style="width: 148px">
@@ -108,6 +110,8 @@ aclnnStatus aclnnConvertWeightToINT4Pack(
 - **返回值：**
 
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
+
+  第一段接口完成入参校验，出现以下场景时报错：
 
   <table style="undefined;table-layout: fixed; width: 1166px"><colgroup>
   <col style="width: 267px">
@@ -197,6 +201,7 @@ aclnnStatus aclnnConvertWeightToINT4Pack(
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 
 ## 约束说明
+
 - 确定性说明：
 
   - <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>、<term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>、<term>Ascend 950PR/Ascend 950DT</term>：aclnnConvertWeightToINT4Pack默认确定性实现。
@@ -668,6 +673,7 @@ aclnnStatus aclnnConvertWeightToINT4Pack(
   }
 
 - <term>Ascend 950PR/Ascend 950DT</term>：
+
   示例代码如下（INT32输入），仅供参考，具体编译和执行过程请参考[编译与运行样例](../../../docs/zh/context/编译与运行样例.md)。
   伪量化有aclnnWeightQuantBatchMatmulV2和aclnnWeightQuantBatchMatmulV3接口， 这里以aclnnWeightQuantBatchMatmulV2为例
 
@@ -1317,4 +1323,3 @@ aclnnStatus aclnnConvertWeightToINT4Pack(
     return 0;
   }
   ```
-

@@ -67,15 +67,15 @@ aclnnStatus aclnnNLLLoss2d(
 
 - **参数说明**
 
-  <table style="undefined;table-layout: fixed; width: 1312px"><colgroup>
-      <col style="width: 158px">
-      <col style="width: 120px">
-      <col style="width: 253px">
-      <col style="width: 283px">
-      <col style="width: 218px">
-      <col style="width: 110px">
-      <col style="width: 102px">
-      <col style="width: 108px">
+   <table style="undefined;table-layout: fixed; width: 1446px"><colgroup>
+    <col style="width: 158px">
+    <col style="width: 120px">
+    <col style="width: 290px">
+    <col style="width: 320px">
+    <col style="width: 218px">
+    <col style="width: 115px">
+    <col style="width: 120px">
+    <col style="width: 145px">
       </colgroup>
       <thead>
         <tr>
@@ -96,7 +96,7 @@ aclnnStatus aclnnNLLLoss2d(
         <td>输入公式中的x，shape为4维，第2维是C，C表示类别数。</td>
         <td>FLOAT、FLOAT16、BFLOAT16</td>
         <td>ND</td>
-        <td>-</td>
+        <td>4</td>
         <td>√</td>
       </tr>
       <tr>
@@ -106,7 +106,7 @@ aclnnStatus aclnnNLLLoss2d(
         <td><ul><li>公式中的y，shape为3维</li><li>target的第1维与self的第1维相等、target的第2维与self的第3维相等、target的第3维与self的第4维相等</li><li>其中每个元素的取值范围是[0, C - 1]</li></ul></td>
         <td>INT64、UINT8、INT32</td>
         <td>ND</td>
-        <td>-</td>
+        <td>3</td>
         <td>√</td>
       </tr>
       <tr>
@@ -123,7 +123,7 @@ aclnnStatus aclnnNLLLoss2d(
         <td>reduction（int64_t）</td>
         <td>输入</td>
         <td>指定要应用到输出的缩减。</td>
-        <td><ul>支持0('none')|1('mean')|2('sum')。<li>'none'表示不应用缩减</li><li>'mean'表示输出的总和将除以输出中的元素数</li><li>'sum'表示输出将被求和</li></ul></td>
+        <td><ul>支持0(none)|1(mean)|2(sum)。<li>'none'表示不应用缩减</li><li>'mean'表示输出的总和将除以输出中的元素数</li><li>'sum'表示输出将被求和</li></ul></td>
         <td>INT64</td>
         <td>-</td>
         <td>-</td>
@@ -144,7 +144,7 @@ aclnnStatus aclnnNLLLoss2d(
         <td>out（aclTensor*）</td>
         <td>输出</td>
         <td>公式中的out。</td>
-        <td>当reduction为0（'none'）时，shape与target的shape相同，否则为(1,)。</td>
+        <td>当reduction为0（none）时，shape与target的shape相同，否则为(1,)。</td>
         <td>数据类型和self保持一致。</td>
         <td>ND</td>
         <td>-</td>
@@ -154,7 +154,7 @@ aclnnStatus aclnnNLLLoss2d(
         <td>totalWeightOut（aclTensor*）</td>
         <td>输出</td>
         <td>公式中的totalWeightOut。</td>
-        <td>在reduction为非0(非'none')下输出值有效，shape为(1,)。</td>
+        <td>在reduction为非0(非none)下输出值有效，shape为(1,)。</td>
         <td>数据类型和self保持一致。</td>
         <td>ND</td>
         <td>-</td>
@@ -189,10 +189,10 @@ aclnnStatus aclnnNLLLoss2d(
 
   第一段接口完成入参校验，出现以下场景时报错：
 
-    <table style="undefined;table-layout: fixed; width: 1244px"><colgroup>
-      <col style="width: 276px">
-      <col style="width: 132px">
-      <col style="width: 836px">
+    <table style="undefined;table-layout: fixed; width: 1150px"><colgroup>
+      <col style="width: 300px">
+      <col style="width: 134px">
+      <col style="width: 716px">
       </colgroup>
       <thead>
       <tr>
@@ -227,10 +227,10 @@ aclnnStatus aclnnNLLLoss2d(
 
 - **参数说明**
 
-  <table style="undefined;table-layout: fixed; width: 1244px"><colgroup>
-      <col style="width: 200px">
-      <col style="width: 162px">
-      <col style="width: 882px">
+  <table style="undefined;table-layout: fixed; width: 1151px"><colgroup>
+      <col style="width: 184px">
+      <col style="width: 134px">
+      <col style="width: 833px">
       </colgroup>
       <thead>
       <tr>
@@ -274,6 +274,7 @@ aclnnStatus aclnnNLLLoss2d(
 ## 调用示例
 
 示例代码如下，仅供参考，具体编译和执行过程请参考[编译与运行样例](../../../docs/zh/context/编译与运行样例.md)。
+
 ```Cpp
 #include <iostream>
 #include <vector>

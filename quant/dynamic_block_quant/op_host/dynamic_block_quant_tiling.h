@@ -16,7 +16,7 @@
 #ifndef AIR_CXX_RUNTIME_V2_OP_IMPL_DYNAMIC_BLOCK_QUANT_H
 #define AIR_CXX_RUNTIME_V2_OP_IMPL_DYNAMIC_BLOCK_QUANT_H
 #include "tiling/tiling_api.h"
-#include "tiling_base/tiling_base.h"
+#include "op_host/tiling_base.h"
 
 namespace optiling {
 constexpr uint16_t MAX_CORE_COUNT = 50;
@@ -31,8 +31,11 @@ TILING_DATA_FIELD_DEF(int64_t, roundMode);                        // 数据类�
 TILING_DATA_FIELD_DEF(int64_t, dstType);                          // 输出数据类型
 TILING_DATA_FIELD_DEF(int64_t, blockSizeRow);                     // 行方向的块大小
 TILING_DATA_FIELD_DEF(int64_t, blockSizeCol);                     // 列方向的块大小
+TILING_DATA_FIELD_DEF(float, dstTypeMax);                         // 目标数据类型的最大值
+TILING_DATA_FIELD_DEF(int64_t, batchNum);                         // batchNum数
 TILING_DATA_FIELD_DEF(int64_t, rowNum);                           // 行数
 TILING_DATA_FIELD_DEF(int64_t, colNum);                           // 列数
+TILING_DATA_FIELD_DEF(int64_t, singleBatchRowBlockLoopNum);       // 单batch行方向块的循环次数
 TILING_DATA_FIELD_DEF(int64_t, rowBlockLoopNum);                  // 行方向块的循环次数
 TILING_DATA_FIELD_DEF(int64_t, colBlockLoopNum);                  // 列方向块的循环次数
 TILING_DATA_FIELD_DEF(int64_t, rowUbBlockLoopNum);                // 行方向UB块的循环次数
@@ -73,8 +76,11 @@ struct DynamicBlockQuantTilingParam {
     int64_t dstType = 0;
     int64_t blockSizeRow = 0;
     int64_t blockSizeCol = 0;
+    float dstTypeMax = 0.0;
+    int64_t batchNum = 0;
     int64_t rowNum = 0;
     int64_t colNum = 0;
+    int64_t singleBatchRowBlockLoopNum = 0;
     int64_t rowBlockLoopNum = 0;
     int64_t colBlockLoopNum = 0;
     int64_t rowUbBlockLoopNum = 0;

@@ -15,7 +15,7 @@
 #include "pp_matmul_default.h"
 #include "pp_matmul_common_tiling.h"
 #include "matmul/mat_mul_v3/op_host/op_tiling/matmul_v3_tiling.h"
-#include "tiling_base/tiling_templates_registry.h"
+#include "op_host/tiling_templates_registry.h"
 #include "register/op_def_registry.h"
 #include "error_util.h"
 #include "platform/platform_infos_def.h"
@@ -43,6 +43,11 @@ constexpr uint32_t FORMAT_BIT_COUNT = 1;
 constexpr uint32_t COMPUTE_TYPE_BIT_COUNT = 3;
 constexpr uint32_t MAX_ATTRS_NUM = 4;
 constexpr uint32_t EN_SHUFFFLE_IDX_ATB = 7;
+
+constexpr uint32_t ALIGNMENT_16 = 16;
+constexpr uint32_t ALIGNMENT_256 = 256;
+constexpr uint32_t L0AB_PINGPONG_BUFFER_LEN_FP16 = 131072;
+constexpr uint32_t TRANS_B_MASK = 0b001000;
 }
 
 namespace optiling {
@@ -61,6 +66,22 @@ void PpMatmulDefaultTilingData::SetBaseOp(uint64_t coreNum, uint64_t l0cSize, ui
     mLoop = CeilDiv(opShape.m, opShape.m0);
     nLoop = CeilDiv(opShape.n, opShape.n0);
     coreLoop = opShape.batchSize * mLoop * nLoop;
+    if (mmInfo.isQuantBatchMatmulV3) {
+        bool transB = tilingKey & TRANS_B_MASK;
+        if (mLoop == 1 && (0 == 0) && transB && coreLoop % coreNum < coreNum / CONST_4 * CONST_3) {
+            uint32_t x = CeilDiv(opShape.n, coreNum);
+            uint32_t y = CeilDiv(x, CONST_256);
+            nBase = RoundUp(CeilDiv(x, y), CONST_16);
+            uint32_t baseLimitSize = l0cSize;
+            if (mBase * nBase * sizeof(float) < baseLimitSize) {
+                opShape.n0 = nBase;
+                nLoop = CeilDiv(opShape.n, opShape.n0);
+                coreLoop = opShape.batchSize * nLoop;
+            }
+        }
+        blockDim = std::min(coreLoop, coreNum);
+        return;
+    }
     if (!isAscend310P && mLoop == 1UL && mmInfo.transB && static_cast<uint64_t>(coreLoop % coreNum) <
         static_cast<uint64_t>(coreNum / CONST_4) * CONST_3) {
         mBase = RoundUp(opShape.m, CONST_16);
@@ -81,12 +102,21 @@ void PpMatmulDefaultTilingData::SetBaseOp(uint64_t coreNum, uint64_t l0cSize, ui
 }
 
 void PpMatmulDefaultTilingData::End(const MatMulInfo &mmInfo, bool isAscend310P) {
+    if (mmInfo.isQuantBatchMatmulV3) {
+        uint32_t l1AbPpBuffLen = L0AB_PINGPONG_BUFFER_LEN_FP16;
+        uint32_t shapeCount = opShape.m0 + opShape.n0;
+        uint32_t k0Max = (shapeCount == 0) ? l1AbPpBuffLen : (l1AbPpBuffLen / shapeCount);
+        uint32_t k0Init = ALIGNMENT_256;
+        opShape.k0 = k0Max < k0Init ? k0Max / ALIGNMENT_16 * ALIGNMENT_16 : k0Max / k0Init * k0Init;
+        kLoop = CeilDiv(opShape.k, opShape.k0);
+        return;
+    }
     uint64_t shapeSum = opShape.m0 + opShape.n0;
     if (!isAscend310P) {
         uint64_t k0Max = shapeSum == 0UL
                         ? L1AB_PINGPONG_BUFFER_SIZE
                         : static_cast<uint64_t>(static_cast<float>(L1AB_PINGPONG_BUFFER_SIZE)
-                            / (shapeSum * mmInfo.inDtype));
+                            / (shapeSum * mmInfo.sizeInDtype));
         opShape.k0 = k0Max < CUBE_BLOCK_SIZE ? RoundDown(k0Max, BLOCK_SIZE) : RoundDown(k0Max, CUBE_BLOCK_SIZE);
         if (opShape.k0 > CONST_512) {
             opShape.k0 = RoundDown(opShape.k0, CONST_512);
@@ -132,7 +162,7 @@ bool PpMatMulDefault::GetMatMulTilingData()
     } else {
         TilingFunc<true, OpShape, PpMatmulDefaultTilingData, HardwareInfo, MatMulInfo>(opShape, ppMatmulDefaultTilingData_, hardwareInfo_, matMulInfo_);
     }
-    Swizzl<PpMatmulDefaultTilingData>(ppMatmulDefaultTilingData_);
+    Swizzle<PpMatmulDefaultTilingData>(ppMatmulDefaultTilingData_);
     ppMatmulDefaultTilingData_.End(matMulInfo_, hardwareInfo_.socVersion == platform_ascendc::SocVersion::ASCEND310P);
     return true;
 }
@@ -150,10 +180,10 @@ void PpMatMulDefault::PrintTiling() {
     OP_LOGD(context_->GetNodeName(), "PpMatMul kLoop: %ld.", ppMatmulDefaultTilingData_.kLoop);
     OP_LOGD(context_->GetNodeName(), "PpMatMul nLoop: %ld.", ppMatmulDefaultTilingData_.nLoop);
     OP_LOGD(context_->GetNodeName(), "PpMatMul coreLoop: %ld.", ppMatmulDefaultTilingData_.coreLoop);
-    OP_LOGD(context_->GetNodeName(), "PpMatMul swizzlCount: %ld.", ppMatmulDefaultTilingData_.swizzlCount);
+    OP_LOGD(context_->GetNodeName(), "PpMatMul swizzleCount: %ld.", ppMatmulDefaultTilingData_.swizzleCount);
     OP_LOGD(context_->GetNodeName(), "PpMatMul tilingKey: %d.", ppMatmulDefaultTilingData_.tilingKey);
     OP_LOGD(context_->GetNodeName(), "PpMatMul blockDim: %ld.", ppMatmulDefaultTilingData_.blockDim);
-    OP_LOGD(context_->GetNodeName(), "PpMatMul swizzlDirect: %ld.", ppMatmulDefaultTilingData_.swizzlDirect);
+    OP_LOGD(context_->GetNodeName(), "PpMatMul swizzleDirect: %ld.", ppMatmulDefaultTilingData_.swizzleDirect);
     OP_LOGD(context_->GetNodeName(), "PpMatMul splitk: %ld.", ppMatmulDefaultTilingData_.splitk);
     OP_LOGD(context_->GetNodeName(), "PpMatMul enShuffleK: %ld.", ppMatmulDefaultTilingData_.enShuffleK);
 }

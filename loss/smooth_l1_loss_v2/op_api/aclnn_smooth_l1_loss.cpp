@@ -132,8 +132,15 @@ static bool CheckShape(const aclTensor* self,const aclTensor* target, int64_t re
   return true;
 }
 
+static inline bool CheckBeta(float beta)
+{
+    OP_CHECK(beta >= 0,
+             OP_LOGE(ACLNN_ERR_PARAM_INVALID, "beta should be greater than or equal to 0"),
+             return false);
+    return true;
+}
 static aclnnStatus CheckParams(const aclTensor *self, const aclTensor *target, 
-                               int64_t reduction, aclTensor *result) {
+                               int64_t reduction, float beta, aclTensor *result) {
   // 1. 检查参数是否为空指针
   CHECK_RET(CheckNotNullTensor(self, target, result), ACLNN_ERR_PARAM_NULLPTR);
 
@@ -154,12 +161,14 @@ static aclnnStatus CheckParams(const aclTensor *self, const aclTensor *target,
   // 6. 检查tensor的format是否合理，nz添加warning打印
   CheckFormat(self);
 
+  // 7. 检查beta
+    CHECK_RET(CheckBeta(beta), ACLNN_ERR_PARAM_INVALID);
+
   return ACLNN_SUCCESS;
 }
 
 static const aclTensor *InputPreProcess(const aclTensor *input, int64_t reduction,
                                         op::DataType promoteType, aclOpExecutor *executor) {
-
   auto inputCast = l0op::Cast(input, promoteType, executor);
   OP_CHECK(inputCast != nullptr,
            OP_LOGE(ACLNN_ERR_INNER_NULLPTR, "The cast return nullptr."), return nullptr);
@@ -245,7 +254,7 @@ aclnnStatus aclnnSmoothL1LossGetWorkspaceSize(const aclTensor *self, const aclTe
   CHECK_RET(uniqueExecutor.get() != nullptr, ACLNN_ERR_INNER_CREATE_EXECUTOR);
 
   // 固定写法，参数检查
-  auto ret = CheckParams(self, target, reduction, result);
+  auto ret = CheckParams(self, target, reduction, beta, result);
   CHECK_RET(ret == ACLNN_SUCCESS, ret);
 
   // SmoothL1Loss算子的空tensor在kernel中支持，对标竞品根据算子实际情况补充

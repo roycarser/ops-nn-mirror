@@ -1,7 +1,9 @@
 # 算子列表
 
 > 说明：
-> - **算子目录**：目录名为算子名小写下划线形式，每个目录承载该算子所有交付件，包括代码实现、examples、文档等，目录介绍参见[项目目录](./context/dir_structure.md)。
+>
+> - **算子目录**：目录名为算子名小写下划线形式，每个目录承载该算子所有交付件，包括代码实现、examples、文档等，目录介绍参见[项目目录](./install/dir_structure.md)。
+>
 > - **算子执行硬件单元**：大部分算子运行在AI Core，少部分算子运行在AI CPU。默认情况下，项目中提到的算子一般指AI Core算子。关于AI Core和AI CPU详细介绍参见[《Ascend C算子开发》](https://hiascend.com/document/redirect/CannCommunityOpdevAscendC)中“概念原理和术语 > 硬件架构与数据处理原理”。
 > - **算子接口列表**：为方便调用算子，CANN提供一套C API执行算子，一般以aclnn为前缀，全量接口参见[aclnn列表](op_api_list.md)。
 
@@ -34,7 +36,17 @@
     <td>AI Core</td>
     <td>该算子暂无Ascend C代码实现，欢迎开发者补充贡献，贡献方式参考<a href="../../CONTRIBUTING.md">贡献指南</a>。</td>
   </tr>
-<tr>
+  <tr>
+    <td>norm</td>
+    <td><a href="../../activation/confusion_softmax_grad/README.md">confusion_softmax_grad</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✗</td>
+    <td>✓</td>
+    <td>AI Core</td>
+    <td>融合算子，将mul、sum、sub三个算子进行融合。</td>
+  </tr>
+  <tr>
     <td>activation</td>
     <td><a href="../../activation/elu/README.md">elu</a></td>
     <td>✓</td>
@@ -67,12 +79,12 @@
   <tr>
     <td>activation</td>
     <td><a href="../../activation/erfinv/README.md">erfinv</a></td>
-    <td>✗</td>
+    <td>✓</td>
     <td>✓</td>
     <td>✓</td>
     <td>✗</td>
     <td>AI Core</td>
-    <td>该算子暂无Ascend C代码实现，欢迎开发者补充贡献，贡献方式参考<a href="../../CONTRIBUTING.md">贡献指南</a>。</td>
+    <td>高斯误差函数erf的反函数。</td>
   </tr>
   <tr>
     <td>activation</td>
@@ -237,12 +249,12 @@
   <tr>
     <td>activation</td>
     <td><a href="../../activation/hard_swish_grad/README.md">hard_swish_grad</a></td>
-    <td>✗</td>
+    <td>✓</td>
     <td>✓</td>
     <td>✓</td>
     <td>✗</td>
     <td>AI Core</td>
-    <td>该算子暂无Ascend C代码实现，欢迎开发者补充贡献，贡献方式参考<a href="../../CONTRIBUTING.md">贡献指南</a>。</td>
+    <td>分段线性激活函数HardSwish的梯度函数<a href="../../CONTRIBUTING.md">贡献指南</a>。</td>
   </tr>
   <tr>
     <td>activation</td>
@@ -286,7 +298,7 @@
   </tr>
   <tr>
     <td>activation</td>
-    <td><a href="../../activation/logsigmoid/README.md">logsigmoid</a></td>
+    <td><a href="../../activation/log_sigmoid/README.md">logsigmoid</a></td>
     <td>✗</td>
     <td>✓</td>
     <td>✓</td>
@@ -302,7 +314,7 @@
     <td>✓</td>
     <td>✗</td>
     <td>AI Core</td>
-    <td>该算子暂无Ascend C代码实现，欢迎开发者补充贡献，贡献方式参考<a href="../../CONTRIBUTING.md">贡献指南</a>。</td>
+    <td>对应logsigmoid操作的反向传播梯度。</td>
   </tr>
   <tr>
     <td>activation</td>
@@ -327,12 +339,12 @@
   <tr>
     <td>activation</td>
     <td><a href="../../activation/mish/README.md">mish</a></td>
-    <td>✗</td>
+    <td>✓</td>
     <td>✓</td>
     <td>✓</td>
     <td>✗</td>
     <td>AI Core</td>
-    <td>该算子暂无Ascend C代码实现，欢迎开发者补充贡献，贡献方式参考<a href="../../CONTRIBUTING.md">贡献指南</a>。</td>
+    <td>一个自正则化的非单调神经网络激活函数。</td>
   </tr>
   <tr>
     <td>activation</td>
@@ -346,13 +358,13 @@
   </tr>
   <tr>
     <td>activation</td>
-    <td><a href="../../activation/prelu/README.md">prelu</a></td>
-    <td>✗</td>
+    <td><a href="../../activation/p_relu/README.md">p_relu</a></td>
+    <td>✓</td>
     <td>✓</td>
     <td>✓</td>
     <td>✗</td>
     <td>AI Core</td>
-    <td>该算子暂无Ascend C代码实现，欢迎开发者补充贡献，贡献方式参考<a href="../../CONTRIBUTING.md">贡献指南</a>。</td>
+    <td>一种激活函数，当Tensor中value大于0，取该value，小于0时取权重与value的乘积。</td>
   </tr>
   <tr>
     <td>activation</td>
@@ -602,7 +614,7 @@
     <td>✓</td>
     <td>✓</td>
     <td>AI Core</td>
-    <td>Swish激活函数的反向传播，用于计算Swish激活函数的梯度。</a>。</td>
+    <td>Swish激活函数的反向传播，用于计算Swish激活函数的梯度。</td>
   </tr>
   <tr>
     <td>activation</td>
@@ -773,6 +785,16 @@
     <td>✓</td>
     <td>AI Core</td>
     <td>用于计算变形卷积（Deformable Convolution）输出的函数。通过引入偏移参数offsets，使得卷积核在输入特征图上的位置可以动态调整，从而适配不规则的集合变化。</td>
+  </tr>
+  <tr>
+    <td>conv</td>
+    <td><a href="../../conv/deformable_offsets_grad/README.md">deformable_offsets</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>AI Core</td>
+    <td>DeformableOffsets 算子的目的是根据 offsets（ kernel 采样点的偏移值）来收集用于卷积的特征采样点，并对其进行重组，方便 Conv2d 算子进行卷积计算。而 DeformableOffsetsGrad 即为这一过程的反向。</td>
   </tr>
   <tr>
     <td>foreach</td>
@@ -1366,6 +1388,16 @@
   </tr>
   <tr>
     <td>index</td>
+    <td><a href="../../index/broadcast_gradient_args/README.md">broadcast_gradient_args</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✗</td>
+    <td>✓</td>
+    <td>AI Core</td>
+    <td>接收两个输入shape，并输出两个整数向量，通过广播机制，分别得出两个输入shape在梯度计算时需要在哪些维度上进行聚合。</td>
+  </tr>
+  <tr>
+    <td>index</td>
     <td><a href="../../index/embedding_bag/README.md">embedding_bag</a></td>
     <td>✓</td>
     <td>✓</td>
@@ -1493,6 +1525,16 @@
     <td>✗</td>
     <td>AI Core</td>
     <td>将alpha和value相乘，并按照sorted_indices中的顺序，累加到var张量的指定axis维度中。</td>
+  </tr>
+  <tr>
+    <td>index</td>
+    <td><a href="../../index/inplace_index_fill/README.md">inplace_index_fill</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>AI Core</td>
+    <td>在输入Tensor的指定维度dim，根据index填写特定的数value。</td>
   </tr>
   <tr>
     <td>index</td>
@@ -1662,11 +1704,21 @@
     <td>✓</td>
     <td>✗</td>
     <td>AI Core</td>
-    <td>该算子暂无Ascend C代码实现，欢迎开发者补充贡献，贡献方式参考<a href="../../CONTRIBUTING.md">贡献指南</a>。</td>
+    <td>算子功能：根据indices在给定变量内，将updates应用于变量的单个值或切片。</td>
   </tr>
   <tr>
     <td>index</td>
     <td><a href="../../index/scatter_update/README.md">scatter_update</a></td>
+    <td>✗</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✗</td>
+    <td>AI Core</td>
+    <td>该算子暂无Ascend C代码实现，欢迎开发者补充贡献，贡献方式参考<a href="../../CONTRIBUTING.md">贡献指南</a>。</td>
+  </tr>
+  <tr>
+    <td>index</td>
+    <td><a href="../../index/tf_scatter_add/README.md">tf_scatter_add</a></td>
     <td>✗</td>
     <td>✓</td>
     <td>✓</td>
@@ -2126,6 +2178,16 @@
   </tr>
   <tr>
     <td>matmul</td>
+    <td><a href="../../matmul/quant_batch_matmul_inplace_add/README.md">quant_batch_matmul_inplace_add</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>AI Core</td>
+    <td>完成量化的矩阵乘计算和原地累加。</td>
+  </tr>
+  <tr>
+    <td>matmul</td>
     <td><a href="../../matmul/quant_matmul_reduce_sum/README.md">quant_matmul_reduce_sum</a></td>
     <td>✓</td>
     <td>✓</td>
@@ -2173,6 +2235,16 @@
     <td>✓</td>
     <td>AI Core</td>
     <td>AdaLayerNorm算子将LayerNorm和下游的Add、Mul融合起来，通过自适应参数scale和shift来调整归一化过程。</td>
+  </tr>
+  <tr>
+    <td>norm</td>
+    <td><a href="../../norm/ada_layer_norm_grad/README.md">ada_layer_norm_grad</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>AI Core</td>
+    <td>AdaLayerNormV2的反向传播。用于计算输入张量的梯度，以便在反向传播过程中更新模型参数。</td>
   </tr>
   <tr>
     <td>norm</td>
@@ -2244,6 +2316,16 @@
     <td>AI Core</td>
     <td>RmsNorm算子是大模型常用的归一化操作，AddRmsNormCast算子将AddRmsNorm后的Cast算子融合起来，减少搬入搬出操作。</td>
   </tr>
+    <tr>
+    <td>norm</td>
+    <td><a href="../../norm/add_rms_norm_dynamic_mx_quant/README.md">add_rms_norm_dynamic_mx_quant</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>AI Core</td>
+    <td>RmsNorm算子是大模型常用的归一化操作，相比LayerNorm算子，其去掉了减去均值的部分。DynamicMxQuant算子则是在尾轴上按blocksize分组进行动态MX量化的算子。AddRmsNormDynamicMxQuant算子将RmsNorm前的Add算子和RmsNorm归一化输出给到的DynamicMxQuant算子融合起来，减少搬入搬出操作。AddRmsNormDynamicMxQuant算子相较于AddRmsNormQuant在RmsNorm计算过程中增加了偏置项betaOptional参数，即计算公式中的beta。</td>
+  </tr>
   <tr>
     <td>norm</td>
     <td><a href="../../norm/add_rms_norm_dynamic_quant/README.md">add_rms_norm_dynamic_quant</a></td>
@@ -2283,6 +2365,16 @@
     <td>✓</td>
     <td>AI Core</td>
     <td>RmsNorm是大模型常用的标准化操作，相比LayerNorm，其去掉了减去均值的部分。AddRmsNormQuant算子将RmsNorm前的Add算子以及RmsNorm归一化的输出给到1个或2个Quantize算子融合起来，减少搬入搬出操作。AddRmsNormQuantV2算子相较于AddRmsNormQuant在RmsNorm计算过程中增加了偏置项bias参数，即计算公式中的`bias`。</td>
+  </tr>
+  <tr>
+    <td>norm</td>
+    <td><a href="../../norm/batch_norm/README.md">batch_norm</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✗</td>
+    <td>✓</td>
+    <td>AI Core</td>
+    <td>对一个批次的数据做批量归一化处理，正则化之后生成的数据的统计结果为0均值、1标准差。</td>
   </tr>
   <tr>
     <td>norm</td>
@@ -2476,6 +2568,16 @@
   </tr>
   <tr>
     <td>norm</td>
+    <td><a href="../../norm/layer_norm/README.md">layer_norm</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✗</td>
+    <td>✓</td>
+    <td>AI Core</td>
+    <td>对指定层进行均值为0、标准差为1的归一化计算。</td>
+  </tr>
+  <tr>
+    <td>norm</td>
     <td><a href="../../norm/layer_norm_grad/README.md">layer_norm_grad</a></td>
     <td>✓</td>
     <td>✓</td>
@@ -2493,6 +2595,16 @@
     <td>✓</td>
     <td>AI Core</td>
     <td>LayerNormV4的反向传播。用于计算输入张量的梯度，以便在反向传播过程中更新模型参数。</td>
+  </tr>
+  <tr>
+    <td>norm</td>
+    <td><a href="../../norm/layer_norm_quant/README.md">layer_norm_quant</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✗</td>
+    <td>AI Core</td>
+    <td>算子将LayerNorm归一化输出和下游的量化算子融合起来，减少搬入搬出操作。</td>
   </tr>
   <tr>
     <td>norm</td>
@@ -2604,35 +2716,45 @@
     <td>AI Core</td>
     <td>RmsNorm算子是大模型常用的标准化操作，相比LayerNorm算子，其去掉了减去均值的部分。RmsNormQuantV2算子将RmsNorm算子以及RmsNorm归一化的输出给到1个或2个Quantize算子融合起来，减少搬入搬出操作。</td>
   </tr>
+    <tr>
+    <td>norm</td>
+    <td><a href="../../norm/rms_norm_dynamic_mx_quant/README.md">rms_norm_dynamic_mx_quant</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>AI Core</td>
+    <td>RmsNorm算子是大模型常用的归一化操作，相比LayerNorm算子，其去掉了减去均值的部分。DynamicMxQuant算子则是在尾轴上按blocksize分组进行动态MX量化的算子。RmsNormDynamicMxQuant算子将RmsNorm归一化输出给到的DynamicMxQuant算子融合起来，减少搬入搬出操作。</td>
+  </tr>
   <tr>
     <td>norm</td>
     <td><a href="../../norm/sync_batch_norm_backward_elemt/README.md">sync_batch_norm_backward_elemt</a></td>
-    <td>✗</td>
     <td>✓</td>
     <td>✓</td>
-    <td>✗</td>
+    <td>✓</td>
+    <td>✓</td>
     <td>AI Core</td>
-    <td>该算子暂无Ascend C代码实现，欢迎开发者补充贡献，贡献方式参考<a href="../../CONTRIBUTING.md">贡献指南</a>。</td>
+    <td>SyncBatchNormBackwardElemt算子用于计算输入张量的元素级梯度，以便在反向传播过程中更新模型参数。</td>
   </tr>
   <tr>
     <td>norm</td>
     <td><a href="../../norm/sync_batch_norm_backward_reduce/README.md">sync_batch_norm_backward_reduce</a></td>
-    <td>✗</td>
     <td>✓</td>
     <td>✓</td>
-    <td>✗</td>
+    <td>✓</td>
+    <td>✓</td>
     <td>AI Core</td>
-    <td>该算子暂无Ascend C代码实现，欢迎开发者补充贡献，贡献方式参考<a href="../../CONTRIBUTING.md">贡献指南</a>。</td>
+    <td>SyncBatchNormBackwardReduce用于反向传播过程中计算BatchNorm操作的所需的权重梯度gradWeight和中间量sumDyXmu。</td>
   </tr>
   <tr>
     <td>norm</td>
     <td><a href="../../norm/sync_batch_norm_gather_stats/README.md">sync_batch_norm_gather_stats</a></td>
-    <td>✗</td>
     <td>✓</td>
     <td>✓</td>
-    <td>✗</td>
+    <td>✓</td>
+    <td>✓</td>
     <td>AI Core</td>
-    <td>该算子暂无Ascend C代码实现，欢迎开发者补充贡献，贡献方式参考<a href="../../CONTRIBUTING.md">贡献指南</a>。</td>
+    <td>SyncBatchNormGatherStats算子用于收集所有device的均值和方差，更新全局的均值和方差。</td>
   </tr>
   <tr>
     <td>norm</td>
@@ -2643,6 +2765,16 @@
     <td>✗</td>
     <td>AI Core</td>
     <td>该算子暂无Ascend C代码实现，欢迎开发者补充贡献，贡献方式参考<a href="../../CONTRIBUTING.md">贡献指南</a>。</td>
+  </tr>
+  <tr>
+    <td>norm</td>
+    <td><a href="../../norm/sync_bn_training_update/README.md">sync_bn_training_update</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>AI Core</td>
+    <td>SyncBNTrainingUpdate算子用于更新在BatchNormTraining过程中的全局的均值。</td>
   </tr>
   <tr>
     <td>optim</td>
@@ -2746,6 +2878,16 @@
   </tr>
   <tr>
     <td>pooling</td>
+    <td><a href="../../pooling/adaptive_avg_pool2d/README.md">adaptive_avg_pool2d</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>AI Core</td>
+    <td>在指定二维输出shape信息的情况下，完成输入张量的2D自适应平均池化计算。</td>
+  </tr>
+  <tr>
+    <td>pooling</td>
     <td><a href="../../pooling/adaptive_avg_pool3d_grad/README.md">adaptive_avg_pool3d_grad</a></td>
     <td>✓</td>
     <td>✓</td>
@@ -2774,6 +2916,26 @@
     <td>AI Core</td>
     <td>正向自适应最大池化的反向传播，将梯度回填到每个自适应窗口最大值的坐标处，相同坐标处累加。</td>
   </tr>
+    <tr>
+    <td>pooling</td>
+    <td><a href="../../pooling/avg_pool/README.md">avg_pool</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✗</td>
+    <td>✓</td>
+    <td>AI Core</td>
+    <td>对输入Tensor进行窗口为kH * kW、步长为sH * sW的二维平均池化操作，其中k为kernelSize，表示池化窗口的大小，s为stride，表示池化操作的步长。</td>
+  </tr>
+  <tr>
+    <td>pooling</td>
+    <td><a href="../../pooling/avg_pool_v2/README.md">avg_pool_v2</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>AI Core</td>
+    <td>对输入Tensor进行窗口为kH * kW、步长为sH * sW的二维平均池化操作，其中k为kernelSize，表示池化窗口的大小，s为stride，表示池化操作的步长。</td>
+  </tr>
   <tr>
     <td>pooling</td>
     <td><a href="../../pooling/avg_pool3_d/README.md">avg_pool3_d</a></td>
@@ -2796,7 +2958,7 @@
   </tr>
   <tr>
     <td>pooling</td>
-    <td><a href="../../pooling/max_pool3d/README.md">max_pool3d</a></td>
+    <td><a href="../../pooling/max_pool3_d/README.md">max_pool3d</a></td>
     <td>✓</td>
     <td>✓</td>
     <td>✗</td>
@@ -2846,6 +3008,16 @@
   </tr>
   <tr>
     <td>pooling</td>
+    <td><a href="../../pooling/max_pool3d_grad/README.md">max_pool3d_grad</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✗</td>
+    <td>AI Core</td>
+    <td>正向最大池化后反向传播，将梯度回填到每个窗口最大值的坐标处，相同坐标处累加。</td>
+  </tr>
+  <tr>
+    <td>pooling</td>
     <td><a href="../../pooling/max_pool3d_with_argmax_v2/README.md">max_pool3d_with_argmax_v2</a></td>
     <td>✓</td>
     <td>✓</td>
@@ -2857,12 +3029,12 @@
   <tr>
     <td>quant</td>
     <td><a href="../../quant/ascend_anti_quant_v2/README.md">ascend_anti_quant_v2</a></td>
-    <td>✗</td>
     <td>✓</td>
     <td>✓</td>
-    <td>✗</td>
+    <td>✓</td>
+    <td>✓</td>
     <td>AI Core</td>
-    <td>该算子暂无Ascend C代码实现，欢迎开发者补充贡献，贡献方式参考<a href="../../CONTRIBUTING.md">贡献指南</a>。</td>
+    <td>根据输入的scale和offset对输入x进行反量化。</td>
   </tr>
     <tr>
     <td>quant</td>
@@ -2872,7 +3044,7 @@
     <td>✓</td>
     <td>✓</td>
     <td>AI Core</td>
-    <td>根据输入的sacle和offset对输入x进行量化，且scale和offset的size需要是x的最后一维或1。</td>
+    <td>根据输入的scale和offset对输入x进行量化，且scale和offset的size需要是x的最后一维或1。</td>
   </tr>
   <tr>
     <td>quant</td>
@@ -2953,6 +3125,16 @@
     <td>✓</td>
     <td>AI Core</td>
     <td>根据传入的分组索引的起始值，对传入的数据进行分组的float8的动态量化。</td>
+  </tr>
+  <tr>
+    <td>quant</td>
+    <td><a href="../../quant/dynamic_block_mx_quant/README.md">dynamic_block_mx_quant</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>AI Core</td>
+    <td>对输入变量，以数据块（32*32）为基本块进行MX量化转换为目的数据类型。</td>
   </tr>
   <tr>
     <td>quant</td>
@@ -3046,6 +3228,16 @@
   </tr>
   <tr>
     <td>quant</td>
+    <td><a href="../../quant/swiglu_mx_quant/README.md">swiglu_mx_quant</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>AI Core</td>
+    <td>在SwiGlu激活函数后添加mx_quant操作，实现输入x的SwigluMxQuant计算，支持FP8或FP4量化输出。</td>
+  </tr>
+  <tr>
+    <td>quant</td>
     <td><a href="../../quant/trans_quant_param/README.md">trans_quant_param</a></td>
     <td>✓</td>
     <td>✓</td>
@@ -3064,9 +3256,19 @@
     <td>AI Core</td>
     <td>完成量化计算参数scale数据类型的转换，将FLOAT32的数据类型转换为硬件需要的UINT64类型。</td>
   </tr>
+  <tr>
+    <td>quant</td>
+    <td><a href="../../quant/ifmr/README.md">ifmr</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✗</td>
+    <td>✓</td>
+    <td>AI Core</td>
+    <td>输入特征图重建的量化方法。</td>
+  </tr>
    <tr>
     <td>rnn</td>
-    <td><a href="../../../../rnn/bidirection_lstm/README.md">bidirection_lstm</a></td>
+    <td><a href="../../rnn/bidirection_lstm/README.md">bidirection_lstm</a></td>
     <td>✓</td>
     <td>✓</td>
     <td>✓</td>
@@ -3076,7 +3278,7 @@
   </tr>
     <tr>
     <td>rnn</td>
-    <td><a href="../../../../rnn/bidirection_lstm_v2/README.md">bidirection_lstm_v2</a></td>
+    <td><a href="../../rnn/bidirection_lstmv2/README.md">bidirection_lstm_v2</a></td>
     <td>✓</td>
     <td>✓</td>
     <td>✓</td>
@@ -3103,6 +3305,36 @@
     <td>✓</td>
     <td>AI Core</td>
     <td>基础循环神经网络 (Recurrent Neural Network) 算子，用于处理序列数据。它通过隐藏状态传递时序信息，适合处理具有时间/顺序依赖性的数据， 仅支持单层RNN。</td>
+  </tr>
+  <tr>
+    <td>rnn</td>
+      <td><a href="../../rnn/single_layer_lstm_grad/README.md">single_layer_lstm_grad</a></td>
+      <td>✓</td>
+      <td>✓</td>
+      <td>✗</td>
+      <td>✓</td>
+      <td>AI Core</td>
+      <td>单层单向LSTM的反向传播，计算正向输入x、权重w、偏置b、初始隐藏状态initH与初始细胞状态initC的梯度。</td>
+  </tr>
+  <tr>
+    <td>rnn</td>
+    <td><a href="../../rnn/thnn_fused_lstm_cell/README.md">thnn_fused_lstm_cell</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✗</td>
+    <td>AI Core</td>
+    <td>实现长短期记忆网络单元（LSTM Cell）的单步前向计算中，矩阵乘法后的后续计算。</td>
+  </tr>
+  <tr>
+    <td>rnn</td>
+    <td><a href="../../rnn/thnn_fused_lstm_cell_grad/README.md">thnn_fused_lstm_cell_grad</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✗</td>
+    <td>✓</td>
+    <td>AI Core</td>
+    <td>LSTMCell中四个门中matmul后剩余计算的反向传播，计算正向输出四个门激活前的值gates、输入cx、偏置b的梯度。</td>
   </tr>
   <tr>
     <td>vfusion</td>

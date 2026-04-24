@@ -6,34 +6,39 @@
 
 | 产品                                                         |  是否支持   |
 | :----------------------------------------------------------- |:-------:|
-| <term>Ascend 950PR/Ascend 950DT</term>                             |    √    |
-| <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>     |    √    |
-| <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term> |    √    |
+| <term>Ascend 950PR/Ascend 950DT</term>                             |    ✓    |
+| <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>     |    ✓    |
+| <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term> |    ✓    |
 | <term>Atlas 200I/500 A2 推理产品</term>                      |    ×    |
-| <term>Atlas 推理系列产品</term>                             |    ×    |
+| <term>Atlas 推理系列产品</term>                             |    ✓    |
 | <term>Atlas 训练系列产品</term>                              |    ×    |
 
 ## 功能说明
 
 - 接口功能：完成量化的矩阵乘计算。
-  - <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>、<term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>：兼容aclnnQuantMatmulV3、aclnnQuantMatmulV4接口功能。完成量化的矩阵乘计算，最小支持输入维度为1维，最大支持输入维度为2维。相似接口有aclnnMm（仅支持2维Tensor作为输入的矩阵乘）。
-  - <term>Ascend 950PR/Ascend 950DT</term>：兼容aclnnQuantMatmulV3、aclnnQuantMatmulV4接口功能，在其基础上新增支持G-B、B-B、T-CG、mx[量化模式](../../../docs/zh/context/量化介绍.md)等特性，新增x1，x2输入支持dtype为FLOAT8_E4M3FN、FLOAT8_E5M2、HIFLOAT8、FLOAT4_E2M1。完成量化的矩阵乘计算，最小支持输入维度为2维，最大支持输入维度为6维。相似接口有aclnnMm（仅支持2维Tensor作为输入的矩阵乘）和aclnnBatchMatMul（仅支持三维的矩阵乘，其中第一维是Batch维度）。
+  - <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>、<term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>：
+
+    兼容aclnnQuantMatmulV3、aclnnQuantMatmulV4接口功能。完成量化的矩阵乘计算，最小支持输入维度为1维，最大支持输入维度为2维。相似接口有aclnnMm（仅支持2维Tensor作为输入的矩阵乘）。
+  - <term>Ascend 950PR/Ascend 950DT</term>：
+
+    兼容aclnnQuantMatmulV3、aclnnQuantMatmulV4接口功能，并在其基础上新增支持G-B、B-B、T-CG、mx [量化模式](../../../docs/zh/context/量化介绍.md)等特性；x1、x2输入新增支持FLOAT8_E4M3FN、FLOAT8_E5M2、HIFLOAT8、FLOAT4_E2M1等数据类型。完成量化的矩阵乘计算，最小支持输入维度为2维，最大支持输入维度为6维。相似接口有aclnnMm（仅支持2维Tensor作为输入的矩阵乘）和aclnnBatchMatMul（仅支持三维的矩阵乘，其中第一维是Batch维度）。
 
 - 计算公式：
   - <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>、<term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>：
+
     支持K-C && K-T、T-C && T-T、G-B、K-G[量化模式](../../../docs/zh/context/量化介绍.md)，不同量化模式对应的输入输出数据类型组合参见[约束说明](#约束说明)。
 
     <details>
     
     <summary><term><strong>K-G量化模式</strong></term></summary>
     
-      - x1为INT8，x2为INT32，x1Scale为FLOAT32，x2Scale为UINT64，yOffset为FLOAT32：
+      - x1为INT8，x2为INT32，x1Scale为FLOAT32，x2Scale为UINT64/INT64，yOffset为FLOAT32：
 
         $$
         out = ((x1 @ (x2*x2Scale)) + yOffset) * x1Scale
         $$
         
-      - x1，x2为INT4，x1Scale，x2Scale为FLOAT32，x2Offset为FLOAT16，out为FLOAT16/BFLOAT16 (pertoken-pergroup非对称量化)：
+      - x1，x2为INT4，x1Scale，x2Scale为FLOAT32，x2Offset为FLOAT16，out为FLOAT16/BFLOAT16（pertoken-pergroup非对称量化）：
 
         $$
         out = x1Scale * x2Scale @ (x1 @ x2 - x1 @ x2Offset)
@@ -45,19 +50,19 @@
 
     <summary><term><strong>K-C && K-T量化模式</strong></term></summary>
 
-      - x1Scale无bias：
+      - x1Scale、无bias：
 
         $$
         out = x1@x2 * x2Scale * x1Scale
         $$
 
-      - x1Scale，bias INT32（此场景无offset）：
+      - x1Scale、bias INT32（此场景无offset）：
 
         $$
         out = (x1@x2 + bias) * x2Scale * x1Scale
         $$
 
-      - x1Scale，bias BFLOAT16/FLOAT16/FLOAT32（此场景无offset）：
+      - x1Scale、bias BFLOAT16/FLOAT16/FLOAT32（此场景无offset）：
 
         $$
         out = x1@x2 * x2Scale * x1Scale + bias
@@ -69,7 +74,7 @@
 
     <summary><term><strong>T-C && T-T量化模式</strong></term></summary>
 
-      - 无x1Scale无bias：
+      - 无x1Scale、无bias：
 
         $$
         out = x1@x2 * x2Scale + x2Offset
@@ -93,7 +98,7 @@
 
     <summary><term><strong>G-B量化模式</strong></term></summary>
 
-      - x1，x2为INT8，x1Scale，x2Scale为FLOAT32，bias为FLOAT32，out为FLOAT16/BFLOAT16  (pergroup-perblock量化)：
+      - x1，x2为INT8，x1Scale，x2Scale为FLOAT32，bias为FLOAT32，out为FLOAT16/BFLOAT16（pergroup-perblock量化）：
 
         $$
         out = (x1 @ x2) * x1Scale * x2Scale + bias
@@ -101,9 +106,43 @@
 
     </details>
 
+  - <term>Atlas 推理系列产品</term>：
+
+    支持K-C[量化模式](../../../docs/zh/context/量化介绍.md)，不同量化模式对应的输入输出数据类型组合参见[约束说明](#约束说明)。
+
+    <details>
+
+    <summary><term><strong>K-C量化模式</strong></term></summary>
+
+      - x1Scale、无bias：
+
+        $$
+        out = x1@x2 * x2Scale * x1Scale
+        $$
+
+      - x1Scale、bias INT32（此场景无offset）：
+
+        $$
+        out = (x1@x2 + bias) * x2Scale * x1Scale
+        $$
+
+    </details>
+
   - <term>Ascend 950PR/Ascend 950DT</term>：
 
-    支持T-C && T-T、K-C && K-T、G-B 、B-B 、mx、T-CG[量化模式](../../../docs/zh/context/量化介绍.md)，不同量化模式对应的输入输出数据类型组合参见[约束说明](#约束说明)。
+    支持T-C && T-T、K-C && K-T、G-B、B-B、mx、T-CG、K-G [量化模式](../../../docs/zh/context/量化介绍.md)，不同量化模式对应的输入输出数据类型组合参见[约束说明](#约束说明)。
+
+    <details>
+    
+    <summary><term><strong>K-G量化模式</strong></term></summary>
+        
+      - x1，x2为INT4，x1Scale，x2Scale为FLOAT32，x2Offset为FLOAT16，out为FLOAT16/BFLOAT16 (pertoken-pergroup非对称量化)：
+
+        $$
+        out = x1Scale * x2Scale @ (x1 @ x2 - x1 @ x2Offset)
+        $$
+
+    </details>
 
     <details>
 
@@ -182,7 +221,7 @@
 
 每个算子分为[两段式接口](../../../docs/zh/context/两段式接口.md)，必须先调用“aclnnQuantMatmulV5GetWorkspaceSize”接口获取计算所需workspace大小以及包含了算子计算流程的执行器，再调用“aclnnQuantMatmulV5”接口执行计算。
 
-```c++
+```cpp
 aclnnStatus aclnnQuantMatmulV5GetWorkspaceSize(
   const aclTensor *x1,
   const aclTensor *x2,
@@ -200,7 +239,8 @@ aclnnStatus aclnnQuantMatmulV5GetWorkspaceSize(
   uint64_t        *workspaceSize,
   aclOpExecutor   **executor)
 ```
-```c++
+
+```cpp
 aclnnStatus aclnnQuantMatmulV5(
   void          *workspace,
   uint64_t       workspaceSize,
@@ -212,12 +252,12 @@ aclnnStatus aclnnQuantMatmulV5(
 
 - **参数说明**
 
-  <table style="undefined;table-layout: fixed; width: 1554px"><colgroup>
+  <table style="table-layout: fixed; width: 1554px"><colgroup>
   <col style="width: 248px">
   <col style="width: 121px">
-  <col style="width: 170px">
-  <col style="width: 397px">
-  <col style="width: 220px">
+  <col style="width: 210px">
+  <col style="width: 327px">
+  <col style="width: 250px">
   <col style="width: 115px">
   <col style="width: 138px">
   <col style="width: 145px">
@@ -244,10 +284,10 @@ aclnnStatus aclnnQuantMatmulV5(
             <li>仅最后m和k轴转置情况下支持<a href="../../../docs/zh/context/非连续的Tensor.md">非连续的Tensor</a>，其他轴方向不支持非连续的Tensor。</li>
           </ul>
         </td>
-        <td>INT4<sup>1</sup>、INT8、INT32<sup>1</sup>、FLOAT8_E4M3FN<sup>2</sup>、FLOAT8_E5M2<sup>2</sup>、HIFLOAT8<sup>2</sup>、FLOAT4_E2M1<sup>2</sup></td>
+        <td>INT4、INT8、INT32<sup>1</sup>、FLOAT8_E4M3FN<sup>2</sup>、FLOAT8_E5M2<sup>2</sup>、HIFLOAT8<sup>2</sup>、FLOAT4_E2M1<sup>2</sup></td>
         <td>ND</td>
         <td>2-6</td>
-        <td>√</td>
+        <td>✓</td>
       </tr>
       <tr>
         <td>x2(aclTensor*)</td>
@@ -261,10 +301,10 @@ aclnnStatus aclnnQuantMatmulV5(
             <li>ND格式下支持最后两根轴转置情况下的非连续tensor，其他场景的<a href="../../../docs/zh/context/非连续的Tensor.md">非连续的Tensor</a>不支持。</li>
           </ul>
         </td>
-        <td>INT4<sup>1</sup>、INT8、INT32<sup>1</sup>、FLOAT8_E4M3FN<sup>2</sup>、FLOAT8_E5M2<sup>2</sup>、HIFLOAT8<sup>2</sup>、FLOAT4_E2M1<sup>2</sup></td>
+        <td>INT4、INT8、INT32<sup>1</sup>、FLOAT8_E4M3FN<sup>2</sup>、FLOAT8_E5M2<sup>2</sup>、HIFLOAT8<sup>2</sup>、FLOAT4_E2M1<sup>2</sup></td>
         <td>ND、NZ</td>
-        <td>2-8</td>
-        <td>√</td>
+        <td>2-6（ND）<br>4-8（NZ）</td>
+        <td>✓</td>
       </tr>
       <tr>
         <td>x1Scale(aclTensor*)</td>
@@ -278,7 +318,7 @@ aclnnStatus aclnnQuantMatmulV5(
         <td>FLOAT32、FLOAT8_E8M0<sup>2</sup>、FLOAT8_E4M3FN<sup>2</sup>、FLOAT8_E5M2<sup>2</sup>、HIFLOAT8<sup>2</sup></td>
         <td>ND</td>
         <td>1-6</td>
-        <td>√</td>
+        <td>✓</td>
       </tr>
       <tr>
         <td>x2Scale(aclTensor*)</td>
@@ -289,10 +329,10 @@ aclnnStatus aclnnQuantMatmulV5(
             <li>不支持空Tensor。</li>
           </ul>
         </td>
-        <td>UINT64、INT64、FLOAT32、BFLOAT16、FLOAT8_E8M0<sup>2</sup></td>
+        <td>UINT64、INT64、FLOAT32、BFLOAT16、FLOAT8_E8M0<sup>2</sup>、FLOAT16<sup>2</sup></td>
         <td>ND</td>
         <td>1-6</td>
-        <td>√</td>
+        <td>✓</td>
       </tr>
       <tr>
         <td>yScale(aclTensor*)</td>
@@ -343,8 +383,7 @@ aclnnStatus aclnnQuantMatmulV5(
         <td>yOffset(aclTensor*)</td>
         <td>可选输入</td>
         <td>公式中的输入yOffset。</td>
-        <td>
-        </td>
+        <td>-</td>
         <td>FLOAT32</td>
         <td>ND</td>
         <td>1</td>
@@ -388,18 +427,14 @@ aclnnStatus aclnnQuantMatmulV5(
         <td>groupSize(int64_t)</td>
         <td>可选输入</td>
         <td>用于输入m、n、k方向上的量化分组大小。</td>
-        <td>
-        <ul>
-            <li>由3个方向的groupSizeM，groupSizeN，groupSizeK 三个值拼接组成，每个值占16位，共占用int64_t类型groupSize的低48位（groupSize中的高16位的数值无效），计算公式见表格下方。</li>
-          </ul>
-        </td>
+        <td>由3个方向的groupSizeM，groupSizeN，groupSizeK 三个值拼接组成，每个值占16位，共占用int64_t类型groupSize的低48位（groupSize中的高16位的数值无效），计算公式见表格下方。</td>
         <td>INT64</td>
         <td>-</td>
         <td>-</td>
         <td>-</td>
       </tr>
       <tr>
-        <td>out(aclTensor)</td>
+        <td>out(aclTensor*)</td>
         <td>输出</td>
         <td>公式中的输出out。</td>
         <td>
@@ -407,10 +442,10 @@ aclnnStatus aclnnQuantMatmulV5(
             <li>不支持空Tensor。</li>
           </ul>
         </td>
-        <td>FLOAT16、INT8、BFLOAT16、INT32</td>
+        <td>FLOAT16、INT8、BFLOAT16、INT32、FLOAT32</td>
         <td>ND</td>
         <td>2</td>
-        <td>✓</td>
+        <td>-</td>
       </tr>
       <tr>
         <td>workspaceSize(uint64_t)</td>
@@ -423,7 +458,7 @@ aclnnStatus aclnnQuantMatmulV5(
         <td>-</td>
       </tr>
       <tr>
-        <td style="white-space: nowrap">executor(aclOpExecutor)</td>
+        <td style="white-space: nowrap">executor(aclOpExecutor*)</td>
         <td>输出</td>
         <td>返回op执行器，包含了算子计算流程。</td>
         <td>-</td>
@@ -439,7 +474,7 @@ aclnnStatus aclnnQuantMatmulV5(
   - <term>Ascend 950PR/Ascend 950DT</term>：
 
     - 上表数据类型列中的角标“1”代表该系列不支持的数据类型。
-    - 输入参数x1、x2均不支持INT4、INT32类型。
+    - 输入参数x1、x2均不支持INT32类型。
     - x2为ND格式时，当输入参数x1为m=0的空tensor或x2为n=0的空tensor时，输出为空tensor；x2为FRACTAL_NZ格式时，当输入参数x1中m=0的空tensor时，输出为空tensor。
 
   - <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>、<term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>：
@@ -458,7 +493,7 @@ aclnnStatus aclnnQuantMatmulV5(
 
   第一段接口完成入参校验，出现以下场景时报错：
 
-  <table style="undefined;table-layout: fixed; width: 1149px"><colgroup>
+  <table style="table-layout: fixed; width: 1149px"><colgroup>
   <col style="width: 281px">
   <col style="width: 119px">
   <col style="width: 749px">
@@ -491,12 +526,11 @@ aclnnStatus aclnnQuantMatmulV5(
       </tr>
     </tbody></table>
 
-
 ## aclnnQuantMatmulV5
 
 - **参数说明**
 
-  <table style="undefined;table-layout: fixed; width: 1150px"><colgroup>
+  <table style="table-layout: fixed; width: 1150px"><colgroup>
   <col style="width: 168px">
   <col style="width: 128px">
   <col style="width: 854px">
@@ -537,7 +571,41 @@ aclnnStatus aclnnQuantMatmulV5(
 ## 约束说明
 
 - 确定性计算：
-  - aclnnGroupedMatmulV5默认确定性实现。
+  - aclnnQuantMatmulV5默认确定性实现。
+
+<details>
+
+<summary><term>Atlas 推理系列产品</term></summary>
+
+- **公共约束：**
+  <a id="公共约束"></a>
+  - 当前版本不支持yScale、x1Offset、x2Offset、yOffset，需要传入nullptr。
+
+  <details>
+
+  <summary><term><strong>K-C 量化场景约束：</strong></term></summary>
+  <a id="K-C 量化"></a>
+
+  - 输入和输出支持以下数据类型组合：
+  <a id="输入和输出支持以下数据类型组合K-C && K-T"></a>
+
+    | x1         | x2           | x1Scale     | x2Scale      | x1Offset    | x2Offset    | yScale   | yOffset    | bias         | out                |
+    | -----------| ------------ | ----------- | -----------  | ----------- |-----------  | -------  | -----------| ------------ | -------------------|
+    | INT8       | INT8         | FLOAT32     | FLOAT32      | null        | null        | null     | null       | null/INT32   | FLOAT16            |
+    
+  - x1的约束：
+    - x1的最后一维大小不能超过65535，transposeX1仅支持false。
+  - x2的约束：
+    - x2的最后一维大小不能超过65535，transposeX2仅支持true。
+    - 各个维度表示：（batch，k1，n1，n0，k0），batch可不存在，其中k0 = 32， n0 = 16， x1 shape中的k和x2 shape中的k1需要满足以下关系：ceil（k / 32） = k1。
+    - x2需要通过[aclnnTransMatmulWeight](https://gitcode.com/cann/ops-math/blob/master/conversion/trans_data/docs/aclnnTransMatmulWeight.md)对format为ND的x2处理得到AI处理器亲和数据排布格式。
+  - x1Scale的约束：数据格式支持ND，shape是1维（t，），t = m，其中m与x1的m一致。
+  - x2Scale的约束：数据格式支持ND，shape是1维（t，），t = n，其中n与x2的n一致。
+  - bias的约束：数据格式支持ND，shape支持1维（n，）或3维（batch，1，n），n与x2的n一致。
+      
+  </details>
+
+</details>
 
 <details>
 
@@ -552,9 +620,21 @@ aclnnStatus aclnnQuantMatmulV5(
       - 为true时X2维度为：（batch，k1，n1，n0，k0），batch可不存在，其中k0 = 32，n0 = 16，x1 shape中的k和x2 shape中的k1需要满足以下关系：ceil（k / 32） = k1。
       - 为false时X2维度为：（batch，n1，k1，k0，n0），batch可不存在，其中k0 = 16，n0 = 32，x1 shape中的k和x2 shape中的k1需要满足以下关系：ceil（k / 16） = k1。
       - 可使用aclnnCalculateMatmulWeightSizeV2接口以及aclnnTransMatmulWeight接口完成输入Format从ND到NZ格式的转换。
+  - 当x2Scale的原始输入类型不满足量化场景约束中组合时，需提前调用aclnnTransQuantParamV2接口来将scale转成INT64、UINT64数据类型。
   - 当前版本不支持yScale，需要传入nullptr。
-  - x2Offset仅当out数据类型为INT8时支持，数据类型支持FLOAT32。其他输入类型需要传入nullptr。
   - out的shape支持2~6维，（batch，m，n），batch可不存在。数据类型支持FLOAT16、INT8、BFLOAT16、INT32。
+  - x1，x2为INT8，out为INT32，bias为INT32或nullptr时，各scale实际不参与计算，计算公式如下：
+    - bias INT32
+
+        $$
+        out = x1@x2 + bias
+        $$
+
+    - 无bias
+
+        $$
+        out = x1@x2
+        $$
 
   <details>
 
@@ -575,7 +655,7 @@ aclnnStatus aclnnQuantMatmulV5(
     | G-B量化 | (m, k) |(n, k)|(m, ceil(k / 128))|(ceil(n / 128),ceil(k / 128))| (n, ) | [1, 128, 128]|
 
   - 注：上表中gsM、gsK和gsN分别表示groupSizeM、groupSizeK和groupSizeN。
-  - x1的约束：目前n需与256对齐, k与128对齐且为4 * 128的倍数, transposeX1为false。
+  - x1的约束：目前k需与128对齐且为4 * 128的倍数, transposeX1为false。
   - x2的约束：目前n需与256对齐，k与128对齐且为4 * 128的倍数，transposeX2为true。
 
   </details>
@@ -590,7 +670,7 @@ aclnnStatus aclnnQuantMatmulV5(
 
     | x1                        | x2                        | x1Scale     | x2Scale         | x2Offset    | yScale   | bias         | yOffset    | out                                    |
     | ------------------------- | ------------------------- | ----------- | -----------     | ----------- | -------  | ------------ | -----------| -------------------------------------- |
-    | INT8                      | INT32                     | FLOAT32     | UINT64          | null        | null     | null         | FLOAT32    | FLOAT16/BFLOAT16                       |
+    | INT8                      | INT32                     | FLOAT32     | UINT64/INT64    | null        | null     | null         | FLOAT32    | FLOAT16/BFLOAT16                       |
     | INT8                      | INT8                      | null        | UINT64/INT64    | null        | null     | null/INT32   | null       | FLOAT16                                |
     | INT8                      | INT8                      | null        | UINT64/INT64    | null/FLOAT32| null     | null/INT32   | null       | INT8                                   |
     | INT8                      | INT8                      | null/FLOAT32| FLOAT32/BFLOAT16| null        | null     | null/INT32/BFLOAT16/FLOAT32   | null       | BFLOAT16              |
@@ -605,16 +685,17 @@ aclnnStatus aclnnQuantMatmulV5(
   - x1的约束：
     - 当数据类型为INT4时，transposeX1为false。维度为：（m，k），要求k为偶数。
     - 当数据类型为INT32时，transposeX1为false。每个INT32数据存放8个INT4数据，对应维度表示：（m，ceil(k / 8)），要求k为8的倍数。
+    - 当数据类型为INT8时，且x2的数据类型为INT32时，transposeX1为false。维度为：（m，k），要求k为偶数。
   - x2的约束：
     - 数据类型为INT4时：
       - 当前仅支持2维ND格式。
       - transposeX2为true时维度为：（n，k），要求k为偶数。
       - transposeX2为false时维度为：（k，n），要求n为偶数。
     - 数据类型为INT32时，每个INT32数据存放8个INT4数据，
-      - 当前仅支持2维ND格式。
-      - transposeX2为true时维度为：（n，ceil(k / 8)），要求k为8的倍数。
-      - transposeX2为false时维度为：（k，ceil(n / 8)），要求n为8的倍数。
-      - 可使用aclnnConvertWeightToINT4Pack接口完成x2从INT32（1个int32在0~3bit位存储1个int4）到INT32（1个int32存储8个int4）或INT4（1个int4表示1个int4）的数据格式转换，具体参见[aclnnConvertWeightToINT4Pack接口](../../convert_weight_to_int4_pack/docs/aclnnConvertWeightToINT4Pack.md)。
+       - 当前仅支持2维ND格式。
+       - transposeX2为true时维度为：（n，ceil(k / 8)），要求k为8的倍数。
+       - transposeX2为false时维度为：（k，ceil(n / 8)），要求n为8的倍数。
+       - 可使用aclnnConvertWeightToINT4Pack接口完成x2从INT32（1个int32在0~3bit位存储1个int4）到INT32（1个int32存储8个int4）或INT4（1个int4表示1个int4）的数据格式转换，具体参见[aclnnConvertWeightToINT4Pack接口](../../convert_weight_to_int4_pack/docs/aclnnConvertWeightToINT4Pack.md)。
   - x1Scale的约束：数据格式支持ND，shape是1维（t，），t = m，其中m与x1的m一致。
   - x2Scale的约束：数据格式支持ND，shape是1维（t，），t = 1或n，其中n与x2的n一致。
   - x2Offset的约束：数据格式支持ND，shape是1维（t，），t = 1或n，其中n与x2的n一致。
@@ -622,7 +703,7 @@ aclnnStatus aclnnQuantMatmulV5(
       - 数据格式支持ND。shape支持1维（n，）或3维（batch，1，n），n与x2的n一致。
       - 当x1和x2为INT32、INT4时，bias的shape只支持1维（n，）。
       - 当out的shape为2、4、5、6维时，bias的shape只支持1维（n，）。
-  - yOffset的约束：shape支持1维（n）。为计算过程中离线计算的辅助结果，值要求为8*x2*x2Scale，并在第1维累加。
+  - yOffset的约束：shape支持1维（n）。为计算过程中离线计算的辅助结果，值要求为8 *x2* x2Scale，并在第1维累加。
 
   </details>
 
@@ -633,24 +714,27 @@ aclnnStatus aclnnQuantMatmulV5(
 
   - 输入和输出支持以下数据类型组合：
   <a id="输入和输出支持以下数据类型组合K-G"></a>
+
       | x1                        | x2                        | x1Scale     | x2Scale         | x2Offset    | yScale   | bias         | yOffset    | out                                    |
       | ------------------------- | ------------------------- | ----------- | -----------     | ----------- | -------  | ------------ | -----------| -------------------------------------- |
-      | INT8                      | INT32                     | FLOAT32     | UINT64          | null        | null     | null         | FLOAT32    | FLOAT16/BFLOAT16                       |
+      | INT8                      | INT32                     | FLOAT32     | UINT64/INT64    | null        | null     | null         | FLOAT32    | FLOAT16/BFLOAT16                       |
       | INT4                      | INT4                      | FLOAT32     | FLOAT32         | FLOAT16     | null     | null         | null       | BFLOAT16                               |
 
   - x1、x2、x1Scale、x2Scale和groupSize的取值关系：
-    |量化类型| x1数据类型                 | x2数据类型                 | x1Scale数据类型| x2Scale数据类型| x1 shape | x2 shape| x1Scale shape| x2Scale shape| yOffset shape| [gsM，gsN，gsK]|
-    | ----- | ------------------------- | ------------------------- | -------------- | ------------- | -------- | ------- | ------------ | ------------ | ------------ | ------------ |
-    | K-G量化 | INT8                    |INT32                   |FLOAT32              |UINT64             |(m, k) |(k, ceil(n / 8))|(m, 1)|(ceil(k / 256), n)| (n) | [0, 0, 256]|
-    | K-G量化 | INT4                    |INT4                    |FLOAT32              |FLOAT32             |(m, k)|(n, k)|(m, 1)|(ceil(k / 256), n)| null | [0, 0, 256]|
+
+    |量化类型| x1数据类型                 | x2数据类型                 | x1Scale数据类型| x2Scale数据类型| x1 shape | x2 shape| x1Scale shape| x2Scale shape|x2Offset shape| yOffset shape| [gsM，gsN，gsK]|
+    | ----- | ------------------------- | ------------------------- | -------------- | ------------- | -------- | ------- | ------------ | ------ |------------ | ------------ | ------------ |
+    | K-G量化 | INT8                    |INT32                   |FLOAT32              |UINT64/INT64 |(m, k) |(k, ceil(n / 8))|(m, 1)|(ceil(k / 256), n)|null| (n) | [0, 0, 256]|
+    | K-G量化 | INT4                    |INT4                    |FLOAT32              |FLOAT32      |(m, k)|(n, k)|(m, 1)|(ceil(k / 256), n)|(ceil(k / 256), n)| null | [0, 0, 256]|
+
   - x1的约束：
-    - 当数据类型为INT8时，k需与256对齐，并小于18432。transposeX1为false。
+    - 当数据类型为INT8时，k需与256对齐，并小于29576。transposeX1为false。
     - 当数据类型为INT4时，k需与1024对齐。transposeX1为false。
   - x2的约束：
     - 当数据类型为INT32时，k需与256对齐。transposeX2为false。
     - 当数据类型为INT4时，k需与1024对称，n需与256对齐。transposeX2为true，
   - x2Scale的约束：
-    - 当数据类型为UINT64时，由于TransQuantParamV2只支持1维，需要将x2Scale view成一维(k / groupSize * n)，再调用TransQuantParamV2算子的aclnn接口来将x2Scale转成UINT64数据类型，再将输出view成二维（k / groupSize, n），groupSize值为256。
+    - 当数据类型为UINT64/INT64时，由于TransQuantParamV2只支持1维，需要将x2Scale view成一维(k / groupSize * n)，再调用TransQuantParamV2算子的aclnn接口来将x2Scale转成UINT64/INT64数据类型，再将输出view成二维（k / groupSize, n），groupSize值为256。
     - 当x1、x2为INT4时，x2Scale的shape为(ceil(k / 256), n)。
 
   </details>
@@ -664,8 +748,8 @@ aclnnStatus aclnnQuantMatmulV5(
 - **公共约束：**
   <a id="公共约束2"></a>
   
-  - transposeX1为false时x1的shape：(batch, m, k)。transposeX1为true时x1的shape：(batch, k, m)。其中batch代表前0~4维，0维表示bacth不存在。
-  - transposeX2为false时x2的shape：(batch, k, n)。transposeX2为true时x2的shape：(batch, n, k)。其中batch代表前0~4维，0维表示bacth不存在。k与x1的shape中的k一致。
+  - transposeX1为false时x1的shape：(batch, m, k)。transposeX1为true时x1的shape：(batch, k, m)。其中batch代表前0~4维，0维表示batch不存在。
+  - transposeX2为false时x2的shape：(batch, k, n)。transposeX2为true时x2的shape：(batch, n, k)。其中batch代表前0~4维，0维表示batch不存在。k与x1的shape中的k一致。
   - 当x2Scale的原始输入类型不满足量化场景约束中组合时，需提前调用aclnnTransQuantParamV2接口来将scale转成INT64、UINT64数据类型。
   - yScale仅当x1为FLOAT8_E4M3FN，x2为FLOAT4_E2M1时支持，其他场景暂不支持。shape是2维(1, n)，其中n与x2的n一致。
   - x2Offset仅当x1，x2数据类型为INT8，且out数据类型为INT8时支持，其他输入类型需要传入nullptr。shape是1维(t, )，t = 1或n，其中n与x2的n一致。
@@ -684,6 +768,18 @@ aclnnStatus aclnnQuantMatmulV5(
     $$
 
   - out的shape支持2~6维，(batch, m, n)，batch可不存在，支持x1与x2的batch维度broadcast，输出batch与broadcast之后的batch一致，m与x1的m一致，n与x2的n一致。
+  - x1，x2为INT8，out为INT32，bias为INT32或nullptr时，各scale实际不参与计算，计算公式如下：
+    - bias INT32
+
+        $$
+        out = x1@x2 + bias
+        $$
+
+    - 无bias
+
+        $$
+        out = x1@x2
+        $$
 
   <details>
 
@@ -692,6 +788,7 @@ aclnnStatus aclnnQuantMatmulV5(
 
   - 输入和输出支持以下数据类型组合：
   <a id="输入和输出支持以下数据类型组合TC/TT"></a>
+
       | x1                        | x2                        | x1Scale     |   x2Scale     | x2Offset | yScale | bias    |   out                                    |
       | ------------------------- | ------------------------- | ----------- |   ----------- | -------- | -------| ------- |   -------------------------------------- |
       | INT8                      | INT8                      | null        | UINT64/ INT64      | null     | null     | null/INT32   | FLOAT16/ BFLOAT16                       |
@@ -702,6 +799,7 @@ aclnnStatus aclnnQuantMatmulV5(
       | HIFLOAT8                  | HIFLOAT8                  | null        | UINT64/ INT64      | null     | null     | null/FLOAT32 | FLOAT16/BFLOAT16/ FLOAT32      |
       | FLOAT8_E4M3FN/FLOAT8_E5M2 | FLOAT8_E4M3FN/FLOAT8_E5M2 | FLOAT32     |   FLOAT32           | null     | null     | null/FLOAT32 | FLOAT16/BFLOAT16/  FLOAT32               |
       | HIFLOAT8                  | HIFLOAT8                  | FLOAT32     | FLOAT32           | null     | null     | null/FLOAT32 | FLOAT16/BFLOAT16/FLOAT32               |
+      | INT4                  | INT4                  | null     | UINT64/INT64           | null     | null     | null/INT32 | FLOAT16               |
 
     - T-T量化场景下，x1Scale的shape为(1,)或nullptr，x2Scale的shape为(1,)。
     - T-C量化场景下，x1Scale的shape为(1,)或nullptr，x2Scale的shape为(n,)，其中n与x2的n一致。
@@ -717,10 +815,13 @@ aclnnStatus aclnnQuantMatmulV5(
 
   - 输入和输出支持以下数据类型组合：
   <a id="输入和输出支持以下数据类型组合KC/KT"></a>
+
       | x1                        | x2                        | x1Scale     | x2Scale     | x2Offset | yScale |   bias    | out                                    |
       | ------------------------- | ------------------------- | ----------- | ----------- | -------- | -------|   ------- | -------------------------------------- |
       | INT8                      | INT8                      | FLOAT32| FLOAT32/BFLOAT16  | null     | null     |  null/INT32/FLOAT32/BFLOAT16   | BFLOAT16              |
       | INT8                      | INT8                      | FLOAT32     | FLOAT32           | null     |  null     | null/INT32/FLOAT32/FLOAT16  | FLOAT16                 |
+      | INT4                      | INT4                      | FLOAT32| FLOAT32/BFLOAT16  | null     | null     |  null/INT32/FLOAT32/BFLOAT16   | BFLOAT16              |
+      | INT4                      | INT4                      | FLOAT32     | FLOAT32           | null     |  null     | null/INT32/FLOAT32/FLOAT16  | FLOAT16                 |
       | FLOAT8_E4M3FN/FLOAT8_E5M2 | FLOAT8_E4M3FN/FLOAT8_E5M2 | FLOAT32     | FLOAT32           | null     |  null     | null/FLOAT32 | FLOAT16/BFLOAT16/FLOAT32               |
       | HIFLOAT8                  | HIFLOAT8                  | FLOAT32     | FLOAT32           | null     |  null     | null/FLOAT32 | FLOAT16/BFLOAT16/FLOAT32               |
 
@@ -736,20 +837,24 @@ aclnnStatus aclnnQuantMatmulV5(
 
   - 输入和输出支持以下数据类型组合：
   <a id="输入和输出支持以下数据类型组合GB/BB"></a>
+
       | x1                        | x2                        | x1Scale     | x2Scale     |   x2Offset | yScale | bias    | out                                    |
       | ------------------------- | ------------------------- | ----------- | ----------- |   -------- | -------| ------- | -------------------------------------- |
       | FLOAT8_E4M3FN/ FLOAT8_E5M2 | FLOAT8_E4M3FN/ FLOAT8_E5M2 | FLOAT32     |   FLOAT32           | null     | null     | null | FLOAT16/BFLOAT16/  FLOAT32               |
       | HIFLOAT8                  | HIFLOAT8                  | FLOAT32     |   FLOAT32           | null     | null     | null | FLOAT16/BFLOAT16/  FLOAT32               |
       | INT8                      |INT8                       | FLOAT32     |   FLOAT32           | null     | null     | FLOAT32 |BFLOAT16       |
+
   - x1、x2、x1Scale、x2Scale和groupSize的取值关系：
+
     |量化类型|x1 shape|x2 shape|x1Scale shape|x2Scale shape|yScale shape|[gsM，gsN，gsK]|groupSize|
     |-------|--------|--------|-------------|-------------|------------|---|---|
     |B-B量化|<li>非转置：(batch, m, k)</li><li>转置：(batch, k, m)</li>|<li>非转置：(batch, k, n)</li><li>转置：(batch, n, k)</li>|<li>非转置：(batch, ceil(m / 128), ceil(k / 128))</li><li>转置：(batch, ceil(k / 128), ceil(m / 128))</li>|<li>非转置：(batch, ceil(k / 128), ceil(n / 128))</li><li>转置：(batch, ceil(n / 128), ceil(k / 128))</li>|null|[128, 128, 128]|549764202624|
     |G-B量化|<li>非转置：(batch, m, k)</li><li>转置：(batch, k, m)</li>|<li>非转置：(batch, k, n)</li><li>转置：(batch, n, k)</li>|<li>非转置：(batch, m, ceil(k / 128))</li><li>转置：(batch, ceil(k / 128), m)</li>|<li>非转置：(batch, ceil(k / 128), ceil(n / 128))</li><li>转置：(batch, ceil(n / 128), ceil(k / 128))</li>|null|[1, 128, 128]|4303356032|
-  - 注：上表中gsM、gsK和gsN分别表示groupSizeM、groupSizeK和groupSizeN。
+
+  - 注：上表中gsM、gsK和gsN分别表示groupSizeM、groupSizeK和groupSizeN。gsM、gsK和gsN为0的维度会自动推导，上表中是不用自动推导的情况。
   - G-B量化和B-B量化场景下，x1和x1Scale的转置属性需要保持一致，x2和x2Scale的转置属性需要保持一致。
-  - G-B量化下，INT8 量化场景支持可选bias，其余场景不支持。
-  - B-B量化场景下，不支持bias。
+  - G-B量化场景下，仅INT8输入支持bias，其余场景不支持bias。
+  - B-B量化场景下，不支持int8输入，且不支持bias。
 
   </details>
 
@@ -760,23 +865,26 @@ aclnnStatus aclnnQuantMatmulV5(
 
   - 输入和输出支持以下数据类型组合：
   <a id="输入和输出支持以下数据类型组合mx"></a>
+
       |量化类型| x1                        | x2                        | x1Scale     | x2Scale     |   x2Offset | yScale | bias    | out                                    |
       |-------| ------------------------- | ------------------------- | ----------- | ----------- |   -------- | -------| ------- | -------------------------------------- |
       |mx 全量化| FLOAT8_E4M3FN/ FLOAT8_E5M2 | FLOAT8_E4M3FN/ FLOAT8_E5M2 | FLOAT8_E8M0 |   FLOAT8_E8M0       | null     | null     | null/FLOAT32 | FLOAT16/BFLOAT16/FLOAT32               |
       |mx 全量化| FLOAT4_E2M1                | FLOAT4_E2M1                | FLOAT8_E8M0 |   FLOAT8_E8M0       | null     | null     | null/FLOAT32 | FLOAT16/BFLOAT16/FLOAT32               |
-      |mx 伪量化| FLOAT8_E4M3FN             | FLOAT4_E2M1               | FLOAT8_E8M0 |   FLOAT8_E8M0       | null     | null     | null/BFLOAT16|  BFLOAT16                               |
+      |mx 伪量化| FLOAT8_E4M3FN             | FLOAT4_E2M1               | FLOAT8_E8M0 |   FLOAT8_E8M0       | null     | null     | null/BFLOAT16/FLOAT16 |  BFLOAT16/FLOAT16                               |
+
   - x1数据类型、x2数据类型、x1、x2、x1Scale、x2Scale和groupSize的取值关系：
+  
     |量化类型|x1数据类型|x2数据类型|x1 shape|x2 shape|x1Scale shape|x2Scale shape|bias shape|yScale shape|[gsM，gsN，gsK]|groupSize|
     |-------|--------|--------|--------|--------|-------------|-------------|------------|---------------------------------------|--|--|
     |mx 全量化|FLOAT8_E4M3FN/ FLOAT8_E5M2|FLOAT8_E4M3FN/ FLOAT8_E5M2|<li>非转置：(batch, m, k)</li><li>转置：(batch, k, m)</li>|<li>非转置：(batch, k, n)</li><li>转置：(batch, n, k)</li>|<li>非转置：(m, ceil(k / 64), 2)</li><li>转置：(ceil(k / 64), m, 2)</li>|<li>非转置：(ceil(k / 64), n, 2)</li><li>转置：(n, ceil(k / 64), 2)</li>|(n,)或(batch, 1, n)|null|[1, 1, 32]|4295032864|
     |mx 全量化|FLOAT4_E2M1|FLOAT4_E2M1|(batch, m, k)|(batch, n, k)|(m, ceil(k / 64), 2)|(n, ceil(k / 64), 2)|(n,)或(batch, 1, n)|null|[1, 1, 32]|4295032864|
-    |mx 伪量化|FLOAT8_E4M3FN|FLOAT4_E2M1|(m, k)|(n, k)|(m, ceil(k / 32))|(n, ceil(k / 32))|(1，n)|null|[0, 0, 32]/[1, 1, 32]|32/4295032864|
+    |mx 伪量化|FLOAT8_E4M3FN|FLOAT4_E2M1|(m, k)|(n, k)|(m, ceil(k / 64), 2)|(n, ceil(k / 64), 2)|(1，n)|null|[1, 1, 32]|4295032864|
 
+  - 注：上表中gsM、gsK和gsN分别表示groupSizeM、groupSizeK和groupSizeN。gsM、gsK和gsN为0的维度会自动推导，上表中是不用自动推导的情况。
   - mx全量化场景下，当x2数据类型为FLOAT8_E4M3FN/FLOAT8_E5M2时，x1和x1Scale的转置属性需要保持一致，x2和x2Scale的转置属性需要保持一致。
-  - mx全量化场景下，当x2数据类型为FLOAT4_E2M1时，仅支持transposeX1为false且transposeX2为true，要求k为偶数且ceil(k / 32)为偶数。
-  - mx伪量化场景下，当x2数据类型为FLOAT4_E2M1时，transposeX1为false且transposeX2为true，不支持batch轴。数据格式支持ND和AI处理器亲和数据排布格式。当数据格式为ND格式时，要求支持k是64的倍数。当数据格式为AI处理器亲和数据排布格式时，要求k，n都是64的倍数。
-  - mx伪量化场景下，bias为可选参数。数据类型支持BFLOAT16，数据格式支持ND，shape支持2维，shape表示(1，n)。如不需要使用该参数，传入nullptr。
-  - mx伪量化场景下，[groupSizeM，groupSizeN，groupSizeK]取值组合支持[0, 0, 32]和[1, 1, 32]，对应的groupSize值分别为32和4295032864。
+  - mx全量化场景下，当x2数据类型为FLOAT4_E2M1时，x1和x2的内轴必须为偶数，且k必须大于2。
+  - mx伪量化场景下，当x2数据类型为FLOAT4_E2M1时，transposeX1为false且transposeX2为true，不支持batch轴。数据格式支持ND格式。要求支持k是32的倍数。
+  - mx伪量化场景下，bias为可选参数。数据类型支持BFLOAT16或FLOAT16，数据类型要求与输出类型保持一致。数据格式支持ND，shape支持2维，shape表示(1，n)。如不需要使用该参数，传入nullptr。
 
   </details>
 
@@ -787,17 +895,49 @@ aclnnStatus aclnnQuantMatmulV5(
 
   - 输入和输出支持以下数据类型组合：
   <a id="输入和输出支持以下数据类型组合TCG"></a>
+
       | x1                        | x2                        | x1Scale     | x2Scale     |     x2Offset | yScale | bias    | out                                    |
       | ------------------------- | ------------------------- | ----------- | ----------- |     -------- | -------| ------- | -------------------------------------- |
-      | FLOAT8_E4M3FN             | FLOAT4_E2M1               | null        |     BFLOAT16          | null     | INT64/UINT64    | null         |     BFLOAT16                               |
+      | FLOAT8_E4M3FN             | FLOAT4_E2M1               | null        |    BFLOAT16/FLOAT16 | null     | INT64/UINT64    | null         |     BFLOAT16/FLOAT16 |
+
   - x1、x2、x1Scale、x2Scale和groupSize的取值关系：
+
     |量化类型|x1 shape|x2 shape|x1Scale shape|x2Scale shape|yScale shape|[gsM，gsN，gsK]|groupSize|
     |-------|--------|--------|-------------|-------------|------------|---------------------------------------|--|
-    |T-CG量化|(m, k)|(n, k)/(k, n)|null|(n, ceil(k / 32))/(ceil(k / 32), n)|(1, n)|[0, 0, 32]/[1, 1, 32]|32/4295032864|
+    |T-CG量化|(m, k)|(n, k)/(k, n)|null|(n, ceil(k / 32))|(1, n)|[0, 0, 32]/[1, 1, 32]|32/4295032864|
+
   - T-CG量化模式下，yScale数据类型支持INT64和UINT64，数据格式支持ND，shape支持2维，shape表示为(1, n)。当原始输入类型不满足约束和限制中的数据类型组合时，需要提前调用TransQuantParamV2算子的aclnn接口来将其转成UINT64数据类型。当输入数据类型是INT64时，内部会把INT64当成UINT64处理。
   - T-CG量化模式下，bias是预留参数，当前版本不支持，需要传入nullptr。
-  - T-CG量化模式下，transposeX1为false。数据格式支持ND和AI处理器亲和数据排布格式。当数据格式为ND格式时，要求支持k是64的倍数，transposeX2为true。当数据格式为AI处理器亲和数据排布格式时，要求k，n都是64的倍数，transposeX2为false。
+  - T-CG量化模式下，transposeX1为false。数据格式支持ND格式。要求支持k是32的倍数，transposeX2为true。
   - T-CG量化模式下，[groupSizeM，groupSizeN，groupSizeK]取值组合支持[0, 0, 32]和[1, 1, 32]，对应的groupSize值分别为32和4295032864。
+  - T-CG量化模式下，out和x2Scale的数据类型需要一致。
+
+  </details>
+
+  <details>
+
+  <summary><term><strong>K-G量化场景约束：</strong></term></summary>
+  <a id="K-G量化"></a>
+
+  - 输入和输出支持以下数据类型组合：
+  <a id="输入和输出支持以下数据类型组合K-G"></a>
+
+      | x1                        | x2                        | x1Scale     | x2Scale         | x2Offset    | yScale   | bias         | yOffset    | out                                    |
+      | ------------------------- | ------------------------- | ----------- | -----------     | ----------- | -------  | ------------ | -----------| -------------------------------------- |
+      | INT4                      | INT4                      | FLOAT32     | FLOAT32         | FLOAT16     | null     | null         | null       | BFLOAT16/FLOAT16                               |
+
+  - x1、x2、x1Scale、x2Scale和groupSize的取值关系：
+
+    |量化类型| x1数据类型                 | x2数据类型                 | x1Scale数据类型| x2Scale数据类型| x1 shape | x2 shape| x1Scale shape| x2Scale shape| yOffset shape| [gsM，gsN，gsK]|
+    | ----- | ------------------------- | ------------------------- | -------------- | ------------- | -------- | ------- | ------------ | ------------ | ------------ | ------------ |
+    | K-G量化 | INT4                    |INT4                    |FLOAT32              |FLOAT32             |(m, k)|(n, k)|(m, 1)|(ceil(k / 256), n)| null | [0, 0, 256]|
+
+  - x1的约束：
+    - 当数据类型为INT4时，k需与1024对齐。transposeX1为false。
+  - x2的约束：
+    - 当数据类型为INT4时，k需与1024对称，n需与256对齐。transposeX2为true，
+  - x2Scale的约束：
+    - 当x1、x2为INT4时，x2Scale的shape为(ceil(k / 256), n)。
 
   </details>
 
@@ -893,7 +1033,7 @@ x1为FLOAT8_E4M3FN，x2为FLOAT4_E2M1，x2Scale为BFLOAT16，yScale为UINT64。
       aclFinalize();
   }
   
-  // 将bloat16的uint16_t表示转换为float表示
+  // 将bfloat16的uint16_t表示转换为float表示
   float Bf16ToFloat(uint16_t h)
   {
       uint32_t sign = (h & 0x8000U) ? 0x80000000U : 0x00000000U; // sign bit
@@ -1044,6 +1184,7 @@ x1为FLOAT8_E4M3FN，x2为FLOAT4_E2M1，x2Scale为BFLOAT16，yScale为UINT64。
 
 - <term>Ascend 950PR/Ascend 950DT</term>：
 x1为INT8，x2为INT8，x1Scale为FLOAT32，x2Scale为FLOAT32，bias为INT32。
+
   ```cpp
   #include <iostream>
   #include <memory>
@@ -1134,7 +1275,6 @@ x1为INT8，x2为INT8，x1Scale为FLOAT32，x2Scale为FLOAT32，bias为INT32。
       std::vector<int64_t> x1Shape = {5, 16};
       std::vector<int64_t> x2Shape = {16, 8};
       std::vector<int64_t> biasShape = {8};
-      std::vector<int64_t> x2OffsetShape = {8};
       std::vector<int64_t> x1ScaleShape = {5};
       std::vector<int64_t> x2ScaleShape = {8};
       std::vector<int64_t> outShape = {5, 8};
@@ -1156,7 +1296,6 @@ x1为INT8，x2为INT8，x1Scale为FLOAT32，x2Scale为FLOAT32，bias为INT32。
       std::vector<int8_t> x2HostData(128, 1);
       std::vector<int32_t> biasHostData(8, 1);
       std::vector<float> x2ScaleHostData(8, 1);
-      std::vector<float> x2OffsetHostData(8, 1);
       std::vector<float> x1ScaleHostData(5, 1);
       std::vector<uint16_t> outHostData(40, 1);  // 实际上是float16半精度方式
       // 创建x1 aclTensor
@@ -1339,7 +1478,6 @@ x1，x2为FLOAT8_E4M3FN，x1Scale为FLOAT32，x2Scale为FLOAT32，无x2Offset，
       std::vector<int64_t> x1Shape = {16, 16};
       std::vector<int64_t> x2Shape = {16, 16};
       std::vector<int64_t> biasShape = {16};
-      std::vector<int64_t> x2OffsetShape = {16};
       std::vector<int64_t> x1ScaleShape = {1};
       std::vector<int64_t> x2ScaleShape = {1};
       std::vector<int64_t> outShape = {16, 16};
@@ -1359,9 +1497,8 @@ x1，x2为FLOAT8_E4M3FN，x1Scale为FLOAT32，x2Scale为FLOAT32，无x2Offset，
       aclTensor *out = nullptr;
       std::vector<int8_t> x1HostData(256, 1);
       std::vector<int8_t> x2HostData(256, 1);
-      std::vector<int32_t> biasHostData(16, 1);
+      std::vector<float> biasHostData(16, 1);
       std::vector<float> x2ScaleHostData(1, 1);
-      std::vector<float> x2OffsetHostData(16, 1);
       std::vector<float> x1ScaleHostData(1, 1);
       std::vector<uint16_t> outHostData(256, 1);  // 实际上是float16半精度方式
 

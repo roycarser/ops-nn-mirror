@@ -33,6 +33,7 @@
 #include "../block/block_mmad_iterbatch.h"
 #include "../block/block_mmad_builder.h"
 #include "../epilogue/block_epilogue_empty.h"
+
 #include "../epilogue/block_epilogue_iterbatch.h"
 #include "../block/block_scheduler_utils.h"
 #include "../block/block_scheduler_policy.h"
@@ -290,7 +291,8 @@ public:
             if (tileIdx + blockNum >= tileNum) {
                 isFinalRound = true;
             }
-            if ASCEND_IS_AIC {
+            // ASCEND_IS_NOT_AIV 等价于 (分离架构ASCEND_IS_AIC OR 耦合架构)
+            if ASCEND_IS_NOT_AIV {
                 if constexpr (!AscendC::Std::is_same_v<BlockEpilogue, Block::BlockEpilogueEmpty>) {
                     blockMmadOp(cLocal, aGlobal_[offsetA], bGlobal_[offsetB], biasGlobal_, blockNum, curIterBatchL1,
                                 nextIterBatchL1, mainIterBatchL1, mainIterBatchL0, baseM, baseN, baseK, isPreLoadRound,

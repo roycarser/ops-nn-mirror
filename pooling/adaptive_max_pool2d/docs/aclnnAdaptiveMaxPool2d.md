@@ -1,4 +1,4 @@
-`# aclnnAdaptiveMaxPool2d
+# aclnnAdaptiveMaxPool2d
 
 [📄 查看源码](https://gitcode.com/cann/ops-nn/tree/master/pooling/adaptive_max_pool3d)
 
@@ -18,6 +18,7 @@
 根据输入的outputSize计算每次kernel的大小，对输入self进行2维最大池化操作，输出池化后的值out和索引indices。aclnnAdaptiveMaxPool2d与aclnnMaxPool2d的区别在于，只需指定outputSize大小，并按outputSize的大小来划分pooling区域。
 
 ## 函数原型
+
 每个算子分为[两段式接口](../../../docs/zh/context/两段式接口.md)，必须先调用“aclnnAdaptiveMaxPool2dGetWorkspaceSize”接口获取计算所需workspace大小以及包含了算子计算流程的执行器，再调用“aclnnAdaptiveMaxPool2d”接口执行计算。
 
 ```Cpp
@@ -29,6 +30,7 @@ aclnnStatus aclnnAdaptiveMaxPool2dGetWorkspaceSize(
   uint64_t          *workspaceSize,
   aclOpExecutor     **executor)
 ```
+
 ```Cpp
 aclnnStatus aclnnAdaptiveMaxPool2d(
   void          *workspace,
@@ -77,7 +79,7 @@ aclnnStatus aclnnAdaptiveMaxPool2d(
         <td>outputSize</td>
         <td>输入</td>
         <td>表示输出结果在H和W维度上的空间大小。</td>
-        <td>-</td>
+        <td>长度为2的INT32数组，且每个元素都必须大于等于0。</td>
         <td>INT32</td>
         <td>-</td>
         <td>-</td>
@@ -225,11 +227,13 @@ aclnnStatus aclnnAdaptiveMaxPool2d(
     </tr>
   </tbody>
   </table>
--  **返回值：**
+
+- **返回值：**
 
     aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 
 ## 约束说明
+
 - 确定性计算：
   - aclnnAdaptiveMaxPool2d默认确定性实现。
 
@@ -240,8 +244,11 @@ aclnnStatus aclnnAdaptiveMaxPool2d(
   - indicesOut.shape = (N, C, Hout, Wout) 或者 (C, Hout, Wout) 或 (N, Hout, Wout, C)
 
 ## 调用示例
+
 示例代码如下，仅供参考，具体编译和执行过程请参考[编译与运行样例](../../../docs/zh/context/编译与运行样例.md)。
+
 ```Cpp
+#include <cstdio>
 #include <iostream>
 #include <vector>
 #include "acl/acl.h"
@@ -393,4 +400,4 @@ int main() {
   aclFinalize();
   return 0;
 }
-````
+```

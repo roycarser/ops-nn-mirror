@@ -50,21 +50,25 @@ ge::graphStatus BatchMatMulV3ToMulTiling::DoOpTiling()
         lastCoreNum -= 1UL;
     }
 
-    runInfo_.toMulInfo.m = m;
-    runInfo_.toMulInfo.n = n;
-    runInfo_.toMulInfo.b = b;
-    runInfo_.toMulInfo.usedCoreNum = usedCoreNum;
-    runInfo_.toMulInfo.singleCoreBatch = singleCoreBatch;
-    runInfo_.toMulInfo.batchNum = batchNum;
-    runInfo_.toMulInfo.batchNumLastRound = batchNumLastRound;
-    runInfo_.toMulInfo.batchNumLastRoundTail = batchNumLastRoundTail;
-    runInfo_.toMulInfo.lastCoreNum = lastCoreNum;
-    runInfo_.toMulInfo.alignNum = alignNum_;
+    runInfo_.bmmToMulInfo.m = m;
+    runInfo_.bmmToMulInfo.n = n;
+    runInfo_.bmmToMulInfo.b = b;
+    runInfo_.bmmToMulInfo.usedCoreNum = usedCoreNum;
+    runInfo_.bmmToMulInfo.singleCoreBatch = singleCoreBatch;
+    runInfo_.bmmToMulInfo.batchNum = batchNum;
+    runInfo_.bmmToMulInfo.batchNumLastRound = batchNumLastRound;
+    runInfo_.bmmToMulInfo.batchNumLastRoundTail = batchNumLastRoundTail;
+    runInfo_.bmmToMulInfo.lastCoreNum = lastCoreNum;
+    runInfo_.bmmToMulInfo.alignNum = alignNum_;
     return ge::GRAPH_SUCCESS;
 }
 
 bool BatchMatMulV3ToMulTiling::IsCapable()
 {
+    if (args_.aFormat == ge::FORMAT_FRACTAL_NZ || args_.bFormat == ge::FORMAT_FRACTAL_NZ) {
+        OP_LOGD(args_.opName, "[matmul2mul] The NZ format is not supported in this strategy.");
+        return false;
+    }
     bool isNotEqualBatch = batchInfo_->batchA0 != batchInfo_->batchB0 || batchInfo_->batchA1 != batchInfo_->batchB1 ||
                            batchInfo_->batchA2 != batchInfo_->batchB2 || batchInfo_->batchA3 != batchInfo_->batchB3;
     if (isNotEqualBatch) {
@@ -113,7 +117,7 @@ uint64_t BatchMatMulV3ToMulTiling::GetTilingKey() const
 
 uint64_t BatchMatMulV3ToMulTiling::GetNumBlocks() const
 {
-    return runInfo_.toMulInfo.usedCoreNum;
+    return runInfo_.bmmToMulInfo.usedCoreNum;
 }
 
 ge::graphStatus BatchMatMulV3ToMulTiling::GetTilingData(TilingResult& tiling) const

@@ -16,15 +16,15 @@
 #include "quant_batch_matmul_v4_asw_tiling.h"
 
 #include "../../../op_kernel/arch35/quant_batch_matmul_v4_tiling_key.h"
-#include "common/inc/error_util.h"
+#include "error_util.h"
 #include "common/op_host/op_tiling/tiling_type.h"
 #include "graph/utils/type_utils.h"
 #include "log/log.h"
 #include "op_cache_tiling.h"
-#include "op_util.h"
+#include "op_api/op_util.h"
 #include "quant_batch_matmul_v4_checker_for_mmads8s4.h"
 #include "quant_batch_matmul_v4_tiling.h"
-#include "tiling_base/tiling_templates_registry.h"
+#include "op_host/tiling_templates_registry.h"
 
 using Ops::NN::MathUtil;
 
@@ -332,7 +332,7 @@ bool AdaptiveSlidingWindowTilingV4::Is4BitInput(ge::DataType dtype, bool isLut) 
 bool AdaptiveSlidingWindowTilingV4::Is8BitInput(ge::DataType dtype, bool isLut) const
 {
     // lut查表逻辑: 原始数据DT_INT2和DT_UINT1，查表后转DT_INT4; 原始数据DT_INT4, 查表后转DT_INT8
-    return (isLut == true && dtype == ge::DT_INT4);
+    return (isLut && dtype == ge::DT_INT4);
 }
 
 uint64_t AdaptiveSlidingWindowTilingV4::GetShapeWithDataType(uint64_t size, ge::DataType dtype, bool isLut) const
@@ -365,6 +365,12 @@ uint64_t AdaptiveSlidingWindowTilingV4::GetTilingKey() const
         trans, static_cast<uint64_t>(QuantType::NONE),
         static_cast<uint64_t>(false), static_cast<uint64_t>(true),
         static_cast<uint64_t>(kernelType));
+}
+
+bool AdaptiveSlidingWindowTilingV4::CheckCoreNum() const
+{
+    // 预留校验接口
+    return true;
 }
 
 }  // namespace optiling

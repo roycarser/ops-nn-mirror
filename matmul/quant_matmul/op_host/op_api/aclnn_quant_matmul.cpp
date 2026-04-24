@@ -27,6 +27,7 @@
 #include "level0/dot.h"
 #include "level0/fill.h"
 #include "matmul/common/op_host/op_api/matmul.h"
+#include "matmul/quant_batch_matmul_v4/op_host/op_api/quant_matmul_common_check.h"
 #include "aclnn_kernels/reshape.h"
 #include "aclnn_kernels/transdata.h"
 #include "level0/unsqueeze.h"
@@ -57,18 +58,6 @@ static const size_t ALIGN_NUM = 16;
 static const uint64_t INPUT_DIM_MIN_VALUE = 2;
 static constexpr int64_t OUTPUT_INFER_FAIL = -1;
 static const int PENULTIMATE_DIM = 2;
-
-inline static void FirstPrint(bool& isFirstToPrint, const char* interfaceName, bool isExecutorInferface)
-{
-    if (isFirstToPrint) {
-        if (isExecutorInferface) {
-            OP_LOGW("%s is deprecated, use aclnnQuantMatmulV4 instead", interfaceName);
-        } else {
-            OP_LOGW("%s is deprecated, use aclnnQuantMatmulV4GetWorkspaceSize instead", interfaceName);
-        }
-        isFirstToPrint = false;
-    }
-}
 
 inline static bool IsFormatSupport(const aclTensor* input, const std::string& inputName)
 {
@@ -367,7 +356,7 @@ inline static aclnnStatus CheckParamsV2(
 }
 
 static const aclTensor* ProcessEmptyTensor(
-    const aclTensor* x1, const aclTensor* x2, const aclTensor* bias, const aclTensor* out, aclOpExecutor* executor)
+    const aclTensor* x1, const aclTensor* bias, const aclTensor* out, aclOpExecutor* executor)
 {
     // 获取shape信息
     op::Shape outShape = out->GetViewShape();
@@ -392,7 +381,7 @@ static const aclTensor* BuildQuantMatMulGraph(
 {
     // 空tensor 处理
     if (x1->IsEmpty() || x2->IsEmpty()) {
-        auto emptyOut = ProcessEmptyTensor(x1, x2, bias, out, executor);
+        auto emptyOut = ProcessEmptyTensor(x1, bias, out, executor);
         CHECK_RET(emptyOut != nullptr, nullptr);
         return emptyOut;
     }
@@ -410,8 +399,7 @@ aclnnStatus aclnnQuantMatmulGetWorkspaceSize(
     const aclTensor* x1, const aclTensor* x2, const aclTensor* bias, float deqScale, aclTensor* out,
     uint64_t* workspaceSize, aclOpExecutor** executor)
 {
-    static bool isFirstToPrint = true;
-    FirstPrint(isFirstToPrint, "aclnnQuantMatmulGetWorkspaceSize", false);
+    DEPRECATED_API_WARN_ONCE("aclnnQuantMatmulGetWorkspaceSize", "December 2026", "aclnnQuantMatmulV5GetWorkspaceSize");
     L2_DFX_PHASE_1(aclnnQuantMatmul, DFX_IN(x1, x2, bias, deqScale), DFX_OUT(out));
 
     // 固定写法，创建OpExecutor
@@ -440,8 +428,16 @@ aclnnStatus aclnnQuantMatmulGetWorkspaceSize(
     auto ret = CheckParams(x1, x2, bias, deqScaleTensor, out);
     CHECK_RET(ret == ACLNN_SUCCESS, ret);
 
+    // 检查输入连续性
+    bool x1TransposeValue = false;
+    CHECK_RET(TensorContiguousProcess(x1, x1TransposeValue, unique_executor.get()), ACLNN_ERR_INNER_NULLPTR);
+    bool x2TransposeValue = false;
+    CHECK_RET(TensorContiguousProcess(x2, x2TransposeValue, unique_executor.get()), ACLNN_ERR_INNER_NULLPTR);
+    bool biasTransposeValue = false;
+    CHECK_RET(TensorContiguousProcess(bias, biasTransposeValue, unique_executor.get()), ACLNN_ERR_INNER_NULLPTR);
+
     // 构建matmul计算图
-    auto matmulOut = BuildQuantMatMulGraph(x1, x2, bias, deqScaleTensor, false, false, out, unique_executor.get());
+    auto matmulOut = BuildQuantMatMulGraph(x1, x2, bias, deqScaleTensor, x1TransposeValue, x2TransposeValue, out, unique_executor.get());
     CHECK_RET(matmulOut != nullptr, ACLNN_ERR_INNER_NULLPTR);
     if (matmulOut->IsEmpty()) {
         // 当输出为空tensor的场景，空tensor处理
@@ -461,8 +457,7 @@ aclnnStatus aclnnQuantMatmulGetWorkspaceSize(
 
 aclnnStatus aclnnQuantMatmul(void* workspace, uint64_t workspaceSize, aclOpExecutor* executor, const aclrtStream stream)
 {
-    static bool isFirstToPrint = true;
-    FirstPrint(isFirstToPrint, "aclnnQuantMatmul", true);
+    DEPRECATED_API_WARN_ONCE("aclnnQuantMatmul", "December 2026", "aclnnQuantMatmulV5");
     L2_DFX_PHASE_2(aclnnQuantMatmul);
     // 固定写法，调用框架能力，完成计算
     return CommonOpExecutorRun(workspace, workspaceSize, executor, stream);
@@ -472,8 +467,7 @@ aclnnStatus aclnnQuantMatmulV2GetWorkspaceSize(
     const aclTensor* x1, const aclTensor* x2, const aclTensor* bias, const aclTensor* deqScale, bool adjX1, bool adjX2,
     aclTensor* out, uint64_t* workspaceSize, aclOpExecutor** executor)
 {
-    static bool isFirstToPrint = true;
-    FirstPrint(isFirstToPrint, "aclnnQuantMatmulV2GetWorkspaceSize", false);
+    DEPRECATED_API_WARN_ONCE("aclnnQuantMatmulV2GetWorkspaceSize", "December 2026", "aclnnQuantMatmulV5GetWorkspaceSize");
     L2_DFX_PHASE_1(aclnnQuantMatmulV2, DFX_IN(x1, x2, bias, deqScale, adjX1, adjX2), DFX_OUT(out));
 
     // 固定写法，创建OpExecutor
@@ -494,6 +488,14 @@ aclnnStatus aclnnQuantMatmulV2GetWorkspaceSize(
     const_cast<aclTensor*>(deqScale)->SetOriginalFormat(op::Format::FORMAT_NHWC);
     const_cast<aclTensor*>(deqScale)->SetViewFormat(op::Format::FORMAT_NHWC);
     const_cast<aclTensor*>(deqScale)->SetStorageFormat(op::Format::FORMAT_NC1HWC0);
+
+    // 检查输入连续性
+    CHECK_RET(TensorContiguousProcess(x1, adjX1, unique_executor.get()), ACLNN_ERR_INNER_NULLPTR);
+    CHECK_RET(TensorContiguousProcess(x2, adjX2, unique_executor.get()), ACLNN_ERR_INNER_NULLPTR);
+    bool biasTransposeValue = false;
+    CHECK_RET(TensorContiguousProcess(bias, biasTransposeValue, unique_executor.get()), ACLNN_ERR_INNER_NULLPTR);
+    bool deqScaleTransposeValue = false;
+    CHECK_RET(TensorContiguousProcess(deqScale, deqScaleTransposeValue, unique_executor.get()), ACLNN_ERR_INNER_NULLPTR);
 
     // 构建matmul计算图
     auto matmulOut = BuildQuantMatMulGraph(x1, x2, bias, deqScale, adjX1, adjX2, out, unique_executor.get());
@@ -517,8 +519,7 @@ aclnnStatus aclnnQuantMatmulV2GetWorkspaceSize(
 aclnnStatus aclnnQuantMatmulV2(
     void* workspace, uint64_t workspaceSize, aclOpExecutor* executor, const aclrtStream stream)
 {
-    static bool isFirstToPrint = true;
-    FirstPrint(isFirstToPrint, "aclnnQuantMatmulV2", true);
+    DEPRECATED_API_WARN_ONCE("aclnnQuantMatmulV2", "December 2026", "aclnnQuantMatmulV5");
     L2_DFX_PHASE_2(aclnnQuantMatmulV2);
     // 固定写法，调用框架能力，完成计算
     return CommonOpExecutorRun(workspace, workspaceSize, executor, stream);

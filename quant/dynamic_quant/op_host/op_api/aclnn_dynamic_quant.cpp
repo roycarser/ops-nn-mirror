@@ -10,6 +10,7 @@
 #include "aclnn_dynamic_quant.h"
 #include "quant/dynamic_quant_v2/op_host/op_api/dynamic_quant_v2.h"
 #include "aclnn_dynamic_quant_v3.h"
+#include "aclnn_dynamic_quant_v4.h"
 #include "dynamic_quant.h"
 #include "quant/dynamic_quant_v2/op_host/op_api/aclnn_dynamic_quant_v2.h"
 #include "level0/fault_injection.h"
@@ -75,6 +76,7 @@ struct DynamicQuantParams {
     int64_t dstType;
     bool isSymmetrical;
     const char* quantMode;
+    float dstTypeMax = 0.0;
     const aclTensor* y = nullptr;
     const aclTensor* scale = nullptr;
     const aclTensor* offset = nullptr;
@@ -375,39 +377,6 @@ aclnnStatus InputsContiguous(
 aclnnStatus GetDynamicQuantResultByL0Api(
     DynamicQuantParams& dynamicQuantParams, uint64_t* workspaceSize, aclOpExecutor** executor)
 {
-#ifdef CFG_BUILD_DEBUG
-    // 获取环境变量
-    auto faultInjectionEnv = getenv("FOR_FAULT_INJECTION");
-    int32_t faultInjectionFlag = 0;
-    if (faultInjectionEnv != nullptr) {
-        faultInjectionFlag = std::atoi(faultInjectionEnv);
-    }
-    if (faultInjectionFlag) {
-        // 固定写法，创建OpExecutor
-        auto uniqueExecutor = CREATE_EXECUTOR();
-        CHECK_RET(uniqueExecutor.get() != nullptr, ACLNN_ERR_INNER_CREATE_EXECUTOR);
-
-        OP_CHECK_NULL(dynamicQuantParams.x, return ACLNN_ERR_INNER_NULLPTR);
-        OP_CHECK_NULL(dynamicQuantParams.smoothScales, return ACLNN_ERR_INNER_NULLPTR);
-
-        auto xContiguous = l0op::Contiguous(dynamicQuantParams.x, uniqueExecutor.get());
-        CHECK_RET(xContiguous != nullptr, ACLNN_ERR_INNER_NULLPTR);
-
-        auto smoothScalesOptionalContiguous = l0op::Contiguous(dynamicQuantParams.smoothScales, uniqueExecutor.get());
-        CHECK_RET(smoothScalesOptionalContiguous != nullptr, ACLNN_ERR_INNER_NULLPTR);
-
-        // 调用FaultInjection算子kernel
-        auto out =
-            uniqueExecutor->AllocTensor(dynamicQuantParams.x->GetViewShape(), dynamicQuantParams.x->GetDataType());
-        auto opOut = l0op::FaultInjection(xContiguous, smoothScalesOptionalContiguous, out, uniqueExecutor.get());
-        CHECK_RET(opOut != nullptr, ACLNN_ERR_INNER_NULLPTR);
-
-        // 固定写法，获取计算过程中需要使用的workspace大小
-        *workspaceSize = uniqueExecutor->GetWorkspaceSize();
-        uniqueExecutor.ReleaseTo(executor);
-        return ACLNN_SUCCESS;
-    }
-#endif
     // 固定写法，创建OpExecutor
     auto uniqueExecutor = CREATE_EXECUTOR();
     CHECK_RET(uniqueExecutor.get() != nullptr, ACLNN_ERR_INNER_CREATE_EXECUTOR);
@@ -448,7 +417,7 @@ aclnnStatus GetDynamicQuantResultByL0Api(
         // DynamicQuantV2 consolidates and remains backward compatible with DynamicQuant in socVersion ASCEND950
         auto dynamicQuantV2Result = l0op::DynamicQuantV2(
             x, smoothScales, groupIndex, yDtype, dynamicQuantParams.isSymmetrical, dynamicQuantParams.quantMode,
-            uniqueExecutor.get());
+            dynamicQuantParams.dstTypeMax, uniqueExecutor.get());
         y = std::get<0>(dynamicQuantV2Result);
         outputTensor = std::get<0>(dynamicQuantV2Result);
         scale = std::get<1>(dynamicQuantV2Result);
@@ -468,7 +437,7 @@ aclnnStatus GetDynamicQuantResultByL0Api(
             CHECK_RET(y != nullptr && scale != nullptr, ACLNN_ERR_INNER_NULLPTR);
         } else {
             auto dynamicQuantV2Result =
-                l0op::DynamicQuantV2(x, smoothScales, groupIndex, yDtype, false, "pertoken", uniqueExecutor.get());
+                l0op::DynamicQuantV2(x, smoothScales, groupIndex, yDtype, false, "pertoken", 0.0, uniqueExecutor.get());
             y = std::get<0>(dynamicQuantV2Result);
             outputTensor = std::get<0>(dynamicQuantV2Result);
             scale = std::get<1>(dynamicQuantV2Result);
@@ -505,7 +474,7 @@ aclnnStatus aclnnDynamicQuantGetWorkspaceSize(
     uint64_t* workspaceSize, aclOpExecutor** executor)
 {
     L2_DFX_PHASE_1(aclnnDynamicQuant, DFX_IN(x, smoothScalesOptional), DFX_OUT(yOut, scaleOut));
-    DynamicQuantParams dynamicQuantParams{x,      smoothScalesOptional, nullptr, 2, true, "pertoken", yOut, scaleOut,
+    DynamicQuantParams dynamicQuantParams{x, smoothScalesOptional, nullptr, 2, true, "pertoken", 0.0, yOut, scaleOut,
                                           nullptr};
     return GetDynamicQuantResultByL0Api(dynamicQuantParams, workspaceSize, executor);
 }
@@ -533,7 +502,7 @@ aclnnStatus aclnnDynamicQuantV2GetWorkspaceSize(
     bool isSymmetrical = (offsetOut == nullptr);
     const char* quantMode = "pertoken";
     DynamicQuantParams dynamicQuantParams{
-        x, smoothScalesOptional, groupIndexOptional, dstType, isSymmetrical, quantMode, yOut, scaleOut, offsetOut};
+        x, smoothScalesOptional, groupIndexOptional, dstType, isSymmetrical, quantMode, 0.0, yOut, scaleOut, offsetOut};
     return GetDynamicQuantResultByL0Api(dynamicQuantParams, workspaceSize, executor);
 }
 
@@ -561,13 +530,42 @@ aclnnStatus aclnnDynamicQuantV3GetWorkspaceSize(
         return ACLNN_ERR_INNER;
     }
     DynamicQuantParams dynamicQuantParams{
-        x, smoothScalesOptional, groupIndexOptional, dstType, isSymmetrical, quantMode, yOut, scaleOut, offsetOut};
+        x, smoothScalesOptional, groupIndexOptional, dstType, isSymmetrical, quantMode, 0.0, yOut, scaleOut, offsetOut};
     return GetDynamicQuantResultByL0Api(dynamicQuantParams, workspaceSize, executor);
 }
 
 aclnnStatus aclnnDynamicQuantV3(void* workspace, uint64_t workspaceSize, aclOpExecutor* executor, aclrtStream stream)
 {
     L2_DFX_PHASE_2(aclnnDynamicQuantV3);
+    auto ret = CommonOpExecutorRun(workspace, workspaceSize, executor, stream);
+    if (ret != ACLNN_SUCCESS) {
+        OP_LOGE(ACLNN_ERR_INNER, "This is an error in DynamicQuant launch aicore");
+        return ACLNN_ERR_INNER;
+    }
+    return ACLNN_SUCCESS;
+}
+
+aclnnStatus aclnnDynamicQuantV4GetWorkspaceSize(
+    const aclTensor* x, const aclTensor* smoothScalesOptional, const aclTensor* groupIndexOptional, int64_t dstType,
+    bool isSymmetrical, const char* quantMode, float dstTypeMax, const aclTensor* yOut, const aclTensor* scaleOut,
+    const aclTensor* offsetOut, uint64_t* workspaceSize, aclOpExecutor** executor)
+{
+    L2_DFX_PHASE_1(
+        aclnnDynamicQuantV4, DFX_IN(x, smoothScalesOptional, groupIndexOptional, dstType, isSymmetrical, quantMode),
+        DFX_OUT(yOut, scaleOut, offsetOut));
+    if (!Ops::NN::AclnnUtil::IsRegbase()) {
+        OP_LOGE(ACLNN_ERR_INNER, "aclnnDynamicQuantV4 only support socVersion Ascend950");
+        return ACLNN_ERR_INNER;
+    }
+    DynamicQuantParams dynamicQuantParams{
+        x, smoothScalesOptional, groupIndexOptional, dstType, isSymmetrical, quantMode,
+        dstTypeMax, yOut, scaleOut, offsetOut};
+    return GetDynamicQuantResultByL0Api(dynamicQuantParams, workspaceSize, executor);
+}
+
+aclnnStatus aclnnDynamicQuantV4(void* workspace, uint64_t workspaceSize, aclOpExecutor* executor, aclrtStream stream)
+{
+    L2_DFX_PHASE_2(aclnnDynamicQuantV4);
     auto ret = CommonOpExecutorRun(workspace, workspaceSize, executor, stream);
     if (ret != ACLNN_SUCCESS) {
         OP_LOGE(ACLNN_ERR_INNER, "This is an error in DynamicQuant launch aicore");

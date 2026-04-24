@@ -14,6 +14,18 @@
 #include "opdev/common_types.h"
 #include "opdev/platform.h"
 
+#define DEPRECATED_API_WARN_ONCE(oldApiName, deprecatedDate, newApiName)                 \
+    do {                                                                                 \
+        static bool isFirstWarn = true;                                                  \
+        if (isFirstWarn){                                                                \
+            OP_LOGW("%s is scheduled to be deprecated in a post-%s version update, "                                            \
+                        "and will be replaced by the %s. "                                                                      \
+                        "We apologize for any inconvenience caused and appreciate your timely migration to the new interface.", \
+                        (oldApiName), (deprecatedDate), (newApiName));                   \
+            isFirstWarn = false;                                                         \
+        }                                                                                \
+    } while(0)
+
 namespace Ops {
 namespace NN {
 using namespace op;
@@ -70,9 +82,9 @@ struct MmOpInfo {
 };
 
 struct TensorInfo {
-  const aclTensor* tensor;
-  op::DataType dataType;
-  op::Format format;
+  const aclTensor* tensor = nullptr;
+  op::DataType dataType = op::DataType::DT_FLOAT;
+  op::Format format = Format::FORMAT_ND;
 };
 
 op::Shape SwapLastTwoDimValue(const op::Shape tensorShape, int64_t last = 1UL, int64_t secondLast = 2UL);
@@ -96,8 +108,17 @@ bool IsTransposeNonContiguous(const aclTensor* tensor, bool& isNeedSwapInnerTwoD
 
 bool CheckNonContiguousShapeSupport(MmOpInfo& mmOpInfo);
 
+bool CheckGemmV3WithAlphaBeta(const aclTensor* bias, const aclTensor* self, const aclTensor* mat2, int8_t cubeMathType);
+
 const aclTensor* ExecGemmV3Op(const aclTensor* self, const aclTensor* mat2, const aclTensor* c, MmOpInfo& mmOpInfo,
                               aclOpExecutor* executor);
+
+const aclTensor* ExecGemmV3WithAlphaBetaOp(const aclTensor* bias,
+                                           const aclTensor* self,
+                                           const aclTensor* mat2,
+                                           const aclScalar* alpha,
+                                           const aclScalar* beta,
+                                           aclOpExecutor* executor);
 
 const aclTensor* ExecMmOp(const aclTensor* self, const aclTensor* mat2, int8_t cubeMathType, aclOpExecutor* executor);
 
@@ -278,9 +299,9 @@ public:
 
     // 初步推导后的类型及兼容记录
     struct PromoteResult {
-        op::DataType type;
-        bool isError;
-        const char* logMessage;
+        op::DataType type = op::DataType::DT_FLOAT;
+        bool isError = false;
+        const char* logMessage = nullptr;
 
         constexpr PromoteResult(op::DataType dataType, bool err, const char* msg) : type(dataType), isError(err), logMessage(msg) {}
     };
@@ -366,21 +387,7 @@ private:
     op::DataType PromoteOutputAndBiasDtype(op::DataType outputDtype, op::DataType biasOriDtype) const;
 };
 
-// 单例
-class NpuArchMatMulRule {
-public:
-    static std::shared_ptr<NpuArchMatMulRuleBase> getInstance() {
-        if(instance == nullptr) {
-            instance = BuildRule();
-        }
-        return std::move(instance);
-    }
-
-private:
-    static std::shared_ptr<NpuArchMatMulRuleBase> instance;
-
-    static std::shared_ptr<NpuArchMatMulRuleBase> BuildRule() ;
-};
+std::shared_ptr<NpuArchMatMulRuleBase> BuildRule();
 
 // =====================================================================================================
 

@@ -42,18 +42,17 @@ aclnnStatus aclnnBinaryCrossEntropy(
 
 ## aclnnL1LossBackwardGetWorkspaceSize
 
-- **参数说明：**
+- **参数说明**
   
-  </style>
-  <table class="tg" style="undefined;table-layout: fixed; width: 1249px"><colgroup>
-  <col style="width: 207px">
-  <col style="width: 87px">
-  <col style="width: 274px">
-  <col style="width: 234px">
-  <col style="width: 118px">
-  <col style="width: 113px">
-  <col style="width: 108px">
-  <col style="width: 108px">
+  <table class="tg" style="undefined;table-layout: fixed; width: 1435px"><colgroup>
+  <col style="width: 205px">
+  <col style="width: 120px">
+  <col style="width: 280px">
+  <col style="width: 320px">
+  <col style="width: 130px">
+  <col style="width: 115px">
+  <col style="width: 120px">
+  <col style="width: 145px">
   </colgroup>
   <thead>
     <tr>
@@ -144,7 +143,7 @@ aclnnStatus aclnnBinaryCrossEntropy(
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 
   第一段接口完成入参校验，出现以下场景时报错：
-    </style>
+  
     <table class="tg" style="undefined;table-layout: fixed; width: 991px"><colgroup>
     <col style="width: 269px">
     <col style="width: 90px">
@@ -171,13 +170,13 @@ aclnnStatus aclnnBinaryCrossEntropy(
         <td class="tg-0pky">gradOutput、target、self做数据类型推导后的结果不在支持的范围之内。</td>
       </tr>
       <tr>
-        <td class="tg-0pky">gradOutput、self和target的shape无法做broadcast。</td>
+        <td class="tg-0pky">gradOutput、self和target的shape无法做<a href="../../../docs/zh/context/broadcast关系.md" target="_blank">broadcast</a>。</td>
       </tr>
       <tr>
         <td class="tg-0pky">gradOutput、self和target的shape超过8维。</td>
       </tr>
       <tr>
-        <td class="tg-0lax">gradOutput、self和target做broadcast后的shape与gradInput不一致。</td>
+        <td class="tg-0lax">gradOutput、self和target做<a href="../../../docs/zh/context/broadcast关系.md" target="_blank">broadcast</a>后的shape与gradInput不一致。</td>
       </tr>
       <tr>
         <td class="tg-0lax">reduction值不在0~2范围之内。</td>
@@ -211,7 +210,7 @@ aclnnStatus aclnnBinaryCrossEntropy(
         <tr>
           <td>workspaceSize</td>
           <td>输入</td>
-          <td>在Device侧申请的workspace大小，由第一段接口aclnnBinaryCrossEntropyGetWorkspaceSize获取。</td>
+          <td>在Device侧申请的workspace大小，由第一段接口aclnnL1LossBackwardGetWorkspaceSize获取。</td>
         </tr>
         <tr>
           <td>executor</td>
@@ -231,12 +230,14 @@ aclnnStatus aclnnBinaryCrossEntropy(
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 
 ## 约束说明
-- 确定性计算： 
+
+- 确定性计算：
     - aclnnL1LossBackward默认确定性实现。
 
 ## 调用示例
 
 示例代码如下，仅供参考，具体编译和执行过程请参考[编译与运行样例](../../../docs/zh/context/编译与运行样例.md)。
+
 ```Cpp
 #include <iostream>
 #include <vector>

@@ -21,7 +21,7 @@
 #include "util/math_util.h"
 #include "tiling/platform/platform_ascendc.h"
 #include "platform/platform_infos_def.h"
-#include "tiling_base/tiling_templates_registry.h"
+#include "op_host/tiling_templates_registry.h"
 
 namespace optiling {
 BEGIN_TILING_DATA_DEF(AddLayerNormGradTilingData)
@@ -54,7 +54,7 @@ TILING_DATA_FIELD_DEF(uint32_t, rstdPadRight);
 TILING_DATA_FIELD_DEF(uint32_t, roundUpNumLastDim);
 TILING_DATA_FIELD_DEF(uint32_t, roundUpNumLastDimDtype);
 TILING_DATA_FIELD_DEF(uint32_t, roundUp1Dtype);
-TILING_DATA_FIELD_DEF(uint32_t, roundUpNumLastDimFloat);
+TILING_DATA_FIELD_DEF(uint64_t, roundUpNumLastDimFloat);
 TILING_DATA_FIELD_DEF(uint32_t, isDeterministicKey);
 END_TILING_DATA_DEF;
 
@@ -88,7 +88,7 @@ struct TilingStruct {
     uint32_t roundUpNumLastDim;
     uint32_t roundUpNumLastDimDtype;
     uint32_t roundUp1Dtype;
-    uint32_t roundUpNumLastDimFloat;
+    uint64_t roundUpNumLastDimFloat;
     uint32_t isDeterministicKey;
 };
 

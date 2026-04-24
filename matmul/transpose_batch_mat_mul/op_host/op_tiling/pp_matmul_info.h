@@ -19,11 +19,12 @@
 #include <iostream>
 #include <map>
 #include "tiling/platform/platform_ascendc.h"
-#include "tiling_base/tiling_base.h"
+#include "op_host/tiling_base.h"
 
 namespace optiling {
 namespace pp_matmul {
 struct MatMulInfo {
+    const char *opName = nullptr;
     uint64_t batchSize{0};
     uint64_t m{0}; // 实际输入的 m
     uint64_t n{0}; // 实际输入的 n
@@ -37,9 +38,11 @@ struct MatMulInfo {
     uint64_t transA{0}; 
     uint64_t transB{0}; 
     bool biasFlag{0}; // false: 0, true: 1
-    bool isInt8{0}; // 是否shi int8融合
-    float inDtype{0};
-    float outDtype{0};
+    bool isInt8{0};
+    bool isQuantBatchMatmulV3{0};
+    bool isPertokenArch20{0};
+    float sizeInDtype{0};
+    float sizeOutDtype{0};
 };
 
 struct HardwareInfo {
@@ -71,12 +74,13 @@ struct PpMatmulDefaultTilingData {
     uint64_t kLoop{1};
     uint64_t nLoop{1};
     uint64_t coreLoop{1};
-    uint64_t swizzlCount{1};
+    uint64_t swizzleCount{1};
     uint32_t tilingKey{0};
     uint64_t blockDim{1};
-    uint64_t swizzlDirect{0};
+    uint64_t swizzleDirect{0};
     uint64_t splitk{0};
     uint64_t enShuffleK{0};
+    bool isQuantBatchMatmulV3{false};
 
     void SetBaseShape(uint64_t batchSize, uint64_t m, uint64_t k, uint64_t n);
     void SetBaseOp(uint64_t coreNum, uint64_t l0cSize, uint64_t mBase, uint64_t nBase, const MatMulInfo &mmInfo, bool isAscend310P);

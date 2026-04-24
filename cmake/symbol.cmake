@@ -12,25 +12,20 @@ function(gen_ophost_symbol)
   if (NOT TARGET ${OPHOST_NAME}_infer_obj AND NOT TARGET ${OPHOST_NAME}_tiling_obj AND NOT TARGET ${OPHOST_NAME}_aicpu_objs)
     return()
   endif()
-  add_library(
-    ${OPHOST_NAME} SHARED
+  npu_op_library(${OPHOST_NAME}_obj TILING)
+  target_sources(${OPHOST_NAME}_obj PUBLIC
     $<$<TARGET_EXISTS:${OPHOST_NAME}_infer_obj>:$<TARGET_OBJECTS:${OPHOST_NAME}_infer_obj>>
     $<$<TARGET_EXISTS:${OPHOST_NAME}_tiling_obj>:$<TARGET_OBJECTS:${OPHOST_NAME}_tiling_obj>>
     $<$<TARGET_EXISTS:${OPHOST_NAME}_aicpu_objs>:$<TARGET_OBJECTS:${OPHOST_NAME}_aicpu_objs>>
+    $<$<TARGET_EXISTS:opbase_util_objs>:$<TARGET_OBJECTS:opbase_util_objs>>
+    $<$<TARGET_EXISTS:opbase_infer_objs>:$<TARGET_OBJECTS:opbase_infer_objs>>
+    $<$<TARGET_EXISTS:opbase_tiling_objs>:$<TARGET_OBJECTS:opbase_tiling_objs>>
     )
-
+  add_library(${OPHOST_NAME} SHARED $<TARGET_OBJECTS:${OPHOST_NAME}_obj>)
   target_link_libraries(
     ${OPHOST_NAME}
     PRIVATE $<BUILD_INTERFACE:intf_pub_cxx17>
-            c_sec
-            -Wl,--no-as-needed
-            register
-            $<$<TARGET_EXISTS:opsbase>:opsbase>
-            -Wl,--as-needed
-            -Wl,--whole-archive
-            rt2_registry_static
-            tiling_api
-            -Wl,--no-whole-archive
+            ${OPHOST_NAME}_obj
             -Wl,-Bsymbolic
     )
 
@@ -44,8 +39,6 @@ endfunction()
 
 # gen es_nn
 function(gen_es_nn_lib_ready)
-  # 合并proto.h生成ops_proto_nn.h和ops_proto_nn.cpp 
-  merge_graph_headers(TARGET merge_ops_proto_${PKG_NAME} OUT_DIR ${ASCEND_GRAPH_CONF_DST})
   add_library(
     proto_${PKG_NAME} SHARED
     ${ASCEND_GRAPH_CONF_DST}/ops_proto_nn.cpp
@@ -57,7 +50,6 @@ function(gen_es_nn_lib_ready)
       c_sec
       -Wl,--no-as-needed
       register
-      $<$<TARGET_EXISTS:opsbase>:opsbase>
       -Wl,--as-needed
     )
   target_link_directories(proto_${PKG_NAME} PRIVATE ${ASCEND_DIR}/${SYSTEM_PREFIX}/lib64)
@@ -69,10 +61,21 @@ function(gen_es_nn_lib_ready)
     OUTPUT_PATH ${CMAKE_BINARY_DIR}/es_packages
   )
   install(
-    DIRECTORY ${CMAKE_BINARY_DIR}/es_packages
-    DESTINATION ${VERSION_INFO_INSTALL_DIR}
+    FILES ${CMAKE_BINARY_DIR}/es_packages/lib64/libes_nn.so
+    DESTINATION ${VERSION_INFO_INSTALL_DIR}/lib64
     OPTIONAL
   )
+  install(
+    DIRECTORY ${CMAKE_BINARY_DIR}/es_packages/include/es_nn
+    DESTINATION ${VERSION_INFO_INSTALL_DIR}/include/es
+    OPTIONAL
+    )
+ 	install(
+    DIRECTORY ${CMAKE_BINARY_DIR}/es_packages/whl/
+    DESTINATION ${WHL_INSTALL_DIR}/es_packages/whl
+    OPTIONAL
+    )
+
 endfunction()
 
 # gen es_nn for custom
@@ -90,7 +93,6 @@ function(gen_es_nn_lib_ready_cust)
       c_sec
       -Wl,--no-as-needed
       register
-      $<$<TARGET_EXISTS:opsbase>:opsbase>
       -Wl,--as-needed
     )
   target_link_directories(proto_${PKG_NAME}_cust PRIVATE ${ASCEND_DIR}/${SYSTEM_PREFIX}/lib64)
@@ -115,7 +117,42 @@ endfunction()
 
 # graph_plugin shared
 function(gen_opgraph_symbol)
+  merge_graph_headers(TARGET merge_ops_proto_${PKG_NAME} OUT_DIR ${ASCEND_GRAPH_CONF_DST})
+
   gen_es_nn_lib_ready()
+  
+  add_library(
+    ${OPGRAPH_NAME} SHARED
+    $<$<TARGET_EXISTS:${GRAPH_PLUGIN_NAME}_obj>:$<TARGET_OBJECTS:${GRAPH_PLUGIN_NAME}_obj>>
+    $<$<TARGET_EXISTS:${CUBE_UTILS_PLUGIN_NAME}_obj>:$<TARGET_OBJECTS:${CUBE_UTILS_PLUGIN_NAME}_obj>>
+    $<$<TARGET_EXISTS:opbase_util_objs>:$<TARGET_OBJECTS:opbase_util_objs>>
+    $<$<TARGET_EXISTS:opbase_infer_objs>:$<TARGET_OBJECTS:opbase_infer_objs>>
+  )
+  add_dependencies(${OPGRAPH_NAME} merge_ops_proto_${PKG_NAME})
+  target_sources( 
+    ${OPGRAPH_NAME} 
+    PRIVATE 
+    ${ASCEND_GRAPH_CONF_DST}/ops_proto_nn.cpp 
+  )
+  target_link_libraries(
+    ${OPGRAPH_NAME}
+    PRIVATE $<BUILD_INTERFACE:intf_pub_cxx17>
+            c_sec
+            -Wl,--no-as-needed
+            register
+            -Wl,--as-needed
+            -Wl,--whole-archive
+            rt2_registry_static
+            -Wl,--no-whole-archive
+            -Wl,-Bsymbolic
+            ge_compiler
+            unified_dlog
+            ascendalog
+  )
+  target_link_directories(${OPGRAPH_NAME} PRIVATE 
+    ${ASCEND_DIR}/${SYSTEM_PREFIX}/lib64
+    ${CMAKE_BINARY_DIR}/es_packages/lib64
+  )
 
   if(TARGET ${GRAPH_PLUGIN_NAME}_obj)
     unset(GRAPH_SOURCE)
@@ -130,41 +167,24 @@ function(gen_opgraph_symbol)
         es_math
         es_nn
       )
-      add_library(
-        ${OPGRAPH_NAME} SHARED
-        $<$<TARGET_EXISTS:${GRAPH_PLUGIN_NAME}_obj>:$<TARGET_OBJECTS:${GRAPH_PLUGIN_NAME}_obj>>
-      )
-      
       target_link_libraries(
         ${OPGRAPH_NAME}
-        PRIVATE $<BUILD_INTERFACE:intf_pub_cxx17>
-                c_sec
+        PRIVATE 
                 -Wl,--no-as-needed
-                register
-                $<$<TARGET_EXISTS:opsbase>:opsbase>
-                -Wl,--as-needed
-                -Wl,--whole-archive
-                rt2_registry_static
-                -Wl,--no-whole-archive
-                -Wl,-Bsymbolic
-                ge_compiler
                 es_math
                 es_nn
+                -Wl,--as-needed
         )
-
-      target_link_directories(${OPGRAPH_NAME} PRIVATE 
-        ${ASCEND_DIR}/${SYSTEM_PREFIX}/lib64
-        ${CMAKE_BINARY_DIR}/es_packages/lib64
-      )
-      set_target_properties(${OPGRAPH_NAME} PROPERTIES 
-        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/opp/built-in/op_proto
-      )
-      install(
-        TARGETS ${OPGRAPH_NAME}
-        LIBRARY DESTINATION ${OPGRAPH_LIB_INSTALL_DIR}
-      )
     endif()
   endif()
+
+  set_target_properties(${OPGRAPH_NAME} PROPERTIES 
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/opp/built-in/op_proto
+  )
+  install(
+    TARGETS ${OPGRAPH_NAME}
+    LIBRARY DESTINATION ${OPGRAPH_LIB_INSTALL_DIR}
+  )
   install(
     FILES ${ASCEND_GRAPH_CONF_DST}/ops_proto_nn.h
     DESTINATION ${OPGRAPH_INC_INSTALL_DIR}
@@ -174,14 +194,18 @@ function(gen_opgraph_symbol)
 endfunction()
 
 function(gen_opapi_symbol)
-  if(NOT TARGET ${OPHOST_NAME}_opapi_obj AND NOT TARGET opbuild_gen_aclnn_all)
+  if((NOT TARGET ${OPHOST_NAME}_opapi_obj AND NOT TARGET opbuild_gen_aclnn_all) OR NO_ACLNN)
     return()
   endif()
+  npu_op_library(${OPAPI_NAME}_obj ACLNN)
+  target_sources(${OPAPI_NAME}_obj PUBLIC
+    $<$<TARGET_EXISTS:${OPHOST_NAME}_opapi_obj>:$<TARGET_OBJECTS:${OPHOST_NAME}_opapi_obj>>
+    $<$<TARGET_EXISTS:opbuild_gen_aclnn_all>:$<TARGET_OBJECTS:opbuild_gen_aclnn_all>>
+  )
   # opapi shared
   add_library(
     ${OPAPI_NAME} SHARED
-    $<$<TARGET_EXISTS:${OPHOST_NAME}_opapi_obj>:$<TARGET_OBJECTS:${OPHOST_NAME}_opapi_obj>>
-    $<$<TARGET_EXISTS:opbuild_gen_aclnn_all>:$<TARGET_OBJECTS:opbuild_gen_aclnn_all>>
+    $<TARGET_OBJECTS:${OPAPI_NAME}_obj>
     )
 
   if(BUILD_WITH_INSTALLED_DEPENDENCY_CANN_PKG)
@@ -191,8 +215,10 @@ function(gen_opapi_symbol)
   target_link_libraries(
     ${OPAPI_NAME}
     PUBLIC $<BUILD_INTERFACE:intf_pub_cxx17>
-    PRIVATE c_sec nnopbase $<$<BOOL:${BUILD_WITH_INSTALLED_DEPENDENCY_CANN_PKG}>:$<BUILD_INTERFACE:opapi_math>>
+    PRIVATE ${OPAPI_NAME}_obj $<$<BOOL:${BUILD_WITH_INSTALLED_DEPENDENCY_CANN_PKG}>:$<BUILD_INTERFACE:opapi_math>>
+    -Wl,-Bsymbolic
     )
+  target_link_directories(${OPAPI_NAME} PRIVATE ${ASCEND_DIR}/${SYSTEM_PREFIX}/lib64)
 
   install(
     TARGETS ${OPAPI_NAME}
@@ -201,7 +227,7 @@ function(gen_opapi_symbol)
 endfunction()
 
 function(gen_cust_opapi_symbol)
-  if(NOT TARGET ${OPHOST_NAME}_opapi_obj AND NOT TARGET opbuild_gen_aclnn_all)
+  if((NOT TARGET ${OPHOST_NAME}_opapi_obj AND NOT TARGET opbuild_gen_aclnn_all) OR NO_ACLNN)
     return()
   endif()
   # op_api
@@ -220,6 +246,7 @@ function(gen_cust_opapi_symbol)
     cust_opapi
     PUBLIC $<BUILD_INTERFACE:intf_pub_cxx17>
     PRIVATE $<$<BOOL:${BUILD_WITH_INSTALLED_DEPENDENCY_CANN_PKG}>:$<BUILD_INTERFACE:opapi_math>>
+    -Wl,-Bsymbolic
     )
 endfunction()
 
@@ -233,12 +260,13 @@ function(gen_cust_optiling_symbol)
     cust_opmaster
     PUBLIC $<$<TARGET_EXISTS:${OPHOST_NAME}_tiling_obj>:$<TARGET_OBJECTS:${OPHOST_NAME}_tiling_obj>>
            $<$<TARGET_EXISTS:${COMMON_NAME}_obj>:$<TARGET_OBJECTS:${COMMON_NAME}_obj>>
+           $<$<TARGET_EXISTS:opbase_util_objs>:$<TARGET_OBJECTS:opbase_util_objs>>
+           $<$<TARGET_EXISTS:opbase_tiling_objs>:$<TARGET_OBJECTS:opbase_tiling_objs>>
     )
 
   target_link_libraries(
     cust_opmaster
     PUBLIC $<BUILD_INTERFACE:intf_pub_cxx17>
-    PRIVATE $<$<TARGET_EXISTS:opsbase>:opsbase>
     -Wl,-Bsymbolic
     )
 endfunction()
@@ -250,13 +278,12 @@ function(gen_cust_proto_symbol)
   endif()
   npu_op_library(cust_proto GRAPH)
 
-  set(NEED_LINK_ES OFF)
+  gen_es_nn_lib_ready_cust()
   if(TARGET ${GRAPH_PLUGIN_NAME}_obj)
     unset(GRAPH_SOURCE)
     get_target_property(GRAPH_SOURCE ${GRAPH_PLUGIN_NAME}_obj SOURCES)
     if(GRAPH_SOURCE)
       # 添加obj依赖es
-      gen_es_nn_lib_ready_cust()
       add_dependencies(${GRAPH_PLUGIN_NAME}_obj
         build_es_math
         build_es_nn
@@ -266,7 +293,6 @@ function(gen_cust_proto_symbol)
         es_math
         es_nn
       )
-      set(NEED_LINK_ES ON)
     endif()
   endif()
   
@@ -274,31 +300,30 @@ function(gen_cust_proto_symbol)
     cust_proto
     PUBLIC $<$<TARGET_EXISTS:${OPHOST_NAME}_infer_obj>:$<TARGET_OBJECTS:${OPHOST_NAME}_infer_obj>>
            $<$<TARGET_EXISTS:${GRAPH_PLUGIN_NAME}_obj>:$<TARGET_OBJECTS:${GRAPH_PLUGIN_NAME}_obj>>
+           $<$<TARGET_EXISTS:opbase_util_objs>:$<TARGET_OBJECTS:opbase_util_objs>>
+           $<$<TARGET_EXISTS:opbase_infer_objs>:$<TARGET_OBJECTS:opbase_infer_objs>>
     )
   
   target_link_libraries(
     cust_proto
     PUBLIC $<BUILD_INTERFACE:intf_pub_cxx17>
-    PRIVATE $<$<TARGET_EXISTS:opsbase>:opsbase>
     ge_compiler
     )
 
-  if(NEED_LINK_ES)
-    add_dependencies(cust_proto build_es_math build_es_nn)
+  add_dependencies(cust_proto build_es_math build_es_nn)
 
-    target_link_directories(cust_proto
-      PRIVATE
-        ${CMAKE_BINARY_DIR}/es_packages/lib64
-        ${ES_LIB_INSTALL_DIR}
-    )
-    target_link_libraries(cust_proto
-      PRIVATE
-        -Wl,--no-as-needed
-        es_math
-        es_nn
-        -Wl,--as-needed
-    )
-  endif()
+  target_link_directories(cust_proto
+    PRIVATE
+      ${CMAKE_BINARY_DIR}/es_packages/lib64
+      ${ES_LIB_INSTALL_DIR}
+  )
+  target_link_libraries(cust_proto
+    PRIVATE
+      -Wl,--no-as-needed
+      es_math
+      es_nn
+      -Wl,--as-needed
+  )
   file(GLOB_RECURSE proto_headers ${ASCEND_AUTOGEN_PATH}/*_proto.h)
   install(
     FILES ${proto_headers}
@@ -389,7 +414,6 @@ function(gen_onnx_plugin_symbol)
             c_sec
             -Wl,--no-as-needed
             register
-            $<$<TARGET_EXISTS:opsbase>:opsbase>
             -Wl,--as-needed
             -Wl,--whole-archive
             rt2_registry_static

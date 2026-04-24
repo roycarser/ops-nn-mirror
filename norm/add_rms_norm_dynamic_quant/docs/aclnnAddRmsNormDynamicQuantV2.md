@@ -6,14 +6,12 @@
 
 | 产品                                                         | 是否支持 |
 | :----------------------------------------------------------- | :------: |
-| <term>Ascend 950PR/Ascend 950DT</term>                             |    ×     |
+| <term>Ascend 950PR/Ascend 950DT</term>                             |    √      |
 | <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>     |    √     |
 | <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term> |    √     |
 | <term>Atlas 200I/500 A2 推理产品</term>                      |    ×     |
 | <term>Atlas 推理系列产品</term>                             |    ×     |
 | <term>Atlas 训练系列产品</term>                              |    ×     |
-
-
 
 ## 功能说明
 
@@ -45,7 +43,8 @@
 
   $$
   scale1Out=\begin{cases}
-    row\_max(abs(input1))/127 & outputMask[0]=True\ ||\ !outputMask \\
+    row\_max(abs(input1))/127 & (outputMask[0]=True\ ||\ !outputMask) \& y1Out为INT8 \\
+    row\_max(abs(input1))/7 & (outputMask[0]=True\ ||\ !outputMask) \& y1Out为INT4 \\
     无效输出 & outputMask[0]=False
     \end{cases}
   $$
@@ -57,10 +56,10 @@
     \end{cases}
   $$
 
-
   $$
   scale2Out=\begin{cases}
-    row\_max(abs(input2))/127 & outputMask[1]=True\ ||\ (!outputMask\ \&\ smoothScale1Optional\ \&\ smoothScale2Optional) \\
+    row\_max(abs(input2))/127 & (outputMask[1]=True\ ||\ (!outputMask\ \&\ smoothScale1Optional\ \&\ smoothScale2Optional)) \& y2Out为INT8 \\
+    row\_max(abs(input2))/7 & (outputMask[1]=True\ ||\ (!outputMask\ \&\ smoothScale1Optional\ \&\ smoothScale2Optional)) \& y2Out为INT4 \\
     无效输出 & outputMask[1]=False\ ||\ (!outputMask\ \&\ smoothScale1Optional\ \&\ !smoothScale2Optional)
     \end{cases}
   $$
@@ -107,7 +106,7 @@ aclnnStatus aclnnAddRmsNormDynamicQuantV2(
 
 ## aclnnAddRmsNormDynamicQuantV2GetWorkspaceSize
 
-- **参数说明：**
+- **参数说明**
 
   <table style="undefined;table-layout: fixed; width: 1550px"><colgroup>
     <col style="width: 170px">
@@ -135,7 +134,7 @@ aclnnStatus aclnnAddRmsNormDynamicQuantV2(
       <td>x1（aclTensor*）</td>
       <td>输入</td>
       <td>表示标准化过程中的源数据张量。对应公式中的`x1`。</td>
-      <td>不支持空Tensor。</td>
+      <td>支持空Tensor。</td>
       <td>FLOAT16、BFLOAT16</td>
       <td>ND</td>
       <td>2-8</td>
@@ -145,7 +144,7 @@ aclnnStatus aclnnAddRmsNormDynamicQuantV2(
       <td>x2（aclTensor*）</td>
       <td>输入</td>
       <td>表示标准化过程中的源数据张量。对应公式中的`x2`。</td>
-      <td><ul><li>不支持空Tensor。</li><li>shape和数据类型需要与`x1`保持一致。</li></ul></td>
+      <td><ul><li>支持空Tensor。</li><li>shape和数据类型需要与`x1`保持一致。</li></ul></td>
       <td>FLOAT16、BFLOAT16</td>
       <td>ND</td>
       <td>2-8</td>
@@ -155,7 +154,7 @@ aclnnStatus aclnnAddRmsNormDynamicQuantV2(
       <td>gamma（aclTensor*）</td>
       <td>输入</td>
       <td>表示标准化过程中的权重张量。对应公式中的`gamma`。</td>
-      <td><ul><li>不支持空Tensor。</li><li>数据类型需要与`x1`保持一致。</li><li>shape需要与`x1`最后一维一致。</li></ul></td>
+      <td><ul><li>支持空Tensor。</li><li>数据类型需要与`x1`保持一致。</li><li>shape需要与`x1`最后一维一致。</li></ul></td>
       <td>FLOAT16、BFLOAT16</td>
       <td>ND</td>
       <td>1</td>
@@ -165,7 +164,7 @@ aclnnStatus aclnnAddRmsNormDynamicQuantV2(
       <td>smoothScale1Optional（aclTensor*）</td>
       <td>输入</td>
       <td>表示量化过程中得到`y1Out`使用的smoothScale张量。对应公式中的`smoothScale1Optional`。</td>
-      <td><ul><li>不支持空Tensor。</li><li>可选参数，支持传入空指针。</li><li>shape和数据类型需要与`gamma`保持一致。</li></ul></td>
+      <td><ul><li>支持空Tensor。</li><li>可选参数，支持传入空指针。</li><li>shape和数据类型需要与`gamma`保持一致。</li></ul></td>
       <td>FLOAT16、BFLOAT16</td>
       <td>ND</td>
       <td>1</td>
@@ -175,7 +174,7 @@ aclnnStatus aclnnAddRmsNormDynamicQuantV2(
       <td>smoothScale2Optional（aclTensor*）</td>
       <td>输入</td>
       <td>表示量化过程中得到`y2Out`使用的smoothScale张量。对应公式中的`smoothScale2Optional`。</td>
-      <td><ul><li>不支持空Tensor。</li><li>可选参数，支持传入空指针。</li><li>shape和数据类型需要与`gamma`保持一致。</li></ul></td>
+      <td><ul><li>支持空Tensor。</li><li>可选参数，支持传入空指针。</li><li>shape和数据类型需要与`gamma`保持一致。</li></ul></td>
       <td>FLOAT16、BFLOAT16</td>
       <td>ND</td>
       <td>1</td>
@@ -185,7 +184,7 @@ aclnnStatus aclnnAddRmsNormDynamicQuantV2(
       <td>betaOptional（aclTensor*）</td>
       <td>输入</td>
       <td>表示标准化过程中的偏置项。对应公式中的`beta`。</td>
-      <td><ul><li>不支持空Tensor。</li><li>可选参数，支持传入空指针。</li><li>shape和数据类型需要与`gamma`保持一致。</li></ul></td>
+      <td><ul><li>支持空Tensor。</li><li>可选参数，支持传入空指针。</li><li>shape和数据类型需要与`gamma`保持一致。</li></ul></td>
       <td>FLOAT16、BFLOAT16</td>
       <td>ND</td>
       <td>1</td>
@@ -215,8 +214,8 @@ aclnnStatus aclnnAddRmsNormDynamicQuantV2(
       <td>y1Out（aclTensor*）</td>
       <td>输出</td>
       <td>表示量化输出Tensor，对应公式中的`y1Out`。</td>
-      <td><ul><li>不支持空Tensor。</li><li>shape需要与输入`x1`保持一致。</li></ul></td>
-      <td>INT8、INT4</td>
+      <td><ul><li>支持空Tensor。</li><li>shape需要与输入`x1`保持一致。</li></ul></td>
+      <td>INT4、INT8、HIFLOAT8、FLOAT8_E5M2、FLOAT8_E4M3FN</td>
       <td>ND</td>
       <td>2-8</td>
       <td>√</td>
@@ -225,8 +224,8 @@ aclnnStatus aclnnAddRmsNormDynamicQuantV2(
       <td>y2Out（aclTensor*）</td>
       <td>输出</td>
       <td>表示量化输出Tensor，对应公式中的`y2Out`。</td>
-      <td><ul><li>不支持空Tensor。</li><li>如果`y2Out`为有效输出时，shape需要与`y1Out`保持一致；如果`y2Out`为无效输出时，shape为[1]。</li></ul></td>
-      <td>INT8、INT4</td>
+      <td><ul><li>支持空Tensor。</li><li>如果`y2Out`为有效输出时，shape需要与`y1Out`保持一致；如果`y2Out`为无效输出时，shape为[1]。</li></ul></td>
+      <td>INT4、INT8、HIFLOAT8、FLOAT8_E5M2、FLOAT8_E4M3FN</td>
       <td>ND</td>
       <td>2-8</td>
       <td>√</td>
@@ -235,7 +234,7 @@ aclnnStatus aclnnAddRmsNormDynamicQuantV2(
       <td>xOut（aclTensor*）</td>
       <td>输出</td>
       <td>表示x1和x2的和，对应公式中的`x`。</td>
-      <td><ul><li>不支持空Tensor。</li><li>shape和数据类型需要与输入`x1`/`x2`一致。</li></ul></td>
+      <td><ul><li>支持空Tensor。</li><li>shape和数据类型需要与输入`x1`/`x2`一致。</li></ul></td>
       <td>FLOAT16、BFLOAT16</td>
       <td>ND</td>
       <td>2-8</td>
@@ -245,7 +244,7 @@ aclnnStatus aclnnAddRmsNormDynamicQuantV2(
       <td>scale1Out（aclTensor*）</td>
       <td>输出</td>
       <td>表示第一路量化的输出，对应公式中的`scale1Out`。</td>
-      <td><ul><li>不支持空Tensor。</li><li>shape需要与输入`x1`除了最后一维后的shape一致，或者与`x1`除了最后一维的乘积一致。</li></ul></td>
+      <td><ul><li>支持空Tensor。</li><li>shape需要与输入`x1`除了最后一维后的shape一致，或者与`x1`除了最后一维的乘积一致。</li></ul></td>
       <td>FLOAT32</td>
       <td>ND</td>
       <td>1-8</td>
@@ -255,7 +254,7 @@ aclnnStatus aclnnAddRmsNormDynamicQuantV2(
       <td>scale2Out（aclTensor*）</td>
       <td>输出</td>
       <td>表示第二路量化的输出，对应公式中的`scale2Out`。</td>
-      <td><ul><li>不支持空Tensor。</li><li>当smoothScale2Optional不存在时，此输出无意义。</li><li>shape需要与`scale1Out`一致。</li></ul></td>
+      <td><ul><li>支持空Tensor。</li><li>当smoothScale2Optional不存在时，此输出无意义。</li><li>shape需要与`scale1Out`一致。</li></ul></td>
       <td>FLOAT32</td>
       <td>ND</td>
       <td>1-8</td>
@@ -284,7 +283,7 @@ aclnnStatus aclnnAddRmsNormDynamicQuantV2(
   </tbody>
   </table>
 
-- **返回值：**
+- **返回值**
 
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
   
@@ -309,23 +308,18 @@ aclnnStatus aclnnAddRmsNormDynamicQuantV2(
       <td>如果传入参数是必选输入，输出或者必选属性，且是空指针，则返回161001。</td>
     </tr>
     <tr>
-      <td>ACLNN_ERR_PARAM_INVALID</td>
-      <td>161002</td>
+      <td rowspan="2">ACLNN_ERR_PARAM_INVALID</td>
+      <td rowspan="2">161002</td>
       <td>输入或输出的数据类型不在支持的范围之内。</td>
     </tr>
     <tr>
-      <td rowspan="2">ACLNN_ERR_INNER_TILING_ERROR</td>
-      <td rowspan="2">561002</td>
       <td>outputMaskOptional为空指针时，输入smoothScale2Optional，而没有输入smoothScale1Optional。</td>
-    </tr>
-    <tr>
-      <td>输入/输出的shape关系不符合预期。</td>
     </tr>
   </tbody></table>
 
 ## aclnnAddRmsNormDynamicQuantV2
 
-- **参数说明：**
+- **参数说明**
 
   <table style="undefined;table-layout: fixed; width: 953px"><colgroup>
   <col style="width: 173px">
@@ -362,7 +356,7 @@ aclnnStatus aclnnAddRmsNormDynamicQuantV2(
   </tbody>
   </table>
 
-- **返回值：**
+- **返回值**
 
   aclnnStatus：返回状态码。（具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)）
 
@@ -375,14 +369,10 @@ aclnnStatus aclnnAddRmsNormDynamicQuantV2(
 - 当outputMaskOptional为空时，参数smoothScale2Optional有值时，参数smoothScale1Optional也必须有值。
 
 - 各产品型号支持数据类型说明：
-
-    | x1数据类型 | x2数据类型 | gamma数据类型 | smoothScale1Optional数据类型 | smoothScale2Optional数据类型 | betaOptional数据类型 | y1Out数据类型 | y2Out数据类型 | scale1Out数据类型 | scale2Out数据类型 |
-    | ---------- | ---------- | ------------- | ---------------------------- | ---------------------------- | -------------------- | ------------- | ------------- | ----------------- | ----------------- |
-    | FLOAT16    | FLOAT16    | FLOAT16       | FLOAT16                      | FLOAT16                      | FLOAT16              | INT8          | INT8          | FLOAT32           | FLOAT32           |
-    | BFLOAT16   | BFLOAT16   | BFLOAT16      | BFLOAT16                     | BFLOAT16                     | BFLOAT16             | INT8          | INT8          | FLOAT32           | FLOAT32           |
-    | FLOAT16    | FLOAT16    | FLOAT16       | FLOAT16                      | FLOAT16                      | FLOAT16              | INT4          | INT4          | FLOAT32           | FLOAT32           |
-    | BFLOAT16   | BFLOAT16   | BFLOAT16      | BFLOAT16                     | BFLOAT16                     | BFLOAT16             | INT4          | INT4          | FLOAT32           | FLOAT32           |
-
+  - <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>、<term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>：
+    - 参数`y1Out`和`y2Out`数据类型仅支持int4和int8。
+  - <term>Ascend 950PR/Ascend 950DT</term>：
+    - 参数`y1Out`和`y2Out`数据类型不支持int4。
 - 确定性计算：
   - aclnnAddRmsNormDynamicQuantV2默认确定性实现。
 
@@ -558,7 +548,7 @@ int main()
     // 调用aclnnAddRmsNormDynamicQuantV2第一段接口
     ret = aclnnAddRmsNormDynamicQuantV2GetWorkspaceSize(
         x1, x2, gamma, smooth1, smooth2, beta, epsilon, nullptr, y1, y2, x, scale1, scale2, &workspaceSize, &executor);
-    CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("aclnnRmsNormGetWorkspaceSize failed. ERROR: %d\n", ret); return ret);
+    CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("aclnnAddRmsNormDynamicQuantV2GetWorkspaceSize failed. ERROR: %d\n", ret); return ret);
     // 根据第一段接口计算出的workspaceSize申请device内存
     void* workspaceAddr = nullptr;
     if (workspaceSize > 0) {

@@ -1186,18 +1186,10 @@ static aclnnStatus ContiguousCheck(
     const aclTensor* antiquantOffsetOptional, const aclTensor* y)
 {
     bool transposeX = IsTransposeLastTwoDims(x);
-    if (op::GetCurrentPlatformInfo().GetCurNpuArch() == NpuArch::DAV_3510) {
-        OP_CHECK(
-            !transposeX && IsContiguous(x),
-            OP_LOGE(
-                ACLNN_ERR_PARAM_INVALID, "DAV_3510 not support x transpose and only support x tensor is contiguous."),
-            return ACLNN_ERR_PARAM_INVALID);
-    } else {
-        OP_CHECK(
-            transposeX || IsContiguous(x),
-            OP_LOGE(ACLNN_ERR_PARAM_INVALID, "only support x tensor is contiguous or transpose last two dims."),
-            return ACLNN_ERR_PARAM_INVALID);
-    }
+    OP_CHECK(
+        transposeX || IsContiguous(x),
+        OP_LOGE(ACLNN_ERR_PARAM_INVALID, "only support x tensor is contiguous or transpose last two dims."),
+        return ACLNN_ERR_PARAM_INVALID);
 
     bool transposeWeight = IsTransposeLastTwoDims(weight);
     OP_CHECK(
@@ -1594,6 +1586,13 @@ aclnnStatus CheckContiguous(
     const aclTensor*& quantOffsetOptional, const aclTensor*& biasOptional, const int& antiquantGroupSize,
     bool& transposeX, bool& transposeWeight, aclOpExecutor* executor)
 {
+    if (op::GetCurrentPlatformInfo().GetCurNpuArch() == NpuArch::DAV_3510) {
+        OP_CHECK(
+            !transposeX && IsContiguous(x),
+            OP_LOGE(
+                ACLNN_ERR_PARAM_INVALID, "DAV_3510 not support x transpose and only support x tensor is contiguous."),
+            return ACLNN_ERR_PARAM_INVALID);
+    }
     CHECK_RET(TensorContiguousProcess(x, transposeX, executor), ACLNN_ERR_INNER_NULLPTR);
 
     if (weight->GetStorageFormat() == Format::FORMAT_FRACTAL_NZ &&
@@ -1739,6 +1738,15 @@ aclnnStatus aclnnWeightQuantBatchMatmulV2GetWorkspaceSize(
     CHECK_RET(socRes == ACLNN_SUCCESS, socRes);
     CHECK_RET(CheckNotNull(x, weight, antiquantScale, y), ACLNN_ERR_PARAM_NULLPTR);
     CHECK_RET(CheckOptionalNotNull(quantScaleOptional, quantOffsetOptional), ACLNN_ERR_PARAM_NULLPTR);
+    if (op::GetCurrentPlatformInfo().GetCurNpuArch() == NpuArch::DAV_3510) {
+        OP_CHECK(
+            weight->GetStorageFormat() == op::Format::FORMAT_ND,
+            OP_LOGE(
+                ACLNN_ERR_PARAM_INVALID,
+                "In DAV_3510, aclnnWeightQuantBatchMatmulV2 not support FORMAT_FRACTAL_NZ and only support "
+                "FORMAT_ND."),
+            return ACLNN_ERR_PARAM_INVALID);
+    }
     const aclTensor* tensorWeight = weight;
     const aclTensor* antiquantScaleRef = antiquantScale;
     const aclTensor* tensorQuantScaleOptional = quantScaleOptional;

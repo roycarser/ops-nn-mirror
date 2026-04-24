@@ -383,9 +383,9 @@ bool QuantBatchMatmulV4BasicBlockTiling::CheckL1TilingInvalid(int64_t stepKa, in
     }
     if (weightNzFlag_) {
         int64_t kBl1Size =
-            std::min(basicBlockParam_.singleK, basicBlockParam_.l1Param.stepKb * basicBlockParam_.basicBlock.baseK);
+            min(CeilAlign(basicBlockParam_.singleK, MX_K_ALIGN_SIZE), basicBlockParam_.l1Param.stepKb * basicBlockParam_.basicBlock.baseK);
         int64_t nBl1Size =
-            std::min(basicBlockParam_.singleN, basicBlockParam_.l1Param.stepN * basicBlockParam_.basicBlock.baseN);
+            min(basicBlockParam_.singleN, basicBlockParam_.l1Param.stepN * basicBlockParam_.basicBlock.baseN);
         invalidFlag =
             invalidFlag ||
             (!transB_ && (nBl1Size % NZ_BASIC_BLOCK_ALIGN_SIZE != 0 && kBl1Size % NZ_BASIC_BLOCK_ALIGN_SIZE != 0)) ||
@@ -399,7 +399,7 @@ void QuantBatchMatmulV4BasicBlockTiling::UpdateL1ParamWithScaleFactor(L1TilingPa
                                                                       bool &ret, const StepKParam &stepKParams)
 {
     int64_t scaleFactorMax =
-    isMxType_ ? CeilDiv(basicBlockParam_.singleK, basicBlockParam_.basicBlock.baseK * stepKParams.stepKaTmp) : 1;
+        isMxType_ ? CeilDiv(CeilAlign(basicBlockParam_.singleK, MX_K_ALIGN_SIZE), basicBlockParam_.basicBlock.baseK * stepKParams.stepKaTmp) : 1;
     scaleFactorMax = max(scaleFactorMax, SCALE_FACTOR_MAX);  // 确保能取到1
     for (int64_t scaleFactorTmp = 1; scaleFactorTmp < scaleFactorMax; scaleFactorTmp++) {
         basicBlockParam_.l1Param = {1, 1, 1, stepKParams.stepKaTmp, stepKParams.stepKbTmp,
@@ -415,7 +415,7 @@ void QuantBatchMatmulV4BasicBlockTiling::UpdateL1ParamWithScaleFactor(L1TilingPa
 bool QuantBatchMatmulV4BasicBlockTiling::GetL1TilingResult(L1TilingParam &l1TilingParam,
                                                                           int64_t &mte2DataSize, double &mte2Cost)
 {
-    if (basicBlockParam_.basicBlock.baseK > basicBlockParam_.singleK) {
+    if (basicBlockParam_.basicBlock.baseK > CeilAlign(basicBlockParam_.singleK, MX_K_ALIGN_SIZE)) {
         return false;
     }
     const int64_t stepKaMin = 1;
@@ -600,12 +600,84 @@ bool QuantBatchMatmulV4BasicBlockTiling::ValidateTilingResult() const
     return true;
 }
 
+bool QuantBatchMatmulV4BasicBlockTiling::GetFallbackBaseK()
+{
+    // baseK选取能开启L0 DB的最大值，另外满足32对齐，方便MTE2 cache line对齐
+    int64_t baseKMax = BASE_MK_LIMIT / max(basicBlockParam_.basicBlock.baseM, basicBlockParam_.basicBlock.baseN);
+    baseKMax = max(baseKMax / BLOCK_CUBE * BLOCK_CUBE, BLOCK_CUBE);
+    if (weightNzFlag_) {
+        baseKMax = min(ops::CeilAlign(basicBlockParam_.kSize, BLOCK_CUBE), baseKMax);
+        for (int64_t baseK = baseKMax; baseK >= BLOCK_CUBE; baseK -= BLOCK_CUBE) {
+            if (transB_) {
+                if (baseK % NZ_BASIC_BLOCK_ALIGN_SIZE != 0) {
+                    continue;
+                }
+            } else {
+                if (baseK % NZ_BASIC_BLOCK_ALIGN_SIZE != 0 ||
+                    basicBlockParam_.basicBlock.baseN % NZ_BASIC_BLOCK_ALIGN_SIZE != 0) {
+                    continue;
+                }
+            }
+
+            if (basicBlockParam_.basicBlock.baseM * baseK * BUFF_NUM_2 > platformParam_.l0aSize ||
+                basicBlockParam_.basicBlock.baseN * baseK * BUFF_NUM_2 > platformParam_.l0bSize) {
+                continue;
+            }
+
+            basicBlockParam_.basicBlock.baseK = baseK;
+            return true;
+        }
+    } else {
+        int64_t baseK = min(ops::CeilAlign(basicBlockParam_.kSize, BLOCK_CUBE), ops::CeilAlign(baseKMax, VF_PROCESS_ELEM));
+        if (basicBlockParam_.basicBlock.baseM * baseK * BUFF_NUM_2 <= platformParam_.l0aSize &&
+            basicBlockParam_.basicBlock.baseN * baseK * BUFF_NUM_2 <= platformParam_.l0bSize) {
+            basicBlockParam_.basicBlock.baseK = baseK;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool QuantBatchMatmulV4BasicBlockTiling::GetFallbackTiling()
+{
+    OP_LOGD(opName_, "The optional results is empty, using fallback tiling");
+
+    InitL1TilingParam();
+    basicBlockParam_.l1Param.scaleFactor = 1;
+
+    // baseM=256, baseN=256
+    const int64_t alignSize =
+        isMxType_ ? (weightNzFlag_ ? BLOCK_CUBE : NZ_BASIC_BLOCK_ALIGN_SIZE) : NZ_BASIC_BLOCK_ALIGN_SIZE;
+    const int64_t maxMNSize = isMxType_ ? BASE_MN_LIMIT_BUFF_2 : BASE_MN_LIMIT_BUFF_1;
+    
+    // M轴切分
+    basicBlockParam_.basicBlock.baseM = ops::CeilAlign(min(basicBlockParam_.mSize, DEFAULT_FALLBACK_BASEM), BLOCK_CUBE);
+    basicBlockParam_.mDim = min(CeilDiv(basicBlockParam_.mSize, basicBlockParam_.basicBlock.baseM), 
+                                platformParam_.blockNum);
+    basicBlockParam_.singleM = ops::CeilAlign(CeilDiv(basicBlockParam_.mSize, basicBlockParam_.mDim), BLOCK_CUBE);
+    
+    // N轴切分
+    basicBlockParam_.basicBlock.baseN = min(BASE_BLOCK_MAX, 
+                                            (maxMNSize / basicBlockParam_.basicBlock.baseM) / BLOCK_CUBE * BLOCK_CUBE);
+    basicBlockParam_.nDim = min(CeilDiv(basicBlockParam_.nSize, basicBlockParam_.basicBlock.baseN),
+                                platformParam_.blockNum / basicBlockParam_.mDim);
+    basicBlockParam_.singleN = ops::CeilAlign(CeilDiv(basicBlockParam_.nSize, basicBlockParam_.nDim), alignSize);
+    
+    // 修正分核和baseN大小
+    basicBlockParam_.mDim = CeilDiv(basicBlockParam_.mSize, basicBlockParam_.singleM);
+    basicBlockParam_.nDim = CeilDiv(basicBlockParam_.nSize, basicBlockParam_.singleN);
+    basicBlockParam_.basicBlock.baseN = min(basicBlockParam_.basicBlock.baseN, basicBlockParam_.singleN);
+    return GetFallbackBaseK();
+}
+
 bool QuantBatchMatmulV4BasicBlockTiling::GetFinalResult()
 {
     bool ret = true;
     if (!optionalResults_.empty()) {
         sort(optionalResults_.begin(), optionalResults_.end(), CompareOptionalResult);
         basicBlockParam_ = optionalResults_.front();
+    } else {
+        ret = GetFallbackTiling();
     }
 
     PrintFinalResult(basicBlockParam_, ret);

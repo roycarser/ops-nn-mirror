@@ -18,8 +18,8 @@
 #include <log/log.h>
 #include <register/tilingdata_base.h>
 #include <tiling/tiling_api.h>
-#include "tiling_base/tiling_key.h"
-#include "tiling_base/tiling_base.h"
+#include "op_host/tiling_key.h"
+#include "op_host/tiling_base.h"
 #include "tbe_tiling_api.h"
 #include "conv3d_backprop_filter_v2_common.h"
 #include "../common/conv_backprop_filter_context_utils.h"
@@ -171,7 +171,7 @@ protected:
 
     void InitBaseMNK();
 
-    void InitBaseBlock910D();
+    void InitBaseBlock();
 
     void UpdateStepMNK();
 
@@ -196,6 +196,8 @@ protected:
     int32_t GetWiCal(int32_t splitWo, bool isSplitKernelHW);
 
     void PrintBasickBlockTilingData();
+
+    bool PrintInputsAttrs(conv_bp_v2_kernel::TConv3DDwTiling& tiling);
 
     void SetBasicBlockAttrsTiling();
 

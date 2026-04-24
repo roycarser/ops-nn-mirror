@@ -539,10 +539,13 @@ __aicore__ inline void EmbeddingDenseGradV2Kernel<GRAD_T, CAST_T, IDX_T, isScale
     IDX_T curLastIdx = -2; // 确保本核最后放到workspace的indices是升序的
     IDX_T curLastCount = 0;
     for (int64_t i = 0; i < arNum; i++) {
+        if (idxOffset >= indices.GetSize()) {
+            break;
+        }
         IDX_T idx = indices(idxOffset);
         IDX_T interval = noDupCountTensor(i);
         idxOffset = idxOffset + interval;
-        if (idx == tiling_.paddingIdx || idx < 0 || idx >= tiling_.numWeights) {
+        if (idx == tiling_.paddingIdx || static_cast<uint64_t>(idx) >= tiling_.numWeights) {
             continue;
         }
 
@@ -904,6 +907,9 @@ __aicore__ inline bool EmbeddingDenseGradV2Kernel<GRAD_T, CAST_T, IDX_T, isScale
     inQueGrad_.template EnQue<IDX_T>(indicesBeginTensor);
 
     LocalTensor<uint64_t> checkResult = cmpResult.template ReinterpretCast<uint64_t>();
+    event_t eventV_S = static_cast<event_t>(GetTPipePtr()->FetchEventID(HardEvent::V_S));
+    SetFlag<HardEvent::V_S>(eventV_S);
+    WaitFlag<HardEvent::V_S>(eventV_S);
     int64_t sameIdxCount = ScalarGetCountOfValue<1>(checkResult(0));  // 统计 bit=1的数量，bit 1 代表核间的头和尾相等，需要累加
     return sameIdxCount != 0;
 }

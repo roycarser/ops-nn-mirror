@@ -19,8 +19,8 @@
 #include "platform/platform_info.h"
 #include "register/op_impl_registry.h"
 #include "util/platform_util.h"
-#include "tiling_base/tiling_util.h"
-#include "tiling_base/tiling_base.h"
+#include "op_host/tiling_util.h"
+#include "op_host/tiling_base.h"
 #include "norm/lp_norm_v2/op_kernel/arch35/lp_norm_v2_dag.h"
 #include "norm/lp_norm_v2/op_kernel/arch35/lp_norm_v2_tiling_key.h"
 
@@ -75,9 +75,8 @@ ge::graphStatus LpNormV2Tiling::SetTilingData()
 
     auto rawTilingData = tilingContext_->GetRawTilingData();
     OP_CHECK_NULL_WITH_CONTEXT(tilingContext_, rawTilingData);
-
-    const uint64_t tilingKey = GET_TPL_TILING_KEY(key_.reduceTiling.patternID, key_.reduceTiling.loopARCount,
-                                                  key_.reduceTiling.loopInnerARCount, key_.templateNum);
+    uint64_t tilingKey;
+    GEN_REDUCE_TILING_KEY(tilingKey, key_.reduceTiling, key_.templateNum);
     OP_LOGI(tilingContext_->GetNodeName(),
             "patternID:%u, loopARCount:%u, loopInnerARCount:%u, Tiling Key is:%lu, templateNum is: %u, p: %f, recp: %f",
             key_.reduceTiling.patternID, key_.reduceTiling.loopARCount, key_.reduceTiling.loopInnerARCount, tilingKey,

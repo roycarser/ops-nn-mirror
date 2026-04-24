@@ -18,9 +18,9 @@
 
 #include "register/op_impl_registry.h"
 #include "register/tilingdata_base.h"
-#include "tiling_base/tiling_base.h"
+#include "op_host/tiling_base.h"
 #include "atvoss/elewise/elewise_tiling.h"
-#include "tiling_base/tiling_templates_registry.h"
+#include "op_host/tiling_templates_registry.h"
 
 namespace optiling {
 
@@ -55,12 +55,12 @@ class SigmoidGradTiling : public Ops::NN::Optiling::TilingBaseClass {
     uint64_t GetTilingKey() const override;
     ge::graphStatus GetWorkspaceSize() override;
     ge::graphStatus PostTiling() override;
-    std::string ToString(SigmoidGradTilingData &tilingData);
+    std::string ToString(SigmoidGradTilingData &tilingDataParam) const;
 
    private:
-    uint64_t GetOpKey(ge::DataType yDtype, ge::DataType dyDtype, ge::DataType zDtype);
-    uint64_t GenerateTilingKey(uint64_t innerKey);
-    std::map<uint64_t, Ops::Base::ComputeParams> GetComputeMap(uint64_t opKey);
+    uint64_t GetOpKey(ge::DataType yDtype, ge::DataType dyDtype, ge::DataType zDtype) const;
+    uint64_t GenerateTilingKey(uint64_t innerKey) const;
+    std::map<uint64_t, Ops::Base::ComputeParams> GetComputeMap(uint64_t opKeyParam) const;
 
     SigmoidGradTilingData tilingData;
     uint64_t opKey;

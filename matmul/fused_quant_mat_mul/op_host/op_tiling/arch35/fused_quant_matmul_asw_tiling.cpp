@@ -17,7 +17,7 @@
 
 #include "common/op_host/op_tiling/tiling_type.h"
 #include "error_util.h"
-#include "op_util.h"
+#include "op_api/op_util.h"
 
 #include "fused_quant_matmul_checker.h"
 
@@ -87,7 +87,7 @@ bool FusedQuantMatMulASWTiling::CheckDtype() const {
     return true;
 }
 
-bool FusedQuantMatMulASWTiling::AnalyzeX2TableAttr(const gert::StorageShape *x2TableShape) {
+bool FusedQuantMatMulASWTiling::AnalyzeX2TableAttr(const gert::StorageShape *x2TableShape) const {
     if (x2TableShape != nullptr) {
         OP_TILING_CHECK(!compileInfo_.supportMmadS8S4,
                         CUBE_INNER_ERR_REPORT(inputParams_.opName, "x2Table only support soc with MmadS8S4."),

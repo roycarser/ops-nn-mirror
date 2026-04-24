@@ -14,9 +14,9 @@
  */
 
 #include "batch_norm_grad_v3_tiling.h"
-#include "op_util.h"
-#include "tiling_base/tiling_templates_registry.h"
-#include "tiling_base/tiling_util.h"
+#include "op_api/op_util.h"
+#include "op_host/tiling_templates_registry.h"
+#include "op_host/tiling_util.h"
 #include "batch_norm_grad_v3_base_tiling.h"
 
 using namespace ge;
@@ -30,6 +30,7 @@ class BatchNormGradV3SplitLoadCrossCoreTiling : public BatchNormGradV3Base {
     static constexpr int64_t TWO = 2;
     static constexpr int64_t CORSSCORE_LIMIT = 20000;
     static constexpr int64_t CORSSCORE_TILINKEY_OFFSET = 10;
+    static constexpr int64_t CONST_ONE = 1;
 
 public:
     explicit BatchNormGradV3SplitLoadCrossCoreTiling(gert::TilingContext* context) : BatchNormGradV3Base(context)
@@ -284,6 +285,7 @@ ge::graphStatus BatchNormGradV3SplitLoadCrossCoreTiling::PostTiling()
 {
     int64_t coreNum = moreMultiChannel || morehalfChannel ? aicoreParams_.numBlocks : needCoreNum;
     context_->SetBlockDim(coreNum);
+    context_->SetScheduleMode(CONST_ONE);
     size_t* currentWorkspace = context_->GetWorkspaceSizes(1);
     OP_CHECK_NULL_WITH_CONTEXT(context_, currentWorkspace);
     auto tmpWsSize = coreNum * 8 * sizeof(float) * 2;

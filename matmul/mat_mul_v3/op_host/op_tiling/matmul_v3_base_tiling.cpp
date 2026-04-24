@@ -20,7 +20,7 @@
 #include "matmul_v3_l2_cache.h"
 #include "util/math_util.h"
 #include "log/log.h"
-#include "tiling_base/tiling_key.h"
+#include "op_host/tiling_key.h"
 #include "error_util.h"
 #include "op_cache_tiling.h"
 #include "runtime_kb_api.h"
@@ -238,7 +238,7 @@ ge::graphStatus MatmulV3BaseTiling::CheckArgs()
     }
 
     if (attrs->GetAttrNum() >= OP_IMPL_MODE_ATTR_NUM) {
-        OP_CHECK_NULL_WITH_CONTEXT(context_, attrs->GetAttrPointer<int32_t>(OP_IMPL_MODE_ATTR_INDEX - 1));
+        OP_CHECK_NULL_WITH_CONTEXT(context_, attrs->GetAttrPointer<int64_t>(OP_IMPL_MODE_ATTR_INDEX - 1));
         OP_CHECK_NULL_WITH_CONTEXT(context_, attrs->GetAttrPointer<bool>(OP_IMPL_MODE_ATTR_INDEX));
     }
     OP_CHECK_NULL_WITH_CONTEXT(context_, context_->GetOutputDesc(0));
@@ -391,9 +391,16 @@ static ge::graphStatus SetMatmulDimensions(
 static ge::graphStatus GetShape(const gert::TilingContext &context, MatmulV3Args &args)
 {
     // get transpose
-    args.isATrans = *context.GetAttrs()->GetAttrPointer<bool>(0);
-    args.isBTrans = *context.GetAttrs()->GetAttrPointer<bool>(1);
-
+    if (strcmp(context.GetNodeType(), "GemmV3") == 0) {
+        // GemmV3 OP_ATTR: alpha, beta, transposeX1, transposeX2, ...
+        args.isATrans = *context.GetAttrs()->GetAttrPointer<bool>(2);
+        args.isBTrans = *context.GetAttrs()->GetAttrPointer<bool>(3);
+    } else {
+        // Other OP_ATTR: transposeX1, transposeX2, ...
+        args.isATrans = *context.GetAttrs()->GetAttrPointer<bool>(0);
+        args.isBTrans = *context.GetAttrs()->GetAttrPointer<bool>(1);
+    }
+    
     // get (m, k, n)
     int64_t mkDims[TWO_BATCH_DIM];
     int64_t knDims[TWO_BATCH_DIM];
@@ -573,19 +580,19 @@ bool MatmulV3BaseTiling::NeedNd2NzVnchw(uint64_t outerSize, uint64_t innerSize, 
     return false;
 }
 
-ge::graphStatus MatmulV3BaseTiling::SelectNZTiling()
-{
-    if ((compileInfo_.supportL12BtBf16 || compileInfo_.supportL0c2out) && args_.bFormat == ge::FORMAT_FRACTAL_NZ) {
-        if (tilingSelect_ == TilingCalcSelect::ALL) {
-            tilingSelect_ = TilingCalcSelect::BASE;
-        } else if (tilingSelect_ != TilingCalcSelect::BASE) {
-            OP_LOGE(args_.opName, "weightNz don't support this tiling select yet.");
-            return ge::GRAPH_FAILED;
-        }
-    }
+ge::graphStatus MatmulV3BaseTiling::SelectNZTiling() 
+{ 
+    if (args_.bFormat == ge::FORMAT_FRACTAL_NZ && args_.bType != ge::DT_FLOAT && (compileInfo_.supportL12BtBf16 || compileInfo_.supportL0c2out)) { 
+        if (tilingSelect_ == TilingCalcSelect::ALL) { 
+            tilingSelect_ = TilingCalcSelect::BASE; 
+        } else if (tilingSelect_ != TilingCalcSelect::BASE) { 
+            OP_LOGE(args_.opName, "weightNz don't support this tiling select yet."); 
+            return ge::GRAPH_FAILED; 
+        } 
+    } 
 
-    return ge::GRAPH_SUCCESS;
-}
+    return ge::GRAPH_SUCCESS; 
+} 
 
 void MatmulV3BaseTiling::CalL1Tiling()
 {
@@ -710,8 +717,8 @@ ge::graphStatus MatmulV3BaseTiling::DoOpTiling()
         }
         return ge::GRAPH_SUCCESS;
     }
-    OP_TILING_CHECK(SelectNZTiling() != ge::GRAPH_SUCCESS, CUBE_INNER_ERR_REPORT(args_.opName, "invalid tiling select"),
-        return ge::GRAPH_FAILED);
+    OP_TILING_CHECK(SelectNZTiling() != ge::GRAPH_SUCCESS, CUBE_INNER_ERR_REPORT(args_.opName, "invalid tiling select"), 
+        return ge::GRAPH_FAILED);   
     DoBasicTiling();
     OptimizeBasicKernelStepK();
     SetNd2NzInfo();
@@ -803,7 +810,8 @@ void MatmulV3BaseTiling::OptimizeBasicKernelStepK()
         static_cast<uint64_t>(tilingEnable_.tilingEnableFullLoad),
         static_cast<uint64_t>(tilingEnable_.tilingEnableSplitCore),
         static_cast<uint64_t>(tilingEnable_.tilingEnableFixOpti), disableMixNd2nz,
-        static_cast<uint64_t>(TilingEnableSpecialOpti::BASE));
+        static_cast<uint64_t>(TilingEnableSpecialOpti::BASE),
+        static_cast<uint64_t>(TilingEnableFp32Addmm::FALSE));
     if (tilingEnable_.tilingEnableFullLoad == TilingEnableFullLoad::BASE &&
         tilingEnable_.tilingEnableSplitCore == TilingEnableSplitCore::BASE &&
         tilingEnable_.tilingEnableFixOpti == TilingEnableFixOpti::BASE && GetMixNd2nzType() == MixNd2NzType::NO_ND2NZ &&
@@ -1889,7 +1897,9 @@ bool MatmulV3BaseTiling::DoBL1FullLoadTiling()
     // mValue should be 16 times more than max of k/nValue, and kValue should be no more than 256
     bool validMK = args_.mValue > 16 * std::max(args_.kValue, args_.nValue) && args_.kValue <= 256;
     uint64_t biasSize = args_.hasBias ? runInfo_.baseN * GetSizeByDataType(ge::DT_FLOAT) : 0; // 默认最高精度保证BF16
-    bool bl1SizeValid = (compileInfo_.l1Size / NUM_HALF - biasSize) > args_.kValue * args_.nValue * bDtypeSize_;
+    uint64_t kAlignedValue = args_.isBTrans ? ops::CeilAlign(args_.kValue, BLOCK_BYTE_SIZE / bDtypeSize_) : ops::CeilAlign(args_.kValue, BASIC_ALIGN_16);
+    uint64_t nAlignedValue = args_.isBTrans ? ops::CeilAlign(args_.nValue, BASIC_ALIGN_16) : ops::CeilAlign(args_.nValue, BLOCK_BYTE_SIZE / bDtypeSize_);
+    bool bl1SizeValid = (compileInfo_.l1Size / NUM_HALF - biasSize) > kAlignedValue * nAlignedValue * bDtypeSize_;
     bool alignedBl1FullLoad = (supportNd2NzOnTheFly && !args_.nd2nzB);
     bool bl1FullLoadCheck = !validMK || (!alignedBl1FullLoad && !(nd2nzAUsingVnchwConv && bl1SizeValid));
     uint64_t mTailBlock = (args_.mValue / BASIC_BLOCK_SIZE_128) % 12; // 当baseM为128时，M方向上分核数量为12的尾块数量
@@ -2066,10 +2076,6 @@ bool MatmulV3BaseTiling::DoL2CacheTiling()
     runInfo_.l2Info.nTileBlock = nTileBlock;
     OP_LOGI(args_.opName, "Enter L2cache tile kernel.");
 
-    if (args_.bFormat == ge::FORMAT_FRACTAL_NZ) {
-        OP_LOGI(args_.opName, "Do not enter split K tile kernel when weightNz.");
-        return true;
-    }
     return false; // 进去单核切K逻辑
 }
 
@@ -2241,10 +2247,10 @@ MixNd2NzType MatmulV3BaseTiling::GetMixNd2nzType() // check different platform
 
 bool MatmulV3BaseTiling::IsSupportSingleCoreSplitSmallK(uint64_t xDim, uint64_t yDim) const
 {
-    // 条件0： A,B 矩阵数据仅支持 bf16/fp16, 矩阵格式支持 (ND,ND)
-    bool isDTypeFormatSupport = args_.aFormat == ge::FORMAT_ND && args_.bFormat == ge::FORMAT_ND &&
-                                (args_.aType == ge::DT_FLOAT16 || args_.aType == ge::DT_BF16) &&
-                                (args_.bType == ge::DT_FLOAT16 || args_.bType == ge::DT_BF16);
+    // 条件0： A,B 矩阵数据支持 bf16/fp16/fp32, 矩阵格式支持 (ND,ND),(ND,NZ)
+    bool isDTypeFormatSupport = args_.aFormat == ge::FORMAT_ND &&
+                                (args_.aType == ge::DT_FLOAT16 || args_.aType == ge::DT_BF16 || args_.aType == ge::DT_FLOAT) &&
+                                (args_.bType == ge::DT_FLOAT16 || args_.bType == ge::DT_BF16 || args_.bType == ge::DT_FLOAT);
     // 条件1： M,N 被128整除，K=1536 （对应DeepSeekV3 的Prefill阶段）
     bool isSmallKwithLargeMN = (args_.kValue == SINGLE_CORE_SPLIT_SMALL_K) &&
                             (args_.mValue % ALIGN_128 == 0 && args_.nValue % ALIGN_128 == 0);
@@ -2736,7 +2742,8 @@ void MatmulV3BaseTiling::DoTilingKey()
         static_cast<uint64_t>(tilingEnable_.tilingEnableFullLoad),
         static_cast<uint64_t>(tilingEnable_.tilingEnableSplitCore),
         static_cast<uint64_t>(tilingEnable_.tilingEnableFixOpti), disableMixNd2nz,
-        static_cast<uint64_t>(tilingEnable_.tilingEnableSpecialOpti));
+        static_cast<uint64_t>(tilingEnable_.tilingEnableSpecialOpti),
+        static_cast<uint64_t>(TilingEnableFp32Addmm::FALSE));
     OP_LOGI(args_.opName, "Tiling Key is 0x%x", tilingKey_);
 }
 

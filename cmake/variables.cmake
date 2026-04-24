@@ -9,7 +9,7 @@
 # ----------------------------------------------------------------------------
 
 # 算子类别清单
-set(OP_CATEGORY_LIST "matmul" "conv" "reliability" "activation" "foreach" "hash" "vfusion" "index" "loss" "norm" "optim" "pooling" "quant" "rnn" "control")
+set(OP_CATEGORY_LIST "matmul" "conv" "activation" "foreach" "hash" "vfusion" "index" "loss" "norm" "optim" "pooling" "quant" "rnn" "control")
 
 set(COMMON_NAME common_${PKG_NAME})
 set(OPHOST_NAME ophost_${PKG_NAME})
@@ -17,15 +17,9 @@ set(OPSTATIC_NAME cann_${PKG_NAME}_static)
 set(OPAPI_NAME opapi_${PKG_NAME})
 set(OPGRAPH_NAME opgraph_${PKG_NAME})
 set(ONNX_PLUGIN_NAME op_${PKG_NAME}_onnx_plugin)
+set(CUBE_UTILS_PLUGIN_NAME cube_utils_${PKG_NAME}_util)
 set(GRAPH_PLUGIN_NAME graph_plugin_${PKG_NAME})
 set(VENDOR_PACKAGE_NAME ${VENDOR_NAME}_nn)
-
-set(ACLNN_EXTRA_HEADERS "" CACHE STRING "Aclnn Extra Headers" FORCE)
-set(ACLNN_EXTRA_SRCS "" CACHE STRING "Aclnn Extra Sources" FORCE)
-
-if(NOT CANN_3RD_LIB_PATH)
-  set(CANN_3RD_LIB_PATH ${PROJECT_SOURCE_DIR}/build/third_party)
-endif()
 
 message(STATUS "System processor: ${CMAKE_SYSTEM_PROCESSOR}")
 if (${CMAKE_SYSTEM_PROCESSOR} MATCHES "x86_64")
@@ -86,25 +80,28 @@ if(ENABLE_CUSTOM)
   set(ES_INC_INSTALL_DIR              packages/vendors/${VENDOR_PACKAGE_NAME}/op_proto/es/include)
  	set(ES_LIB_INSTALL_DIR              packages/vendors/${VENDOR_PACKAGE_NAME}/op_proto/es/lib/linux/${CMAKE_SYSTEM_PROCESSOR})
   set(VERSION_INFO_INSTALL_DIR        packages/vendors/${VENDOR_PACKAGE_NAME}/)
-  set(PACK_CUSTOM_NAME                "cann-ops-nn-${VENDOR_NAME}-linux.${ARCH}")
+  set(PACK_CUSTOM_NAME                "cann-ops-nn-${VENDOR_NAME}_linux-${ARCH}")
 else()
   # built-in package install path
-  set(ACLNN_INC_INSTALL_DIR           opp/include/aclnnop)
-  set(ACLNN_OP_INC_INSTALL_DIR        opp/include/aclnnop/level2)
-  set(ACLNN_LIB_INSTALL_DIR           opp/built-in/op_impl/ai_core/tbe/op_api/lib/linux/${CMAKE_SYSTEM_PROCESSOR})
-  set(OPS_INFO_INSTALL_DIR            opp/built-in/op_impl/ai_core/tbe/config)
-  set(IMPL_INSTALL_DIR                opp/built-in/op_impl/ai_core/tbe/impl/ops_nn/ascendc)
-  set(IMPL_DYNAMIC_INSTALL_DIR        opp/built-in/op_impl/ai_core/tbe/impl/ops_nn/dynamic)
-  set(BIN_KERNEL_INSTALL_DIR          opp/built-in/op_impl/ai_core/tbe/kernel)
-  set(BIN_KERNEL_CONFIG_INSTALL_DIR   opp/built-in/op_impl/ai_core/tbe/kernel/config)
-  set(OPHOST_LIB_INSTALL_PATH         opp/built-in/op_impl/ai_core/tbe/op_host/lib/linux/${CMAKE_SYSTEM_PROCESSOR})
-  set(AICPU_KERNEL_IMPL               opp/built-in/op_impl/aicpu/kernel)
-  set(AICPU_JSON_CONFIG               opp/built-in/op_impl/aicpu/config)
+  set(OPP_PREFIX "opp")
+
+  set(ACLNN_INC_INSTALL_DIR           ${CMAKE_SYSTEM_PROCESSOR}-linux/include/aclnnop)
+  set(ACLNN_OP_INC_INSTALL_DIR        ${CMAKE_SYSTEM_PROCESSOR}-linux/include/aclnnop/level2)
+  set(ACLNN_LIB_INSTALL_DIR           ${CMAKE_SYSTEM_PROCESSOR}-linux/lib64)
+  set(OPS_INFO_INSTALL_DIR            ${OPP_PREFIX}/built-in/op_impl/ai_core/tbe/config)
+  set(IMPL_INSTALL_DIR                ${OPP_PREFIX}/built-in/op_impl/ai_core/tbe/impl/ops_nn/ascendc)
+  set(IMPL_DYNAMIC_INSTALL_DIR        ${OPP_PREFIX}/built-in/op_impl/ai_core/tbe/impl/ops_nn/dynamic)
+  set(BIN_KERNEL_INSTALL_DIR          ${OPP_PREFIX}/built-in/op_impl/ai_core/tbe/kernel)
+  set(BIN_KERNEL_CONFIG_INSTALL_DIR   ${OPP_PREFIX}/built-in/op_impl/ai_core/tbe/kernel/config)
+  set(OPHOST_LIB_INSTALL_PATH         ${OPP_PREFIX}/built-in/op_impl/ai_core/tbe/op_host/lib/linux/${CMAKE_SYSTEM_PROCESSOR})
+  set(AICPU_KERNEL_IMPL               ${OPP_PREFIX}/built-in/op_impl/aicpu/kernel)
+  set(AICPU_JSON_CONFIG               ${OPP_PREFIX}/built-in/op_impl/aicpu/config)
   set(OPTILING_LIB_INSTALL_DIR        ${OPHOST_LIB_INSTALL_PATH})
-  set(OPGRAPH_INC_INSTALL_DIR         opp/built-in/op_graph/inc)
-  set(OPGRAPH_LIB_INSTALL_DIR         opp/built-in/op_graph/lib/linux/${CMAKE_SYSTEM_PROCESSOR})
-  set(ONNX_PLUGIN_LIB_INSTALL_DIR     opp/built-in/framework/onnx)
-  set(VERSION_INFO_INSTALL_DIR        ops_nn)
+  set(OPGRAPH_INC_INSTALL_DIR         ${OPP_PREFIX}/built-in/op_graph/inc)
+  set(OPGRAPH_LIB_INSTALL_DIR         ${OPP_PREFIX}/built-in/op_graph/lib/linux/${CMAKE_SYSTEM_PROCESSOR})
+  set(ONNX_PLUGIN_LIB_INSTALL_DIR     ${OPP_PREFIX}/built-in/framework/onnx)
+  set(VERSION_INFO_INSTALL_DIR        ${CMAKE_SYSTEM_PROCESSOR}-linux)
+  set(WHL_INSTALL_DIR                 ops_nn)
 endif()
 
 # util path
@@ -169,6 +166,7 @@ set(OP_TILING_INCLUDE
   ${OPS_NN_DIR}
   ${OPS_NN_DIR}/common/inc
   ${OPS_NN_DIR}/common/inc/op_host
+  ${ASCEND_DIR}/include
 )
 
 set(OP_PROTO_INCLUDE
@@ -182,6 +180,7 @@ set(OP_PROTO_INCLUDE
   ${OPS_NN_DIR}/conv
   ${OPS_NN_DIR}/vfusion
   ${OPS_NN_DIR}/common/inc
+  ${ASCEND_DIR}/include
 )
 
 set(AICPU_INCLUDE

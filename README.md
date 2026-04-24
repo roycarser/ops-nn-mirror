@@ -1,9 +1,10 @@
 # ops-nn
 
 ## 🔥Latest News
-- [2026/01] 新增[QuickStart](QUICKSTART.md)，指导新手零基础入门算子项目部署（支持Docker环境）、算子开发和贡献流程。
-- [2025/12] 开源算子支持Ascend 950PR/Ascend 950DT/KirinX90，可以通过[CANN Simulator](docs/zh/debug/cann_simulator.md)仿真工具开发调试；优化指南类文档，聚焦[算子开发指南](docs/zh/develop/aicore_develop_guide.md)，明确最小交付件和关键示例代码，针对Ascend/samples仓算子提供迁移本项目的指导；新支持[稀疏4:2量化matmul算子](matmul/sparse4to2quant_matmul)，针对稀疏矩阵使能硬件加速能力。
-- [2025/11] 新支持算子[index_fill](index/index_fill/)、[masked_scatter](index/masked_scatter/)、[scatter](index/scatter/)、[tf_scatter_add](index/tf_scatter_add/)、[fused_cross_entropy_loss_with_max_sum](loss/fused_cross_entropy_loss_with_max_sum/)。
+
+- [2026/01] 新增[QuickStart](docs/QUICKSTART.md)，指导新手零基础入门算子项目部署（支持Docker环境）、算子开发和贡献流程。
+- [2025/12] 开源算子支持Ascend 950PR/Ascend 950DT/KirinX90，可以通过[CANN Simulator](./docs/zh/debug/cann_sim.md)仿真工具开发调试；优化指南类文档，聚焦[算子开发指南](docs/zh/develop/aicore_develop_guide.md)，明确最小交付件和关键示例代码，针对Ascend/samples仓算子提供迁移本项目的指导；新支持[稀疏4:2量化matmul算子](matmul/sparse4to2quant_matmul)，针对稀疏矩阵使能硬件加速能力。
+- [2025/11] 新支持算子[index_fill](../index/index_fill/)、[masked_scatter](index/masked_scatter/)、[scatter](index/scatter/)、[tf_scatter_add](index/tf_scatter_add/)、[fused_cross_entropy_loss_with_max_sum](loss/fused_cross_entropy_loss_with_max_sum/)。
 - [2025/10] 新增experimental目录，完善[贡献指南](CONTRIBUTING.md)，支持开发者调试并贡献自定义算子。
 - [2025/09] ops-nn项目首次上线，开源算子支持Atlas A2/A3系列产品。
 
@@ -20,28 +21,26 @@ ops-nn是[CANN](https://hiascend.com/software/cann) （Compute Architecture for 
 
 ## ⚡️快速入门
 
-若您希望**从零到一了解并快速体验项目**，请访问如下文档。可以先了解项目算子信息，再尝试算子调用、开发、贡献等。
+若您希望**从零到一快速体验**项目能力，请访问下述简易教程。
 
-1. [算子列表](docs/zh/op_list.md)：项目全量算子信息，方便快速查询。
-2. [QuickStart](QUICKSTART.md)：**基于WebIDE或Docker环境**提供极简快速上手指南，包括搭建环境、编译部署、算子调用/开发/调试、贡献等。
-
-    > **说明**：无论是WebIDE或Docker环境，默认提供最新商发版本CANN软件包，目前是CANN 8.5.0。若您想手动安装CANN包或体验master分支最新能力等，请参考[学习教程](#📖学习教程)中的步骤，完成环境搭建、编译执行、算子开发等操作。
+1. [环境部署](docs/zh/install/quick_install.md)：本文是**QuickStart和各类教程的操作前提**，请先完成基础环境搭建和源码下载。
+2. [QuickStart](docs/QUICKSTART.md)：针对源码编译、算子调用/开发/调试等关键能力，提供快速上手的简易指南。
 
 ## 📖学习教程
 
-若您已完成**快速入门**学习，对本项目有了一定认知，并希望**深入了解和体验项目**，请访问如下文档。
+若您已学习完**快速入门**章节，对本项目有一定认知，并希望**深入了解和体验项目**，请访问下述详细教程。
 
-这些文档提供了多样化场景和更全面的操作指导，方便您应用于各种AI业务场景。
+1. [算子列表](docs/zh/op_list.md)：提供全量算子信息，方便您查看算子分类和功能。
+2. [算子调用](docs/zh/invocation/quick_op_invocation.md)：提供多种源码编译和执行算子样例（包括执行UT）的方法。
+3. [算子开发](docs/zh/develop/aicore_develop_guide.md)：提供算子端到端开发指南，从零学习创建算子工程、实现Tiling和Kernel核心交付件。
+4. [算子调试调优](docs/zh/debug/op_debug_prof.md)：提供常见算子调试和调优方法，如DumpTensor、msProf、Simulator等。
 
-1. [环境部署](docs/zh/context/quick_install.md)：**基础环境搭建**指南，提供多种场景下CANN软件包安装方法，例如Docker部署、手动安装等。
-2. [算子调用](docs/zh/invocation/quick_op_invocation.md)：算子**源码编译和执行**指南，提供多种编译算子包以及运行算子的方法（包括执行算子样例和UT）等。
-3. [算子开发](docs/zh/develop/aicore_develop_guide.md)：基于项目工程**开发新算子**指南，从零学习创建算子工程、实现Tiling和Kernel核心交付件等。
-4. [算子调试调优](docs/zh/debug/op_debug_prof.md)：提供常见的算子**调试和调优**方法，如DumpTensor、msProf、Simulator等。
-
-除了上述指南，还提供了其他文档介绍，例如算子调用方式和流程、算子基本概念等，全量文档介绍请访问[docs](docs/README.md)。
+除了上述关键教程，还有其他文档介绍，例如算子调用方式、build参数说明、术语概念等，全量文档请访问[docs](docs/README.md)。
 
 ## 🔍目录结构
-关键目录如下，详细目录介绍参见[项目目录](./docs/zh/context/dir_structure.md)。
+
+关键目录如下，详细目录介绍参见[项目目录](./docs/zh/install/dir_structure.md)。
+
 ```
 ├── activation                         # activation类算子
 ├── cmake                              # 项目工程编译目录
@@ -60,7 +59,7 @@ ops-nn是[CANN](https://hiascend.com/software/cann) （Compute Architecture for 
 │   │   ├── examples                   # 算子使用示例
 │   │   ├── op_graph                   # 算子构图相关目录
 │   │   ├── op_host                    # 算子信息库、Tiling、InferShape相关实现目录
-│   │   │   └── op_api                 # 算子aclnn接口实现目录
+│   │   ├── op_api                 # 可选，算子aclnn接口实现目录，如未提供则表示此算子的aclnn接口会让工程自动生成
 │   │   ├── op_kernel                  # 算子Kernel目录
 │   │   ├── CMakeLists.txt             # 算子编译配置文件
 │   │   └── README.md                  # 算子介绍文档

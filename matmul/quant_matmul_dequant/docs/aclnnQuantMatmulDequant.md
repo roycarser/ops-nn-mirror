@@ -8,7 +8,7 @@
 |  <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>   |     ×    |
 |  <term>Atlas A2 训练系列产品/Atlas 800I A2 推理产品/A200I A2 Box 异构组件</term>     |     ×    |
 |  <term>Atlas 200I/500 A2 推理产品</term>    |     ×    |
-|  <term>Atlas 推理系列产品 </term>    |     √    |
+|  <term>Atlas 推理系列产品</term>    |     √    |
 |  <term>Atlas 训练系列产品</term>    |     ×    |
 
 ## 功能说明
@@ -39,6 +39,7 @@
     $$
       out = (x_{quantized}@weight_{quantized} + bias) * scale_{weight} * scale_{x}
     $$
+
   - 4.2 若输入的$scale_{weight}$数据类型为INT64, 则：
 
     $$
@@ -47,6 +48,7 @@
     $$
 
     特别说明：如果是上述4.2场景，说明$scale_{weight}$输入前已经和$scale_{x}$做过了矩阵乘运算，因此算子内部计算时省略了该步骤，这要求必须要是pertensor静态量化的场景。即输入前要对$scale_{weight}做如下处理得到INT64类型的数据：
+
     $$
     scale_{weight} = scale_{weight} * scale_{x} \\
     scale_{weight} = torch.tensor(np.frombuffer(scale_{weight}.numpy().astype(np.float32). \\tobytes(), dtype=np.int32).astype(np.int64))
@@ -84,13 +86,13 @@ aclnnStatus aclnnQuantMatmulDequant(
 
 - **参数说明**
 
-  <table style="undefined;table-layout: fixed; width: 1380px"><colgroup>
+  <table style="undefined;table-layout: fixed; width: 1491px"><colgroup>
   <col style="width: 201px">
-  <col style="width: 115px">
-  <col style="width: 200px">
-  <col style="width: 300px">
+  <col style="width: 120px">
+  <col style="width: 240px">
+  <col style="width: 350px">
   <col style="width: 177px">
-  <col style="width: 104px">
+  <col style="width: 120px">
   <col style="width: 138px">
   <col style="width: 145px">
   </colgroup>
@@ -126,6 +128,7 @@ aclnnStatus aclnnQuantMatmulDequant(
       <td>2、4</td>
       <td>√</td>
     </tr>
+      <tr>
       <td>weightScale（aclTensor*）</td>
       <td>输入</td>
       <td>表示weight的量化系数，公式中的scale_{weight}。</td>

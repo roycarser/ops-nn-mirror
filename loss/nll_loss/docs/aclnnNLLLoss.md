@@ -70,14 +70,14 @@ aclnnStatus aclnnNLLLoss(
 ## aclnnNLLLossGetWorkspaceSize
 
 - **参数说明**
-   <table style="undefined;table-layout: fixed; width: 1349px"><colgroup>
+   <table style="undefined;table-layout: fixed; width: 1372px"><colgroup>
     <col style="width: 158px">
     <col style="width: 120px">
     <col style="width: 253px">
     <col style="width: 283px">
     <col style="width: 218px">
-    <col style="width: 110px">
-    <col style="width: 102px">
+    <col style="width: 115px">
+    <col style="width: 120px">
     <col style="width: 145px">
     </colgroup>
     <thead>
@@ -137,8 +137,8 @@ aclnnStatus aclnnNLLLoss(
       <td>输入</td>
       <td>表示一个被忽略且不影响输入梯度的目标值。
       </td>
-      <td>INT64</td>
       <td>-</td>
+      <td>INT64</td>
       <td>-</td>
       <td>-</td>
       <td>-</td>
@@ -147,7 +147,7 @@ aclnnStatus aclnnNLLLoss(
       <td>out（aclTensor*）</td>
       <td>输出</td>
       <td>公式中的out。</td>
-      <td>当reduction为0（'none'）且self的shape为2维时，out shape为(N,), 否则为(1,)。</td>
+      <td>当reduction为0（none）且self的shape为2维时，out shape为(N,), 否则为(1,)。</td>
       <td>FLOAT、FLOAT16、BFLOAT16</td>
       <td>ND</td>
       <td>-</td>
@@ -157,7 +157,7 @@ aclnnStatus aclnnNLLLoss(
       <td>totalWeightOut（aclTensor*）</td>
       <td>输出</td>
       <td>公式中的totalWeightOut。</td>
-      <td>在reduction为非0(非'none')下输出值有效，shape为(1,)。</td>
+      <td>在reduction为非0(非none)下输出值有效，shape为(1,)。</td>
       <td>FLOAT、FLOAT16、BFLOAT16</td>
       <td>ND</td>
       <td>-</td>
@@ -192,10 +192,10 @@ aclnnStatus aclnnNLLLoss(
 
   第一段接口完成入参校验，出现以下场景时报错：
 
-    <table style="undefined;table-layout: fixed; width: 1244px"><colgroup>
-      <col style="width: 276px">
-      <col style="width: 132px">
-      <col style="width: 836px">
+    <table style="undefined;table-layout: fixed; width: 1150px"><colgroup>
+      <col style="width: 300px">
+      <col style="width: 134px">
+      <col style="width: 716px">
       </colgroup>
       <thead>
       <tr>
@@ -230,10 +230,10 @@ aclnnStatus aclnnNLLLoss(
 
 - **参数说明**
 
-  <table style="undefined;table-layout: fixed; width: 1244px"><colgroup>
-      <col style="width: 200px">
-      <col style="width: 162px">
-      <col style="width: 882px">
+  <table style="undefined;table-layout: fixed; width: 1151px"><colgroup>
+      <col style="width: 184px">
+      <col style="width: 134px">
+      <col style="width: 833px">
       </colgroup>
       <thead>
       <tr>
@@ -277,6 +277,7 @@ aclnnStatus aclnnNLLLoss(
 ## 调用示例
 
 示例代码如下，仅供参考，具体编译和执行过程请参考[编译与运行样例](../../../docs/zh/context/编译与运行样例.md)。
+
 ```Cpp
 #include <iostream>
 #include <vector>
@@ -438,4 +439,3 @@ int main() {
   return 0;
 }
 ```
-

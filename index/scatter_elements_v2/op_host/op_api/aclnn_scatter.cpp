@@ -24,7 +24,7 @@
 #include "level0/sort.h"
 #include "level0/arange.h"
 #include "level0/tensor_move.h"
-#include "index/scatter_update/op_host/op_api/scatter_update.h"
+#include "index/scatter_update/op_api/scatter_update.h"
 #include "../../../tf_scatter_add/op_host/op_api/tf_scatter_add.h"
 #include "../../../scatter_add_with_sorted/op_host/op_api/scatter_add_with_sorted.h"
 #include "../../../linear_index/op_host//op_api//linear_index.h"
@@ -322,10 +322,6 @@ static aclnnStatus ExecScatterNoTranspose(
     CHECK_RET(selfContiguous != nullptr, ACLNN_ERR_INNER_NULLPTR);
     auto indexContiguous = l0op::Contiguous(index, executor);
     CHECK_RET(indexContiguous != nullptr, ACLNN_ERR_INNER_NULLPTR);
-    // linear index，转换负数索引并输出int32索引
-    indexContiguous = l0op::LinearIndex(indexContiguous, selfContiguous, -1, false, executor);
-    CHECK_COND(indexContiguous != nullptr, ACLNN_ERR_INNER_NULLPTR, "LinearIndex failed!");
-    
     auto srcContiguous = l0op::Contiguous(src, executor);
     CHECK_RET(srcContiguous != nullptr, ACLNN_ERR_INNER_NULLPTR);
     auto reduction = GetReduceStr(reduce);
@@ -750,6 +746,13 @@ static aclnnStatus ExecScatterGetWorkspaceSize(
     return ret;
 }
 
+static void CheckFormat(const aclTensor* self) {
+    ge::Format selfStorageFormat = self->GetStorageFormat();
+    if (selfStorageFormat == ge::Format::FORMAT_FRACTAL_NZ) {
+        OP_LOGW("aclnnScatterValue/aclnnInplaceScatterValue doesn't support format NZ.");
+    }
+}
+
 static aclnnStatus ExecScatterValueGetWorkspaceSize(
     const aclTensor* self, int64_t dim, const aclTensor* index, const aclScalar* value, int64_t reduce, aclTensor* out,
     uint64_t* workspaceSize, aclOpExecutor** executor)
@@ -765,6 +768,9 @@ static aclnnStatus ExecScatterValueGetWorkspaceSize(
     CHECK_COND(
         isTensorComplex(self) || !isScalarComplex(value), ACLNN_ERR_PARAM_INVALID,
         "When value is COMPLEX, the data type of self must be COMPLEX.");
+
+    // 检查格式
+    CheckFormat(self);
 
     if (index->IsEmpty()) {
         auto selfContiguous = InitializeTensor(self, uniqueExecutor.get());

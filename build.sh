@@ -12,6 +12,9 @@ set -e
 RELEASE_TARGETS=("ophost" "opapi" "onnxplugin" "opgraph")
 
 SUPPORT_COMPUTE_UNIT_SHORT=("ascend031" "ascend035" "ascend310b" "ascend310p" "ascend910_93" "ascend950" "ascend910b" "ascend910" "kirinx90" "kirin9030" "mc62cm12a")
+declare -A SOC_TO_ARCH
+SOC_TO_ARCH=(["ascend310b"]="3002" ["ascend310p"]="2002" ["ascend910_93"]="2201" ["ascend910b"]="2201"
+            ["ascend950"]="3510" ["ascend910"]="1001" ["mc62cm12a"]="5102")
 # 对SUPPORT_COMPUTE_UNIT_SHORT按字符串长度从长到短排序，避免前缀匹配时出错
 SUPPORT_COMPUTE_UNIT_SHORT=($(printf '%s\n' "${SUPPORT_COMPUTE_UNIT_SHORT[@]}" | awk '{print length($0) " " $0}' | sort -rn | cut -d ' ' -f2-))
 TRIGER_UTS=()
@@ -21,9 +24,10 @@ SUPPORTED_SHORT_OPTS="hj:vO:uf:-:"
 
 # 所有支持的长选项
 SUPPORTED_LONG_OPTS=(
-  "help" "ops=" "soc=" "vendor_name=" "build-type=" "cov" "noexec" "no_aicpu" "opkernel" "opkernel_aicpu" "opkernel_aicpu_test" "static"
+  "help" "ops=" "soc=" "vendor_name=" "build-type=" "cov" "noexec" "noaicpu" "opkernel" "opkernel_aicpu" "opkernel_aicpu_test" "static"
    "jit" "pkg" "asan" "make_clean_all" "make_clean" "no_force"
   "ophost" "opgraph" "opapi" "run_example" "example_name=" "genop=" "genop_aicpu=" "experimental" "cann_3rd_lib_path=" "oom" "onnxplugin" "dump_cce"
+  "simulator" "bisheng_flags=" "kernel_template_input=" "module_extension=" "noaclnn"
 )
 
 source "./install_deps.sh"
@@ -158,12 +162,18 @@ usage() {
         echo "                           Set ascend third_party package install path, default ./third_party"
         echo "    --oom                  Build with oom mode on the kernel side, with options: '-g --cce-enable-oom'"
         echo "    --dump_cce             Dump kernel precompiled files (.i) for debugging"
+        echo "    --bisheng_flags=ccec_g,oom"
+        echo "                           Specify bisheng compiler flags (comma-separated for multiple)"
+        echo "    --kernel_template_input="args0=args0;args1=args1;args2=args2;args3=args3""
+        echo "                           Specify kernel template input arguments (semicolon-separated for multiple)"
         echo $dotted_line
         echo "Examples:"
         echo "    bash build.sh --pkg --soc=ascend910b --vendor_name=customize -j16 -O3"
         echo "    bash build.sh --pkg --ops=transpose_batch_mat_mul,fatrelu_mul --build-type=Debug"
         echo "    bash build.sh --pkg --soc=ascend910b --ops=transpose_batch_mat_mul --oom"
         echo "    bash build.sh --pkg --experimental --soc=ascend910b --ops=\${experimental_op}"
+        echo "    bash build.sh --pkg --experimental --soc=ascend910b --ops=\${experimental_op} --bisheng_flags=ccec_g,oom"
+        echo "    bash build.sh --pkg --soc=ascend910b --ops=transpose_batch_mat_mul --kernel_template_input="BATCH_SPLIT=0;PP_MAT_MUL_EINSUM_MODE=0;PERM_X1=2;PERM_X2=0""
         return
         ;;
       opkernel)
@@ -175,12 +185,17 @@ usage() {
         echo "    --build-type=<Type>    Specify build-type (Type options: Release/Debug), Default:Release"
         echo "    --oom                  Build with oom mode on the kernel side, with options: '-g --cce-enable-oom'"
         echo "    --dump_cce             Dump kernel precompiled files (.i) for debugging"
+        echo "    --bisheng_flags=ccec_g,oom"
+        echo "                           Specify bisheng compiler flags (comma-separated for multiple)"
         echo "    --no_force             Don't force dependency installation"
+        echo "    --kernel_template_input="args0=args0;args1=args1;args2=args2;args3=args3""
+        echo "                           Specify kernel template input arguments (semicolon-separated for multiple)"
         echo $dotted_line
         echo "Examples:"
         echo "    bash build.sh --opkernel --soc=ascend310p --ops=transpose_batch_mat_mul,fatrelu_mul"
         echo "    bash build.sh --opkernel --soc=ascend310p --ops=transpose_batch_mat_mul,fatrelu_mul --build-type=Debug"
         echo "    bash build.sh --opkernel --soc=ascend310p --ops=transpose_batch_mat_mul,fatrelu_mul --oom"
+        echo "    bash build.sh --opkernel --soc=ascend910b --ops=transpose_batch_mat_mul --kernel_template_input="BATCH_SPLIT=0;PP_MAT_MUL_EINSUM_MODE=0;PERM_X1=2;PERM_X2=0""
         return
         ;;
       opkernel_aicpu)
@@ -286,6 +301,7 @@ usage() {
         echo "    bash build.sh --run_example mat_mul_v3 eager --example_name=mm"
         echo "    bash build.sh --run_example mat_mul_v3 eager cust"
         echo "    bash build.sh --run_example mat_mul_v3 eager cust --vendor_name=custom"
+        echo "    bash build.sh --run_example mat_mul_v3 eager cust --vendor_name=custom --simulator"
         return
         ;;
       genop)
@@ -352,6 +368,9 @@ usage() {
   echo "    --genop_aicpu Create the initial directory for AI CPU op, like: --genop_aicpu=op_class/op_name"
   echo "    --oom Build with oom mode on the kernel side, with options: '-g --cce-enable-oom'"
   echo "    --dump_cce Dump kernel precompiled files (.i) for debugging"
+  echo "    --bisheng_flags Specify bisheng compiler config, like: --bisheng_flags=ccec_g,oom, use ',' to separate different compiler flags"
+  echo "    --kernel_template_input Specify kernel template input arguments, like: --kernel_template_input="args0=args0;args1=args1;args2=args2;args3=args3""
+  echo "                                                                                                  Use ';' to separate different kernel template args, can only specify a single kernel template input"
   echo "to be continued ..."
 }
 
@@ -432,6 +451,13 @@ check_param() {
     fi
   fi
 
+  if [ -n "$BISHENG_FLAGS" ]; then
+    if [[ "$ENABLE_MSSANITIZER" == "TRUE" || "$ENABLE_OOM" == "TRUE" || "$ENABLE_DUMP_CCE" == "TRUE" ]]; then
+      echo "[ERROR] --bisheng_flags= cannot be used with --mssanitizer, --oom, --dump_cce"
+      exit 1
+    fi
+  fi
+
   if [[ "$ENABLE_MSSANITIZER" == "TRUE" && "$ENABLE_OOM" == "TRUE" ]]; then
     echo "[ERROR] --mssanitizer cannot be used with --oom"
     exit 1
@@ -445,6 +471,13 @@ check_param() {
   if $(echo ${USE_CMD} | grep -wq "opkernel_aicpu") && $(echo ${USE_CMD} | grep -wq "jit"); then
     echo "[ERROR] --opkernel_aicpu cannot be used with --jit"
     exit 1
+  fi
+
+  if [ -n "$KERNEL_TEMPLATE_INPUT" ]; then
+    if [[ -z "${COMPILED_OPS}" || "$COMPILED_OPS" == *","* ]]; then
+      echo "[ERROR] --kernel_template_input must be used with --ops= and can only specify a single operator"
+      exit 1
+    fi
   fi
 }
 
@@ -560,11 +593,8 @@ make_clean() {
 }
 
 make_clean_all() {
-  if [ -d "$BUILD_PATH" ]; then
-    cd $BUILD_PATH
-    rm -rf ./*
-  fi
-  [ -d "$BUILD_OUT_PATH" ] && rm -rf $BUILD_OUT_PATH
+  clean_build
+  clean_build_out
   print_success "make clean all success!"
 }
 
@@ -583,6 +613,7 @@ checkopts() {
   EXAMPLE_NAME=""
   EXAMPLE_MODE=""
   USE_CMD="$*"
+  KERNEL_TEMPLATE_INPUT=""
 
   BUILD_TYPE="Release"
   ENABLE_MSSANITIZER=FALSE
@@ -599,6 +630,7 @@ checkopts() {
   ENABLE_JIT=FALSE
   ENABLE_TEST=FALSE
   ENABLE_EXPERIMENTAL=FALSE
+  ENABLE_TORCH_EXTENSION=FALSE
   NO_FORCE=FALSE
   AICPU_ONLY=FALSE
   NO_AICPU=FALSE
@@ -615,6 +647,8 @@ checkopts() {
   OP_KERNEL_AICPU=FALSE
   ENABLE_CREATE_LIB=FALSE
   ENABLE_RUN_EXAMPLE=FALSE
+  ENABLE_SIMULATOR=FALSE
+  BISHENG_FLAGS=""
   BUILD_LIBS=()
   UT_TARGES=()
 
@@ -623,6 +657,8 @@ checkopts() {
   GENOP_TYPE=""
   GENOP_NAME=""
   GENOP_BASE=${BASE_PATH}
+  MODULE_EXT=""
+  NO_ACLNN=FALSE
 
   if [ $# -eq 0 ]; then
     usage "$SHOW_HELP"
@@ -751,11 +787,15 @@ checkopts() {
         build-type=*)
           BUILD_TYPE=${OPTARG#*=}
           ;;
+        module_extension=*)
+          MODULE_EXT=${OPTARG#*=}
+          ;;
+        noaclnn) NO_ACLNN=TRUE ;;
         mssanitizer) ENABLE_MSSANITIZER=FALSE ;;
         oom) ENABLE_OOM=TRUE ;;
         dump_cce) ENABLE_DUMP_CCE=TRUE ;;
         noexec) ENABLE_UT_EXEC=FALSE ;;
-        no_aicpu) NO_AICPU=TRUE ;;
+        noaicpu) NO_AICPU=TRUE ;;
         cov) ENABLE_COVERAGE=TRUE;;
         opkernel)
           ENABLE_BINARY=TRUE
@@ -781,16 +821,21 @@ checkopts() {
           ;;
         asan) ENABLE_ASAN=TRUE ;;
         run_example) ENABLE_RUN_EXAMPLE=TRUE
-          step=0
-          set_example_opt $2 $3 $4
-          shift $step
+          set_example_opt "$@"
           ;;
-        experimental) ENABLE_EXPERIMENTAL=TRUE ;;
+        experimental) ENABLE_EXPERIMENTAL=TRUE; ENABLE_TORCH_EXTENSION=TRUE ;;
         make_clean_all) make_clean_all
                         exit 0 ;;
         make_clean) make_clean
                     exit 0 ;;
         no_force) NO_FORCE=TRUE ;;
+        simulator) ENABLE_SIMULATOR=TRUE ;;
+        bisheng_flags=*)
+          BISHENG_FLAGS=${OPTARG#*=}
+          ;;
+        kernel_template_input=*)
+          KERNEL_TEMPLATE_INPUT=${OPTARG#*=}
+          ;;
         *)
           ## 如果不在RELEASE_TARGETS，不做处理
           if ! in_array "$OPTARG" "${RELEASE_TARGETS[@]}"; then
@@ -841,17 +886,17 @@ checkopts() {
 }
 
 set_example_opt() {
-  if [[ -n $1 && $1 != -* ]]; then
-    OP_NAME=$1
-    step=$((step + 1))
+  if [[ $OPTIND -le $# && ${!OPTIND} != -* ]]; then
+    OP_NAME=${!OPTIND}
+    ((OPTIND++))
   fi
-  if [[ -n $2 && $2 != -* ]]; then
-    EXAMPLE_MODE=$2
-    step=$((step + 1))
+  if [[ $OPTIND -le $# && ${!OPTIND} != -* ]]; then
+    EXAMPLE_MODE=${!OPTIND}
+    ((OPTIND++))
   fi
-  if [[ -n $3 && $3 != -* ]]; then
-    PKG_MODE=$3
-    step=$((step + 1))
+  if [[ $OPTIND -le $# && ${!OPTIND} != -* ]]; then
+    PKG_MODE=${!OPTIND}
+    ((OPTIND++))
   fi
 }
 
@@ -881,6 +926,10 @@ assemble_cmake_args() {
   CMAKE_ARGS="$CMAKE_ARGS -DENABLE_UT_EXEC=${ENABLE_UT_EXEC}"
   CMAKE_ARGS="$CMAKE_ARGS -DENABLE_CUSTOM=${ENABLE_CUSTOM}"
   CMAKE_ARGS="$CMAKE_ARGS -DENABLE_STATIC=${ENABLE_STATIC}"
+  CMAKE_ARGS="$CMAKE_ARGS -DMODULE_EXT=${MODULE_EXT}"
+  if [[ "$NO_ACLNN" == "TRUE" ]]; then
+    CMAKE_ARGS="$CMAKE_ARGS -DNO_ACLNN=TRUE"
+  fi
   custom_cmake_args
   if [[ "$ENABLE_ASAN" == "TRUE" ]]; then
     set +e
@@ -911,6 +960,9 @@ assemble_cmake_args() {
   CMAKE_ARGS="$CMAKE_ARGS -DOP_KERNEL_UT=${OP_KERNEL_UT}"
   CMAKE_ARGS="$CMAKE_ARGS -DOP_KERNEL_AICPU_UT=${OP_KERNEL_AICPU_UT}"
   CMAKE_ARGS="$CMAKE_ARGS -DUT_TEST_ALL=${UT_TEST_ALL}"
+  if [[ "x$BISHENG_FLAGS" != "x" ]]; then
+    CMAKE_ARGS="$CMAKE_ARGS -DBISHENG_FLAGS=${BISHENG_FLAGS}"
+  fi
   if [[ -n $COMPUTE_UNIT ]]; then
     IFS=',' read -ra COMPUTE_UNIT <<<"$COMPUTE_UNIT"
     COMPUTE_UNIT_SHORT=""
@@ -928,6 +980,8 @@ assemble_cmake_args() {
       print_error "The soc [${COMPUTE_UNIT}] is not support."
       usage
       exit 1
+    else
+      COMPUTE_UNIT_SHORT="${COMPUTE_UNIT_SHORT%?}"
     fi
 
     echo "COMPUTE_UNIT: ${COMPUTE_UNIT_SHORT}"
@@ -936,6 +990,56 @@ assemble_cmake_args() {
     CMAKE_ARGS="$CMAKE_ARGS -UASCEND_COMPUTE_UNIT"
   fi
   CMAKE_ARGS="$CMAKE_ARGS -DCANN_3RD_LIB_PATH=${CANN_3RD_LIB_PATH}"
+  if [[ "x$KERNEL_TEMPLATE_INPUT" != "x" ]]; then
+    CMAKE_ARGS="$CMAKE_ARGS -DKERNEL_TEMPLATE_INPUT=${KERNEL_TEMPLATE_INPUT}"
+    NO_FORCE=TRUE
+    CMAKE_ARGS="$CMAKE_ARGS -DNO_FORCE=${NO_FORCE}"
+  fi
+}
+
+cmake_init() {
+  if [ ! -d "${BUILD_PATH}" ]; then
+    mkdir -p "${BUILD_PATH}"
+  fi
+
+  [ -f "${BUILD_PATH}/CMakeCache.txt" ] && rm -f ${BUILD_PATH}/CMakeCache.txt
+
+  cd "${BUILD_PATH}" && cmake -DCANN_3RD_LIB_PATH=${CANN_3RD_LIB_PATH} -DENABLE_EXPERIMENTAL=${ENABLE_EXPERIMENTAL} -DPREPROCESS_ONLY=ON ..
+}
+
+clean_build() {
+  if [ -d "${BUILD_PATH}" ]; then
+    rm -rf ${BUILD_PATH}/*
+  fi
+}
+
+clean_build_out() {
+  if [ -d "${BUILD_OUT_PATH}" ]; then
+    rm -rf ${BUILD_OUT_PATH}/*
+  fi
+}
+
+clean_build_binary() {
+  if [ -d "${BUILD_PATH}/tbe" ]; then
+    find ${BUILD_PATH}/tbe/ -mindepth 1 -not -path "${BUILD_PATH}/tbe/ascendc" -not -path "${BUILD_PATH}/tbe/ascendc/*" -delete
+  fi
+  if [ -d "${BUILD_PATH}/autogen" ]; then
+    rm -rf ${BUILD_PATH}/autogen/
+  fi
+  if [ -d "${BUILD_PATH}/binary" ]; then
+    rm -rf ${BUILD_PATH}/binary/
+  fi
+  if [ -d "${BUILD_PATH}/es_packages" ]; then
+    rm -rf ${BUILD_PATH}/es_packages/
+  fi
+  if [ -d "${BUILD_PATH}/es_nn_build" ]; then
+    rm -rf ${BUILD_PATH}/es_nn_build/
+  fi
+  if [[ "$ENABLE_STATIC" == "TRUE" ]]; then
+    if [ -d "${BUILD_PATH}/static_library_files" ]; then
+      rm -rf ${BUILD_PATH}/static_library_files/
+    fi
+  fi
 }
 
 build_static_lib() {
@@ -975,7 +1079,7 @@ build_lib() {
   echo "Start to build libs ${BUILD_LIBS[@]}"
 
   git submodule init && git submodule update
-  cd "${BUILD_PATH}" && cmake ${CMAKE_ARGS} -UENABLE_STATIC ..
+  cd "${BUILD_PATH}" && cmake ${CMAKE_ARGS} -UENABLE_STATIC .. &>/dev/null
   local all_targets=$(cmake --build . --target help)
   for lib in "${BUILD_LIBS[@]}"; do
     if grep -wq "$lib" <<< "${all_targets}"; then
@@ -1018,7 +1122,7 @@ build_binary() {
   echo "arch=$(arch)" >> ${BUILD_PATH}/opp/scene.info
   echo "--------------- build tiling end ---------------"
 
-  cd "${BUILD_PATH}" && cmake .. ${CMAKE_ARGS}
+  cd "${BUILD_PATH}" && cmake .. ${CMAKE_ARGS} &>/dev/null
 
   echo "--------------- prepare build start ---------------"
   local all_targets=$(cmake --build . --target help)
@@ -1050,7 +1154,7 @@ build_binary() {
     [[ -f "$OPC_CMD_FILE" ]] && opc_list_num=$(wc -l < "$OPC_CMD_FILE") || opc_list_num=0
     CMAKE_ARGS="${CMAKE_ARGS} -DOPC_NUM_${unit}=${opc_list_num}"
   done
-  cd "$BUILD_PATH" && cmake .. ${CMAKE_ARGS}
+  cd "$BUILD_PATH" && cmake .. ${CMAKE_ARGS} &>/dev/null
 
   if grep -wq "binary" <<< "${all_targets}"; then
     cmake --build . --target binary -- ${VERBOSE} -j $THREAD_NUM
@@ -1068,6 +1172,7 @@ build_binary() {
 
 build_pkg() {
   echo "--------------- build pkg start ---------------"
+  clean_build_out
   local all_targets=$(cmake --build . --target help)
   if [[ "$ENABLE_BINARY" == "FALSE" ]]; then # for jit need dynamic py
     if grep -wq "ascendc_impl_gen" <<< "${all_targets}"; then
@@ -1075,7 +1180,7 @@ build_pkg() {
       if [ $? -ne 0 ]; then exit 1; fi
     fi
   fi
-  cd "${BUILD_PATH}" && cmake ${CMAKE_ARGS} ..
+  cd "${BUILD_PATH}" && cmake ${CMAKE_ARGS} .. &>/dev/null
 
   if echo "${all_targets}" | grep -wq "build_es_nn"; then
  	     cmake --build . --target build_es_nn -- ${VERBOSE} -j $THREAD_NUM
@@ -1091,9 +1196,25 @@ parse_op_dependencies() {
   echo "Start to parse op dependencies for ${COMPILED_OPS}"
 
   cd "${BUILD_PATH}"
-  python3 ${BASE_PATH}/scripts/util/dependency_parser.py --ops ${COMPILED_OPS} -p ${BUILD_PATH}
-  echo $dotted_line
+  PE_OPS=""
+  for category_dir in "${BASE_PATH}/experimental"/*/; do
+    for op_dir in "$category_dir"*/; do
+      if [ -n "$op_dir/CMakeLists.txt" ]; then
+        if grep -qE "^\s*add_sources\s*\(" "$op_dir/CMakeLists.txt" 2>/dev/null; then
+          category_name=$(basename "$category_dir")
+          op_name=$(basename "$op_dir")
+          if [ -n "$PE_OPS" ]; then
+            PE_OPS="$PE_OPS;$category_name,$op_name"
+          else
+            PE_OPS="$category_name,$op_name"
+          fi
+        fi
+      fi
+    done
+  done
+  python3 ${BASE_PATH}/scripts/util/dependency_parser.py --ops ${COMPILED_OPS} -p ${BUILD_PATH} --peo ${PE_OPS}
   echo "End to parse op dependencies"
+  echo $dotted_line
 }
 
 set_ci_mode() {
@@ -1129,7 +1250,7 @@ build_ut() {
     mkdir -p "${BUILD_PATH}"
   fi
   # 删除ai_core下的json文件，强制UT执行时重新生成json文件，避免多次执行之间的干扰
-  cd "${BUILD_PATH}"  && rm -rf ${BUILD_PATH}/tbe/op_info_cfg/ai_core/* && cmake ${CMAKE_ARGS} ..
+  cd "${BUILD_PATH}"  && rm -rf ${BUILD_PATH}/tbe/op_info_cfg/ai_core/* && cmake ${CMAKE_ARGS} .. &>/dev/null
   local enable_cov=FALSE
   if [[ "$CI_MODE" == "TRUE" ]]; then
     # ci 模式
@@ -1168,6 +1289,39 @@ build_ut() {
 
 build_single_example() {
   echo "Start to run example,op_name:${OP_NAME} example_name:${example} mode:${EXAMPLE_MODE}."
+
+  if [[ "${ENABLE_SIMULATOR}" == "TRUE" ]]; then
+    if [[ "${EXAMPLE_MODE}" == "graph" ]]; then
+      usage "run_example"
+      exit 1
+    fi
+    # 根据soc设置仿真库路径
+    if [[ -n $COMPUTE_UNIT_SHORT ]]; then
+      IFS=';' read -ra COMPUTE_UNITS <<<"$COMPUTE_UNIT_SHORT"
+      unit=${COMPUTE_UNITS[0]}
+    else
+      unit="ascend910b"
+    fi
+    if [[ "${SOC_TO_ARCH[${unit}]}x" == "x" ]]; then
+      usage "run_example"
+      exit 1
+    fi
+    SIMULATOR_PATH="${ASCEND_HOME_PATH}/${ARCH_INFO}-linux/simulator/dav_${SOC_TO_ARCH[${unit}]}/lib"
+    if [[ ! -f ${SIMULATOR_PATH}/libruntime_camodel.so ]]; then
+      echo "[ERROR] ${SIMULATOR_PATH}/libruntime_camodel.so not found."
+      exit 1
+    fi
+    if [[ ! -f ${SIMULATOR_PATH}/libnpu_drv_camodel.so ]]; then
+      echo "[ERROR] ${SIMULATOR_PATH}/libnpu_drv_camodel.so not found."
+      exit 1
+    fi
+    rm -fr ${BUILD_PATH}/simulator
+    mkdir -p ${BUILD_PATH}/simulator
+    ln -sf ${SIMULATOR_PATH}/libruntime_camodel.so ${BUILD_PATH}/simulator/libruntime.so
+    ln -sf ${SIMULATOR_PATH}/libnpu_drv_camodel.so ${BUILD_PATH}/simulator/libascend_hal.so
+    echo "[INFO] Successfully linked simulator libraries: ${SIMULATOR_PATH}/libruntime_camodel.so, ${SIMULATOR_PATH}/libnpu_drv_camodel.so"
+    export LD_LIBRARY_PATH=${BUILD_PATH}/simulator:${SIMULATOR_PATH}:${LD_LIBRARY_PATH}
+  fi
 
   if [[ "${EXAMPLE_MODE}" == "eager" ]]; then
     if [[ "${PKG_MODE}" == "cust" ]]; then
@@ -1224,7 +1378,7 @@ build_example() {
 
   OLDIFS=$IFS
   IFS=$'\n'
-  {  
+  {
     files=($(find ../ -path "*/${OP_NAME}/examples/${pattern}*.cpp" -not -path "*/opgen/template/*" | grep ${grep_word} "experimental"))
   } || {
     files=()
@@ -1398,12 +1552,12 @@ main() {
   assemble_cmake_args
   echo "CMAKE_ARGS: ${CMAKE_ARGS}"
 
+  clean_build_binary
   if [[ "$ENABLE_RUN_EXAMPLE" == "TRUE" ]]; then
     build_example
     exit $?
   fi
-  mkdir -p "${BUILD_PATH}"
-  cd "${BUILD_PATH}" && rm -f CMakeCache.txt && cmake -DENABLE_EXPERIMENTAL=${ENABLE_EXPERIMENTAL} -DPREPROCESS_ONLY=ON ..
+  cmake_init
 
   if [[ "$CI_MODE" == "TRUE" ]]; then
     set_ci_mode
@@ -1411,7 +1565,8 @@ main() {
     parse_op_dependencies
   fi
 
-  cd "${BUILD_PATH}" && cmake ${CMAKE_ARGS} -DPREPROCESS_ONLY=OFF ..
+  cd "${BUILD_PATH}" && cmake ${CMAKE_ARGS} -DENABLE_GEN_ACLNN=ON -DPREPROCESS_ONLY=OFF ..
+  cd "${BUILD_PATH}" && cmake ${CMAKE_ARGS} -DENABLE_GEN_ACLNN=OFF -DPREPROCESS_ONLY=OFF .. &>/dev/null
 
   if [[ "$ENABLE_TEST" == "TRUE" ]]; then
     build_ut
@@ -1431,6 +1586,9 @@ main() {
     build_pkg
     if [[ "$ENABLE_STATIC" == "TRUE" ]]; then
       package_static
+    fi
+    if [[ "$ENABLE_TORCH_EXTENSION" == "TRUE" ]]; then
+      bash "${BASE_PATH}/scripts/torch_extension/build_experimental.sh" --ops=$COMPILED_OPS -j$THREAD_NUM --soc=$COMPUTE_UNIT
     fi
   fi
 }

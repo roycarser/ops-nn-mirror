@@ -20,7 +20,7 @@
 #include <util/math_util.h>
 #include <log/log.h>
 #include <graph/utils/type_utils.h>
-#include "tiling_base/tiling_templates_registry.h"
+#include "op_host/tiling_templates_registry.h"
 
 namespace Ops {
 namespace NN {
@@ -88,6 +88,12 @@ ge::graphStatus Conv3DBackpropFilterV2StreamKTiling::DoOpTiling()
            << "dilation is [1, 1, " << runInfo_.dilation_d << ", " << runInfo_.dilation_h << ", " << runInfo_.dilation_w << "]. ";
         OP_LOGE(opName_, "StreamK tiling template do optiling failed. Exceed L1 buffer size, please check the shape and attribute. %s", ss.str().c_str());
         return ge::GRAPH_FAILED;
+    }
+    if (blockTiling_.isSplitKernelHW) {
+        std::stringstream ss;
+        ss << "The conv3d has entered the large kernel processing process. A timeout AiCore error may be reported. "
+           << "If a timeout AiCore error is reported, reduce the conv3d specifications and try again.";
+        OP_LOGD(opName_, "%s", ss.str().c_str());
     }
     AdjustSmallCaseBaseBlock();
     DoStreamKTiling();

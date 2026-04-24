@@ -15,7 +15,7 @@
 
 #include "log/log.h"
 #include "tiling/tiling_api.h"
-#include "tiling_base/tiling_key.h"
+#include "op_host/tiling_key.h"
 #include "util/platform_util.h"
 #include "util/math_util.h"
 #include "gather_nd_tiling_arch35.h"
@@ -270,7 +270,7 @@ ge::graphStatus GatherNdSimtTiling::GetShapeAttrsInfo() {
 }
 
 
-bool GatherNdSimtTiling::IsGaAllLoad() {
+bool GatherNdSimtTiling::IsGaAllLoad() const {
   int64_t ubBlockSize = static_cast<int64_t>(GetUbBlockSize(context_));
   int64_t ubSize = static_cast<int64_t>(ubSize_) + static_cast<int64_t>(DCACHE_SIZE);
   int64_t aSize = static_cast<int64_t>(gatherSize_) * static_cast<int64_t>(xDtypeSize_);

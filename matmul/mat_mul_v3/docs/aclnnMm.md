@@ -8,7 +8,7 @@
 | <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>     |    √     |
 | <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term> |    √     |
 | <term>Atlas 200I/500 A2 推理产品</term>                      |    ×     |
-| <term>Atlas 推理系列产品 </term>                             |    √     |
+| <term>Atlas 推理系列产品</term>                             |    √     |
 | <term>Atlas 训练系列产品</term>                              |    √     |
 
 ## 功能说明
@@ -23,6 +23,7 @@
 ## 函数原型
 
 每个算子分为[两段式接口](../../../docs/zh/context/两段式接口.md)，必须先调用“aclnnMmGetWorkspaceSize”接口获取计算所需workspace大小以及包含了算子计算流程的执行器，再调用“aclnnMm”接口执行计算。
+
 ```cpp
 aclnnStatus aclnnMmGetWorkspaceSize(
   const aclTensor   *self,
@@ -32,6 +33,7 @@ aclnnStatus aclnnMmGetWorkspaceSize(
   uint64_t          *workspaceSize,
   aclOpExecutor     **executor)
 ```
+
 ```cpp
 aclnnStatus aclnnMm(
   void           *workspace,
@@ -39,6 +41,7 @@ aclnnStatus aclnnMm(
   aclOpExecutor  *executor,
   aclrtStream    stream)
 ```
+
 ## aclnnMmGetWorkspaceSize
 
 - **参数说明：**
@@ -148,7 +151,7 @@ aclnnStatus aclnnMm(
     - cubeMathType=1，当输入数据类型为FLOAT32时，会转换为HFLOAT32计算，当输入为其他数据类型时不做处理；
     - cubeMathType=2，当输入数据类型为BFLOAT16时不支持该选项；
     - cubeMathType=3，当输入数据类型为FLOAT32时，会转换为HFLOAT32计算，当输入为其他数据类型时不支持该选项。
-    - cubeMathType=4时不做处理。
+    - cubeMathType=4，当输入数据类型为FLOAT32，m轴等于1或者n轴等于1且k轴大于512时，会使用vector核进行计算，以提高计算结果的精度（该方式在部分场景下会导致算子性能发生劣化）。
 
 - **返回值：**
 
@@ -185,10 +188,10 @@ aclnnStatus aclnnMm(
     </tr>
   </tbody>
   </table>
+
 ## aclnnMm
 
 - **参数说明：**
-
 
   <div style="overflow-x: auto;">
   <table style="undefined;table-layout: fixed; width: 1030px"><colgroup>
@@ -196,7 +199,7 @@ aclnnStatus aclnnMm(
   <col style="width: 130px">
   <col style="width: 650px">
   </colgroup>
-  <table><thead>
+  <thead>
     <tr>
       <th>参数名</th>
       <th>输入/输出</th>
@@ -227,12 +230,12 @@ aclnnStatus aclnnMm(
   </table>
   </div>
 
-
 - **返回值：**
 
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 
 ## 约束说明
+
 - 确定性说明:
   - <term>Atlas 训练系列产品</term>、<term>Atlas 推理系列产品</term>、<term>Ascend 950PR/Ascend 950DT</term>：aclnnMm默认确定性实现。
 
@@ -245,6 +248,7 @@ aclnnStatus aclnnMm(
 ## 调用示例
 
 示例代码如下，仅供参考，具体编译和执行过程请参考[编译与运行样例](../../../docs/zh/context/编译与运行样例.md)。
+
 ```Cpp
 #include <iostream>
 #include <vector>

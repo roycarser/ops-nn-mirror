@@ -10,7 +10,7 @@
 | <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>     |    √    |
 | <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>     |    √     |
 | <term>Atlas 200I/500 A2 推理产品</term>                      |    ×     |
-| <term>Atlas 推理系列产品 </term>                             |    ×     |
+| <term>Atlas 推理系列产品</term>                             |    ×     |
 | <term>Atlas 训练系列产品</term>                              |    ×   |
 
 ## 功能说明
@@ -19,6 +19,7 @@
   根据输入词频logits、topK/topP/minP采样参数、随机采样权重分布q，进行topK-topP-minP-sample采样计算。当输入isNeedSampleResult为false时，输出每个batch的最大词频logitsSelectIdx，以及topK-topP-minP采样后的词频分布logitsTopKPSelect；当输入isNeedSampleResult为true时，输出topK-topP-minP采样后的中间计算结果logitsIdx和logitsSortMasked，其中logitsSortMasked为词频logits经过topK-topP-minP采样计算后的中间结果，logitsIdx为logitsSortMasked在logits中对应的索引。
 
   算子包含四个可单独使能，但上下游处理关系保持不变的采样算法（从原始输入到最终输出）：TopK采样、TopP采样、MinP采样、指数采样（本文档中Sample所指）。目前支持以下计算场景。如下表所示：
+  
   | 计算场景 | TopK采样 | TopP采样 | minP采样 | 指数分布采样 | 输出中间计算结果 |备注|
   | :-------:| :------:|:-------:|:-------:|:-------:|:-------:|:-------:|
   |Softmax-Argmax采样|×|×|×|×|×|对输入logits按每个batch，取SoftMax后取最大结果|
@@ -358,6 +359,7 @@ aclnnStatus aclnnTopKTopPSampleV2(
         <td>-</td>
         <td>-</td>
       </tr>
+      <tr>
         <td>isNeedLogits</td>
         <td>输入</td>
         <td>表示控制logitsTopKPselect的输出条件，建议设置为0。</td>
@@ -367,7 +369,7 @@ aclnnStatus aclnnTopKTopPSampleV2(
         <td>-</td>
         <td>-</td>
       </tr>
-      </tr>
+      <tr>
         <td>topKGuess</td>
         <td>输入</td>
         <td>表示每个batch在尝试topP部分遍历采样logits时的候选logits大小。</td>
@@ -377,7 +379,7 @@ aclnnStatus aclnnTopKTopPSampleV2(
         <td>-</td>
         <td>-</td>
       </tr>
-      </tr>
+      <tr>
         <td>ksMax</td>
         <td>输入</td>
         <td>表示每个batch在topK采样时最大topK值，必须为正整数。</td>
@@ -387,7 +389,7 @@ aclnnStatus aclnnTopKTopPSampleV2(
         <td>-</td>
         <td>-</td>
       </tr>
-      </tr>
+      <tr>
         <td>inputIsLogits</td>
         <td>输入</td>
         <td>表示输入的logits是否未进行归一化，默认为true。</td>
@@ -397,7 +399,7 @@ aclnnStatus aclnnTopKTopPSampleV2(
         <td>-</td>
         <td>-</td>
       </tr>
-      </tr>
+      <tr>
         <td>isNeedSampleResult</td>
         <td>输入</td>
         <td>表示是否输出中间计算结果，默认为false。</td>
@@ -407,7 +409,7 @@ aclnnStatus aclnnTopKTopPSampleV2(
         <td>-</td>
         <td>-</td>
       </tr>
-      </tr>
+      <tr>
         <td>logitsSelectIdx</td>
         <td>输出</td>
         <td>表示经过topK-topP-minP-sample计算流程后，每个batch中词频最大元素max(probsOpt[batch, :])在输入logits中的位置索引。</td>
@@ -417,7 +419,7 @@ aclnnStatus aclnnTopKTopPSampleV2(
         <td>1</td>
         <td>√</td>
       </tr>
-      </tr>
+      <tr>
         <td>logitsTopKPSelect</td>
         <td>输出</td>
         <td>表示经过topK-topP-minP计算流程后，输入logits中剩余未被过滤的logits。</td>
@@ -427,7 +429,7 @@ aclnnStatus aclnnTopKTopPSampleV2(
         <td>1</td>
         <td>√</td>
       </tr>
-      </tr>
+      <tr>
         <td>logitsIdx</td>
         <td>输出</td>
         <td>表示经过topK-topP-minP计算流程后，每个batch的中间采样结果在输入logits中的位置索引。</td>
@@ -437,7 +439,7 @@ aclnnStatus aclnnTopKTopPSampleV2(
         <td>1</td>
         <td>√</td>
       </tr>
-      </tr>
+      <tr>
         <td>logitsSortMasked</td>
         <td>输出</td>
         <td>表示经过topK-topP-minP计算流程后，每个batch的中间采样结果。</td>
@@ -472,7 +474,7 @@ aclnnStatus aclnnTopKTopPSampleV2(
 
 - **返回值：**
 
-  aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。  
+  aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 
   第一段接口完成入参校验，出现以下场景时报错：
 

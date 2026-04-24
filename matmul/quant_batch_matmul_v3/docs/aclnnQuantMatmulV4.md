@@ -1,22 +1,24 @@
 # aclnnQuantMatmulV4
 
+**须知：该接口后续版本会废弃，请使用最新aclnnQuantMatmulV5接口。**
+
 ## 产品支持情况
 
 | 产品                                                         |  是否支持   |
 | :----------------------------------------------------------- |:-------:|
-| <term>Ascend 950PR/Ascend 950DT</term>                             |    √    |
-| <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>     |    √    |
-| <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term> |    √    |
+| <term>Ascend 950PR/Ascend 950DT</term>                             |    ✓    |
+| <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>     |    ✓    |
+| <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term> |    ✓    |
 | <term>Atlas 200I/500 A2 推理产品</term>                      |    ×    |
-| <term>Atlas 推理系列产品 </term>                             |    √    |
+| <term>Atlas 推理系列产品</term>                             |    ✓    |
 | <term>Atlas 训练系列产品</term>                              |    ×    |
 
 ## 功能说明
 
-- 接口功能：兼容aclnnQuantMatmulV3接口功能，在其基础上支持K-C && K-T[量化模式](../../../docs/zh/context/量化介绍.md)。完成量化的矩阵乘计算，最小支持输入维度为2维，最大支持输入维度为6维。相似接口有aclnnMm（仅支持2维Tensor作为输入的矩阵乘）和aclnnBatchMatMul（仅支持三维的矩阵乘，其中第一维是Batch维度）。
+- 接口功能：兼容aclnnQuantMatmulV3接口功能，并在其基础上支持K-C && K-T [量化模式](../../../docs/zh/context/量化介绍.md)。完成量化的矩阵乘计算，最小支持输入维度为2维，最大支持输入维度为6维。相似接口有aclnnMm（仅支持2维Tensor作为输入的矩阵乘）和aclnnBatchMatMul（仅支持三维的矩阵乘，其中第一维是Batch维度）。
 - 计算公式：
   - <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>、<term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>、<term>Ascend 950PR/Ascend 950DT</term>：
-    - 无pertoken无bias：
+    - 无pertoken、无bias：
 
       $$
       out = x1@x2 * scale + offset
@@ -40,13 +42,13 @@
       out = x1@x2 * scale * pertokenScaleOptional
       $$
 
-    - pertoken， bias INT32（此场景无offset）：
+    - pertoken、bias INT32（此场景无offset）：
 
       $$
       out = (x1@x2 + bias) * scale * pertokenScaleOptional
       $$
 
-    - pertoken， bias BFLOAT16/FLOAT16/FLOAT32（此场景无offset）：
+    - pertoken、bias BFLOAT16/FLOAT16/FLOAT32（此场景无offset）：
 
       $$
       out = x1@x2 * scale * pertokenScaleOptional + bias
@@ -59,13 +61,14 @@
       out = x1@x2 * scale + offset
       $$
 
-    - bias int32：
+    - bias INT32：
 
       $$
       out = (x1@x2 + bias) * scale + offset
       $$
 
 ## 函数原型
+
 每个算子分为[两段式接口](../../../docs/zh/context/两段式接口.md)，必须先调用“aclnnQuantMatmulV4GetWorkspaceSize”接口获取计算所需workspace大小以及包含了算子计算流程的执行器，再调用“aclnnQuantMatmulV4”接口执行计算。
 
 ```cpp
@@ -94,7 +97,7 @@ aclnnStatus aclnnQuantMatmulV4(
 ## aclnnQuantMatmulV4GetWorkspaceSize
 
 - **参数说明：**
-  <table style="undefined;table-layout: fixed; width: 1552px"><colgroup>
+  <table style="table-layout: fixed; width: 1552px"><colgroup>
   <col style="width: 198px">
   <col style="width: 121px">
   <col style="width: 220px">
@@ -130,7 +133,7 @@ aclnnStatus aclnnQuantMatmulV4(
       <td>INT8、INT32、INT4</td>
       <td>ND</td>
       <td>2-6</td>
-      <td>x</td>
+      <td>×</td>
   </tr>
   <tr>
       <td>x2</td>
@@ -148,9 +151,9 @@ aclnnStatus aclnnQuantMatmulV4(
         </ul>
       </td>
       <td>INT8、INT32、INT4</td>
-      <td>ND</td>
-      <td>2-6</td>
-      <td>x</td>
+      <td>ND、NZ</td>
+      <td>2-6（ND）<br>4-8（NZ）</td>
+      <td>×</td>
   </tr>
   <tr>
       <td>scale</td>
@@ -238,10 +241,10 @@ aclnnStatus aclnnQuantMatmulV4(
             <li>NZ格式下：</li>
                 <li>transposeX2为true时shape为：（batch，k1，n1，n0，k0），batch可不存在，其中k0 = 32，n0 = 16，x1 shape中的k和x2 shape中的k1需要满足以下关系：ceil（k / 32） = k1。</li>
                 <li>transposeX2为false情况下各个维度表示：（batch，n1，k1，k0，n0），batch可不存在，其中k0 = 16，n0 = 32，x1 shape中的k和x2 shape中的k1需要满足以下关系：ceil（k / 16） = k1。</li>
-        </ul>
+      </ul>
       </td>
       <td>BOOL</td>
-      <td>ND</td>
+      <td>-</td>
       <td>-</td>
       <td>-</td>
     </tr>
@@ -263,7 +266,7 @@ aclnnStatus aclnnQuantMatmulV4(
       <td>-</td>
       <td>-</td>
       <td>-</td>
-      <td>✓</td>
+      <td>-</td>
     </tr>
     <tr>
       <td>executor</td>
@@ -278,8 +281,8 @@ aclnnStatus aclnnQuantMatmulV4(
   </tbody></table>
   
   - <term>Atlas 推理系列产品</term>：
-    - x1与x2的最后一维大小不能超过65535（x1的最后一维指transposeX1为true时的m或transposeX1为false时的k，x2的最后一维指transposeX2为true时的k或transposeX2为false时的n。
- 	- x1数据类型支持INT8。
+    - x1与x2的最后一维大小不能超过65535（x1的最后一维指transposeX1为true时的m或transposeX1为false时的k，x2的最后一维指transposeX2为true时的k或transposeX2为false时的n）。
+    - x1数据类型支持INT8。
     - x2数据类型支持INT8，为NZ格式时，不支持transposeX2为false的场景。
     - bias数据类型支持INT32。
     - scale数据类型支持UINT64、INT64。
@@ -288,7 +291,7 @@ aclnnStatus aclnnQuantMatmulV4(
 
   - <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>、<term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>：
     - x1与x2的最后一维大小不能超过65535。
-	- x1数据类型支持INT8、INT32、INT4。当数据类型为INT32、INT4时，为INT4量化场景，当前仅支持2-6维ND格式，transposeX1为false情况。其中当x1数据类型为INT4时，维度表示：（batch，m，k），要求k为偶数，当x1数据类型为INT32时，每个INT32数据存放8个INT4数据，对应维度表示：（batch，m，k // 8），要求k为8的倍数。
+    - x1数据类型支持INT8、INT32、INT4。当数据类型为INT32、INT4时，为INT4量化场景，当前仅支持2-6维ND格式，transposeX1为false情况。其中当x1数据类型为INT4时，维度表示：（batch，m，k），要求k为偶数，当x1数据类型为INT32时，每个INT32数据存放8个INT4数据，对应维度表示：（batch，m，k // 8），要求k为8的倍数。
     - x2数据类型支持INT8、INT32、INT4。当数据类型为INT32、INT4时，为INT4量化场景，当前仅支持2维ND格式。
     - 数据类型为INT4时，在transposeX2为true情况下各个维度表示：（n，k），要求k为偶数；在transposeX2为false情况下各个维度表示：（k，n），要求n为偶数。
     - 数据类型为INT32时，每个INT32数据存放8个INT4数据，在transposeX2为true情况下各个维度表示：（n，k // 8），要求k为8的倍数；在transposeX2为false情况下各个维度表示：（k，n // 8），要求n为8的倍数。
@@ -297,12 +300,11 @@ aclnnStatus aclnnQuantMatmulV4(
     - x1和x2为INT32、INT4时，transposeX1仅支持false。
     - out数据类型支持FLOAT16、INT8、BFLOAT16、INT32。
   - <term>Ascend 950PR/Ascend 950DT</term>：
-	- x1数据类型支持INT8。
-    - x2数据类型支持INT8，当最后两根轴其中一根轴为1（即n=1或k=1）时，x2不支持私有格式，仅支持ND格式。
+    - x1数据类型支持INT8、INT4。
+    - x2数据类型支持INT8、INT4，当最后两根轴其中一根轴为1（即n=1或k=1）时，x2不支持私有格式，仅支持ND格式。
     - bias数据类型支持INT32，BFLOAT16，FLOAT16，FLOAT32。
     - out数据类型支持FLOAT16、INT8、BFLOAT16、INT32。
     - x2为ND格式时，当输入x1为m=0的空tensor或x2为n=0的空tensor时，输出为空tensor；x2为FRACTAL_NZ格式时，当输入x1中m=0的空tensor时，输出为空tensor。
-
 
 - **返回值：**
 
@@ -310,7 +312,7 @@ aclnnStatus aclnnQuantMatmulV4(
 
   第一段接口完成入参校验，出现以下场景时报错：
 
-    <table style="undefined;table-layout: fixed; width: 1030px"><colgroup>
+    <table style="table-layout: fixed; width: 1030px"><colgroup>
     <col style="width: 262px">
     <col style="width: 121px">
     <col style="width: 819px">
@@ -336,7 +338,7 @@ aclnnStatus aclnnQuantMatmulV4(
         <td>x1、x2、bias、scale、offset或out的shape不满足校验条件。</td>
     </tr>
     <tr>
-        <td>x1、x2、bias、x2Scale、x2Offset或out是空tensor。</td>
+        <td>x1、x2、bias、scale、offset或out是空tensor。</td>
     </tr>
     </tbody>
     </table>
@@ -344,7 +346,7 @@ aclnnStatus aclnnQuantMatmulV4(
 ## aclnnQuantMatmulV4
 
 - **参数说明：**
-    <table style="undefined;table-layout: fixed; width: 1030px"><colgroup>
+    <table style="table-layout: fixed; width: 1030px"><colgroup>
     <col style="width: 153px">
     <col style="width: 121px">
     <col style="width: 880px">
@@ -384,6 +386,7 @@ aclnnStatus aclnnQuantMatmulV4(
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 
 ## 约束说明
+
 - 确定性说明：
   - <term>Atlas 训练系列产品</term>、<term>Atlas 推理系列产品</term>：aclnnQuantMatmulV4默认确定性实现。
   - <term>Ascend 950PR/Ascend 950DT</term>: aclnnQuantMatmulV4默认确定性实现。
@@ -394,6 +397,7 @@ aclnnStatus aclnnQuantMatmulV4(
   2.当原始ND的后两维中存在某一维度为1时，不建议转NZ格式，默认x2为非连续，且仅支持x2为非连续的tensor。
 
 输入和输出支持以下数据类型组合：
+
 - <term>Atlas 推理系列产品</term>：
 
   | x1 | x2 | scale | offset | bias | pertokenScaleOptional | out |
@@ -425,6 +429,9 @@ aclnnStatus aclnnQuantMatmulV4(
   | INT8 | INT8 | FLOAT32/BFLOAT16 | null | null/INT32/FLOAT32/BFLOAT16 | null/FLOAT32 | BFLOAT16 |
   | INT8 | INT8 | FLOAT32 | null | null/INT32/FLOAT32/FLOAT16 | FLOAT32 | FLOAT16 |
   | INT8 | INT8 | FLOAT32/BFLOAT16 | null | null/INT32 | null | INT32 |
+  | INT4 | INT4 | UINT64/INT64 | null | null/INT32 | null | FLOAT16 |
+  | INT4 | INT4 | FLOAT32/BFLOAT16 | null | null/INT32/FLOAT32/BFLOAT16 | FLOAT32 | BFLOAT16 |
+  | INT4 | INT4 | FLOAT32 | null | null/INT32/FLOAT32/FLOAT16 | FLOAT32 | FLOAT16 |
 
 ## 调用示例
 
@@ -432,7 +439,7 @@ aclnnStatus aclnnQuantMatmulV4(
 
 - <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>、<term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>、<term>Ascend 950PR/Ascend 950DT</term>：
 
-  ```Cpp
+  ```cpp
   #include <iostream>
   #include <memory>
   #include <vector>
@@ -643,7 +650,7 @@ aclnnStatus aclnnQuantMatmulV4(
 - <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>、<term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>：
 x2为NZ格式场景(transposeX2=false)。
 
-  ```Cpp
+  ```cpp
   #include <iostream>
   #include <memory>
   #include <vector>
@@ -934,7 +941,7 @@ x2为NZ格式场景(transposeX2=false)。
 
 x2为NZ格式场景(transposeX2=true)。
 
-  ```Cpp
+  ```cpp
   #include <iostream>
   #include <memory>
   #include <vector>
@@ -1256,7 +1263,7 @@ x2为NZ格式场景(transposeX2=true)。
 - <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>、<term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>：
 INT4量化场景(x1和x2数据类型为INT4，transposeX2=false)。
 
-  ```Cpp
+  ```cpp
   #include <iostream>
   #include <memory>
   #include <vector>

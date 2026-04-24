@@ -94,16 +94,17 @@ ge::graphStatus InferShape4AvgPoolV2Grad(gert::InferShapeContext* context)
 
     auto padding_mode = attrs->GetAttrPointer<char>(ATTR_PADDING_MODE_POS);
     OP_CHECK_NULL_WITH_CONTEXT(context, padding_mode);
-    OP_CHECK_IF(
-        !strcmp(padding_mode, "SAME") && !strcmp(padding_mode, "VALID") && !strcmp(padding_mode, "CALCULATED"),
-        OP_LOGE(context->GetNodeName(),"attr padding_mode(%s) only support SAME、 VALID and CALCULATED", padding_mode), return GRAPH_FAILED);
+    OP_CHECK_IF(strcmp(padding_mode, "SAME") != 0 && strcmp(padding_mode, "VALID") != 0 &&
+        strcmp(padding_mode, "CALCULATED") != 0, OP_LOGE(context->GetNodeName(),
+                "attr padding_mode(%s) only support SAME, VALID and CALCULATED", padding_mode),
+        return GRAPH_FAILED);
 
     auto ksize = attrs->GetAttrPointer<gert::ContinuousVector>(ATTR_KERNEL_POS);
     OP_CHECK_NULL_WITH_CONTEXT(context, ksize);
     OP_CHECK_IF(
         ksize->GetSize() != ATTR_LIST_SHAPE_SIZE,
         OP_LOGE(context->GetNodeName(), "Length of ksize %lu must be 4!", ksize->GetSize()), return GRAPH_FAILED);
-    auto ksize_data = reinterpret_cast<const int64_t*>(ksize->GetData());
+    auto ksize_data = static_cast<const int64_t*>(ksize->GetData());
 
     if (dataFormatStr == "NCHW") {
         OP_CHECK_IF(ksize_data[IDX_ZERO] != ONE,
@@ -120,13 +121,13 @@ ge::graphStatus InferShape4AvgPoolV2Grad(gert::InferShapeContext* context)
                 OP_LOGE(context->GetNodeName(), "Pooling ksize[3] %ld must be 1.", ksize_data[IDX_THREE]),
                 return GRAPH_FAILED);
     }
-    
+
     auto strides = attrs->GetAttrPointer<gert::ContinuousVector>(ATTR_STRIDE_POS);
     OP_CHECK_NULL_WITH_CONTEXT(context, strides);
     OP_CHECK_IF(
         strides->GetSize() != ATTR_LIST_SHAPE_SIZE,
         OP_LOGE(context->GetNodeName(), "Length of strides %lu must be 4!", strides->GetSize()), return GRAPH_FAILED);
-    auto strides_data = reinterpret_cast<const int64_t*>(strides->GetData());
+    auto strides_data = static_cast<const int64_t*>(strides->GetData());
 
     if (dataFormatStr == "NCHW") {
         OP_CHECK_IF(strides_data[IDX_ZERO] != ONE,
@@ -147,13 +148,14 @@ ge::graphStatus InferShape4AvgPoolV2Grad(gert::InferShapeContext* context)
     const gert::Tensor* inputShape0 = context->GetInputTensor(IDX_ORIGIN_INPUT);
     OP_CHECK_NULL_WITH_CONTEXT(context, inputShape0);
     size_t inputDimNum = static_cast<size_t>(inputShape0->GetOriginShape().GetShapeSize());
+    const int32_t* shapeValue = inputShape0->GetData<int32_t>();
     OP_CHECK_IF(
-        inputDimNum != CHW_DIMS || inputDimNum != NCHW_DIMS,
+        inputDimNum != CHW_DIMS && inputDimNum != NCHW_DIMS,
         OP_LOGE(context->GetNodeName(), "input dim num should be 3 or 4, but get %zu.", inputDimNum),
         return GRAPH_FAILED);
     const gert::Shape* inputShape1 = context->GetInputShape(IDX_ORIGIN_INPUT);
     OP_CHECK_NULL_WITH_CONTEXT(context, inputShape1);
-    
+
     gert::Shape* OutShape = context->GetOutputShape(IDX_OUTPUT);
     OP_CHECK_NULL_WITH_CONTEXT(context, OutShape);
 
@@ -168,6 +170,10 @@ ge::graphStatus InferShape4AvgPoolV2Grad(gert::InferShapeContext* context)
 
     OutShape->SetDimNum(inputDimNum);
 
+    for (size_t idx = 0; idx < inputDimNum; ++idx) {
+        OutShape->SetDim(idx, shapeValue[idx]);
+    }
+
     OP_LOGD(context->GetNodeName(), "runtime2.0 end AvgPoolV2Grad infershape");
     return ge::GRAPH_SUCCESS;
 }
@@ -178,7 +184,7 @@ static ge::graphStatus InferDataType4AvgPoolV2Grad(gert::InferDataTypeContext* c
         return GRAPH_FAILED;
     }
 
-    const ge::DataType xDtype = context->GetInputDataType(0);
+    const ge::DataType xDtype = context->GetInputDataType(1);
     context->SetOutputDataType(0, xDtype);
     return GRAPH_SUCCESS;
 }

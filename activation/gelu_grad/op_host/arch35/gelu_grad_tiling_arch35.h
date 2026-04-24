@@ -17,11 +17,11 @@
 
 #include "register/tilingdata_base.h"
 #include "atvoss/broadcast/broadcast_tiling.h"
-#include "tiling_base/tiling_base.h"
+#include "op_host/tiling_base.h"
 
+namespace optiling {
 using Ops::NN::Optiling::TilingBaseClass;
 using namespace Ops::Base;
-namespace optiling {
 
 class GeluGradTiling : public TilingBaseClass {
 public:

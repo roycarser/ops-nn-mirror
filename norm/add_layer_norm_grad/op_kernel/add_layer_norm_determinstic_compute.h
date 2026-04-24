@@ -18,25 +18,26 @@ namespace AddLayerNormGrad {
 using namespace AscendC;
 constexpr int64_t DOUBLE_BUFFER = 2;
 constexpr int64_t ROW_TEMPLATE = 180;
-constexpr int64_t COL_TEMPLATE = 64;  // 因为Add mask的原因不太好调整
+constexpr int64_t COL_TEMPLATE = 64;
 constexpr int64_t UB_SIZE = 180 * 1024 + 2 * DOUBLE_BUFFER * COL_TEMPLATE * sizeof(float);
 constexpr int64_t FLOAT_ALIGN = 8;
 constexpr int64_t MAX_REPEAT_TIMES = 255;
 constexpr uint64_t B32_REPEAT_STRIDE = 8;
+constexpr uint64_t UINT16_MAX_VALUE = 65535;
 
 class AddLayerNormGradDeterminsticCompute {
 public:
   __aicore__ inline AddLayerNormGradDeterminsticCompute(){};
   __aicore__ inline void initBuffer(TPipe& pipe,GlobalTensor<float>& pdGammaOutTensorGM,GlobalTensor<float>& pdBetaOutTensorGM,GlobalTensor<float>& workspaceGM,int64_t workspaceNum) {
     pipe_ = pipe;
-    pipe_.InitBuffer(queueGammaIn_, DOUBLE_BUFFER, ROW_TEMPLATE * COL_TEMPLATE * sizeof(float));
     pipe_.InitBuffer(queueGammaOut_, DOUBLE_BUFFER, COL_TEMPLATE * sizeof(float));
-    pipe_.InitBuffer(queueBetaIn_, DOUBLE_BUFFER, ROW_TEMPLATE * COL_TEMPLATE * sizeof(float));
+    pipe_.InitBuffer(queueGammaIn_, DOUBLE_BUFFER, ROW_TEMPLATE * COL_TEMPLATE * sizeof(float));
     pipe_.InitBuffer(queueBetaOut_, DOUBLE_BUFFER, COL_TEMPLATE * sizeof(float));
-    pdGammaOutTensorGM_ = pdGammaOutTensorGM;
+    pipe_.InitBuffer(queueBetaIn_, DOUBLE_BUFFER, ROW_TEMPLATE * COL_TEMPLATE * sizeof(float));
     pdBetaOutTensorGM_ = pdBetaOutTensorGM;
-    workspaceGM_ = workspaceGM;
+    pdGammaOutTensorGM_ = pdGammaOutTensorGM;
     workspaceNum_ = workspaceNum;
+    workspaceGM_ = workspaceGM;
   }
 
   __aicore__ inline void FinalProcessDeterministic(int64_t tcolAlignV, int64_t tblockNum, int64_t tcol) {
@@ -47,20 +48,20 @@ public:
     buffer2_ = queueGammaOut_.AllocTensor<float>();
     buffer3_ = queueBetaIn_.AllocTensor<float>();
     buffer4_ = queueBetaOut_.AllocTensor<float>();
-    int64_t colcycleCount = (colAlignV_ + COL_TEMPLATE - 1) / COL_TEMPLATE;
-    int64_t colcyclePerBlockCount = (colcycleCount + GetBlockNum() - 1) / GetBlockNum();
-    int64_t rowcycleCount = (row_ + ROW_TEMPLATE - 1) / ROW_TEMPLATE;
+    int64_t colCycleCount = (colAlignV_ + COL_TEMPLATE - 1) / COL_TEMPLATE;
+    int64_t colCyclePerBlockCount = (colCycleCount + GetBlockNum() - 1) / GetBlockNum();
+    int64_t rowCycleCount = (row_ + ROW_TEMPLATE - 1) / ROW_TEMPLATE;
     int64_t colSize = COL_TEMPLATE;
     int64_t rowSize = ROW_TEMPLATE;
     int64_t taskId = 0;
-    for (int64_t blocktaskId = 0; blocktaskId < colcyclePerBlockCount; blocktaskId++) {
+    for (int64_t blocktaskId = 0; blocktaskId < colCyclePerBlockCount; blocktaskId++) {
         taskId = blocktaskId * GetBlockNum() + GetBlockIdx();
-        if (taskId < colcycleCount) {
-            if (taskId == colcycleCount - 1) {
+        if (taskId < colCycleCount) {
+            if (taskId == colCycleCount - 1) {
                 colSize = col_ - COL_TEMPLATE * taskId;
             }
-            for(int64_t i = 0; i < rowcycleCount; i++) {
-                if (i == rowcycleCount - 1) {
+            for(int64_t i = 0; i < rowCycleCount; i++) {
+                if (i == rowCycleCount - 1) {
                     rowSize = row_ - ROW_TEMPLATE * i;
                 }
                 copyIn(taskId,i,colSize,rowSize);
@@ -72,39 +73,95 @@ public:
             break;
         }
     }
-    queueGammaIn_.FreeTensor(buffer1_);
     queueGammaOut_.FreeTensor(buffer2_);
-    queueBetaIn_.FreeTensor(buffer3_);
+    queueGammaIn_.FreeTensor(buffer1_);
     queueBetaOut_.FreeTensor(buffer4_);
+    queueBetaIn_.FreeTensor(buffer3_);
   }
 
-  __aicore__ inline void copyIn(int64_t colIndex,int64_t rowIndex, int64_t colSize, int64_t rowSize) {
+  __aicore__ inline void copyIn(int64_t colIndex, int64_t rowIndex, int64_t colSize, int64_t rowSize) {
     uint8_t rightPad = 0;
-    bool isPad = false;
     int64_t colSizeMod = colSize % FLOAT_ALIGN;
-    // 尾核补齐对齐
     if (colSizeMod != 0) {
         rightPad = FLOAT_ALIGN - colSizeMod;
-        isPad = true;
     }
+    
+    int64_t srcStrideValue = (colAlignV_ * workspaceNum_ - colSize) / FLOAT_ALIGN;
+    int64_t dstStrideValue = (COL_TEMPLATE - (colSize + rightPad)) / FLOAT_ALIGN;
+    int64_t offset = (colIndex * COL_TEMPLATE) + rowIndex * colAlignV_ * workspaceNum_ * ROW_TEMPLATE;
+
 #if __CCE_AICORE__ == 220 || __CCE_AICORE__ == 310
     if ASCEND_IS_AIV {
-#endif
-      DataCopyParams intriParams;
-      intriParams.blockCount = rowSize;
-      intriParams.blockLen   = (colSize + FLOAT_ALIGN - 1) / FLOAT_ALIGN;
-      intriParams.srcStride  = (colAlignV_ * workspaceNum_ - colSize) / FLOAT_ALIGN;
-      intriParams.dstStride  = (COL_TEMPLATE - (colSize + rightPad)) / FLOAT_ALIGN;
-      TEventID eventID = GetTPipePtr()->AllocEventID<HardEvent::V_MTE2>();
-      SetFlag<HardEvent::V_MTE2>(eventID);
-      WaitFlag<HardEvent::V_MTE2>(eventID);
-      GetTPipePtr()->ReleaseEventID<HardEvent::V_MTE2>(eventID);
-      int64_t offset = (colIndex * COL_TEMPLATE) + rowIndex * colAlignV_ * workspaceNum_ * ROW_TEMPLATE;
-      DataCopy(buffer1_, workspaceGM_[offset], intriParams);
-      DataCopy(buffer3_, workspaceGM_[offset + colAlignV_], intriParams);
-#if __CCE_AICORE__ == 220 || __CCE_AICORE__ == 310
+      copyInWithPad(offset, colSize, rowSize, rightPad, dstStrideValue);
+    }
+#else
+    if (static_cast<uint64_t>(srcStrideValue) <= UINT16_MAX_VALUE && 
+        static_cast<uint64_t>(dstStrideValue) <= UINT16_MAX_VALUE) {
+      copyInWithParams(offset, colSize, rowSize, srcStrideValue, dstStrideValue);
+    } else {
+      copyInByRow(offset, colSize, rowSize, rightPad);
     }
 #endif
+  }
+
+  __aicore__ inline void copyInWithPad(int64_t offset, int64_t colSize, int64_t rowSize, uint8_t rightPad, int64_t dstStrideValue) {
+    TEventID eventID = GetTPipePtr()->AllocEventID<HardEvent::V_MTE2>();
+    SetFlag<HardEvent::V_MTE2>(eventID);
+    WaitFlag<HardEvent::V_MTE2>(eventID);
+    GetTPipePtr()->ReleaseEventID<HardEvent::V_MTE2>(eventID);
+    
+    DataCopyExtParams intriParams;
+    intriParams.blockCount = static_cast<uint16_t>(rowSize);
+    intriParams.blockLen = static_cast<uint32_t>(colSize * sizeof(float));
+    intriParams.srcStride = static_cast<uint32_t>((colAlignV_ * workspaceNum_ - colSize) * sizeof(float));
+    intriParams.dstStride = static_cast<uint32_t>(dstStrideValue);
+    intriParams.rsv = 0;
+    DataCopyPadExtParams<float> padParams;
+    padParams.isPad = false;
+    padParams.leftPadding = 0;
+    padParams.rightPadding = rightPad;
+    padParams.paddingValue = 0.0f;
+    DataCopyPad(buffer1_, workspaceGM_[offset], intriParams, padParams);
+    DataCopyPad(buffer3_, workspaceGM_[offset + colAlignV_], intriParams, padParams);
+  }
+
+  __aicore__ inline void copyInWithParams(int64_t offset, int64_t colSize, int64_t rowSize, int64_t srcStrideValue, int64_t dstStrideValue) {
+    DataCopyParams intriParams;
+    intriParams.blockCount = static_cast<uint16_t>(rowSize);
+    intriParams.blockLen = static_cast<uint16_t>((colSize + FLOAT_ALIGN - 1) / FLOAT_ALIGN);
+    intriParams.srcStride = static_cast<uint16_t>(srcStrideValue);
+    intriParams.dstStride = static_cast<uint16_t>(dstStrideValue);
+    TEventID eventID = GetTPipePtr()->AllocEventID<HardEvent::V_MTE2>();
+    SetFlag<HardEvent::V_MTE2>(eventID);
+    WaitFlag<HardEvent::V_MTE2>(eventID);
+    GetTPipePtr()->ReleaseEventID<HardEvent::V_MTE2>(eventID);
+    DataCopy(buffer1_, workspaceGM_[offset], intriParams);
+    DataCopy(buffer3_, workspaceGM_[offset + colAlignV_], intriParams);
+  }
+
+  __aicore__ inline void copyInByRow(int64_t baseOffset, int64_t colSize, int64_t rowSize, uint8_t rightPad) {
+    int64_t rowStride = colAlignV_ * workspaceNum_;
+    TEventID eventID = GetTPipePtr()->AllocEventID<HardEvent::V_MTE2>();
+    SetFlag<HardEvent::V_MTE2>(eventID);
+    WaitFlag<HardEvent::V_MTE2>(eventID);
+    GetTPipePtr()->ReleaseEventID<HardEvent::V_MTE2>(eventID);
+    for (int64_t row = 0; row < rowSize; row++) {
+      int64_t srcOffset = baseOffset + row * rowStride;
+      int64_t dstOffset = row * COL_TEMPLATE;
+      
+      if (colSize % FLOAT_ALIGN == 0 && rightPad == 0) {
+        DataCopy(buffer1_[dstOffset], workspaceGM_[srcOffset], colSize);
+        DataCopy(buffer3_[dstOffset], workspaceGM_[srcOffset + colAlignV_], colSize);
+      } else {
+        DataCopyParams rowParams;
+        rowParams.blockCount = 1;
+        rowParams.blockLen = static_cast<uint16_t>((colSize + FLOAT_ALIGN - 1) / FLOAT_ALIGN);
+        rowParams.srcStride = 0;
+        rowParams.dstStride = static_cast<uint16_t>((COL_TEMPLATE - colSize - rightPad) / FLOAT_ALIGN);
+        DataCopy(buffer1_[dstOffset], workspaceGM_[srcOffset], rowParams);
+        DataCopy(buffer3_[dstOffset], workspaceGM_[srcOffset + colAlignV_], rowParams);
+      }
+    }
   }
 
   __aicore__ inline void compute(int64_t colIndex,int64_t rowIndex, int64_t colSize, int64_t rowSize) {
@@ -114,14 +171,14 @@ public:
     if (colSizeMod != 0) {
         colSizeAlign += FLOAT_ALIGN - colSizeMod;
     }
-    TEventID eventID = GetTPipePtr()->AllocEventID<HardEvent::MTE2_V>();
-    SetFlag<HardEvent::MTE2_V>(eventID);
-    WaitFlag<HardEvent::MTE2_V>(eventID);
-    GetTPipePtr()->ReleaseEventID<HardEvent::MTE2_V>(eventID);
-    TEventID eventID1 = GetTPipePtr()->AllocEventID<HardEvent::MTE3_V>();
-    SetFlag<HardEvent::MTE3_V>(eventID1);
-    WaitFlag<HardEvent::MTE3_V>(eventID1);
-    GetTPipePtr()->ReleaseEventID<HardEvent::MTE3_V>(eventID1);
+    TEventID eventId = GetTPipePtr()->AllocEventID<HardEvent::MTE2_V>();
+    SetFlag<HardEvent::MTE2_V>(eventId);
+    WaitFlag<HardEvent::MTE2_V>(eventId);
+    GetTPipePtr()->ReleaseEventID<HardEvent::MTE2_V>(eventId);
+    TEventID eventId1 = GetTPipePtr()->AllocEventID<HardEvent::MTE3_V>();
+    SetFlag<HardEvent::MTE3_V>(eventId1);
+    WaitFlag<HardEvent::MTE3_V>(eventId1);
+    GetTPipePtr()->ReleaseEventID<HardEvent::MTE3_V>(eventId1);
     Duplicate(buffer2_, static_cast<float>(0.0), COL_TEMPLATE);
     Duplicate(buffer4_, static_cast<float>(0.0), COL_TEMPLATE);
     PipeBarrier<PIPE_V>();
@@ -179,8 +236,8 @@ private:
   TPipe pipe_;
   TQue<QuePosition::VECOUT, DOUBLE_BUFFER> queueGammaOut_;
   TQue<QuePosition::VECOUT, DOUBLE_BUFFER> queueBetaOut_;
-  TQue<QuePosition::VECIN, DOUBLE_BUFFER> queueGammaIn_;
   TQue<QuePosition::VECIN, DOUBLE_BUFFER> queueBetaIn_;
+  TQue<QuePosition::VECIN, DOUBLE_BUFFER> queueGammaIn_;
   LocalTensor<float> buffer1_;
   LocalTensor<float> buffer2_;
   LocalTensor<float> buffer3_;

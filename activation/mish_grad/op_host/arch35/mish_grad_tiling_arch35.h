@@ -11,10 +11,11 @@
 #define OPS_BUILD_IN_OP_TILING_RUNTIME_MISHGRAD_TILING_ARCH35_H
 
 #include "register/tilingdata_base.h"
-#include "tiling_base/tiling_base.h"
+#include "op_host/tiling_base.h"
 #include "atvoss/elewise/elewise_tiling.h"
 
 namespace optiling {
+    using namespace Ops::Base;
     struct MishGradCompileInfo {
         uint64_t coreNum = 0;
         uint64_t ubSize = 0;
@@ -31,10 +32,10 @@ namespace optiling {
 
     private:
         gert::TilingContext* tilingContext;
-        ge::DataType outputDtype;
-        ge::DataType inputDtype;
-        ge::DataType inputDtype1;
-        ge::DataType inputDtype2;
+        ge::DataType outputDtype = ge::DT_UNDEFINED;
+        ge::DataType inputDtype = ge::DT_UNDEFINED;
+        ge::DataType inputDtype1 = ge::DT_UNDEFINED;
+        ge::DataType inputDtype2 = ge::DT_UNDEFINED;
         bool unfullCompute = true;
         uint64_t dType = 0;
     };

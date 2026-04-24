@@ -23,7 +23,7 @@
 #include "register/tilingdata_base.h"
 #include "atvoss/reduce/reduce_tiling.h"
 #include "atvoss/reduce/reduce_tiling_data.h"
-#include "tiling_base/tiling_util.h"
+#include "op_host/tiling_util.h"
 #include "error_util.h"
 #include <graph/utils/type_utils.h>
 #include "tiling/platform/platform_ascendc.h"
@@ -55,7 +55,7 @@ static ge::graphStatus DoTiling(gert::TilingContext* context, ReduceOpInputParam
     return status;
 }
 
-static ge::graphStatus GetPreluGradReduceAxes(gert::TilingContext* context, ReduceOpInputParam& opInput)
+static ge::graphStatus GetPreluGradReduceAxes(const gert::TilingContext* context, ReduceOpInputParam& opInput)
 {
     auto features = context->GetInputShape(1);
     OPS_CHECK_NULL_WITH_CONTEXT(context, features);
@@ -107,8 +107,8 @@ static ge::graphStatus Tiling4PreluGradReduce(gert::TilingContext* context)
     OP_TILING_CHECK((DoTiling(context, opInput, key) == ge::GRAPH_FAILED),
                     VECTOR_INNER_ERR_REPORT_TILIING(context->GetNodeName(), "DoTiling Failed for PreluGradReduce"),
                     return ge::GRAPH_FAILED);
-
-    const uint64_t tilingKey = GET_TPL_TILING_KEY(key.patternID, key.loopARCount, key.loopInnerARCount);
+    uint64_t tilingKey;
+    GEN_REDUCE_TILING_KEY(tilingKey, key);
     OP_LOGI(context->GetNodeName(), "patternID:%u, loopARCount:%u, loopInnerARCount:%u, Tiling Key is:%lu",
             key.patternID, key.loopARCount, key.loopInnerARCount, tilingKey);
     context->SetTilingKey(tilingKey);

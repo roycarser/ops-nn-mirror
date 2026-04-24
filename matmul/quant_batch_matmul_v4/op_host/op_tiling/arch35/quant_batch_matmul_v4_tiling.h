@@ -20,14 +20,14 @@
 #include <cstdint>
 #include <vector>
 
-#include "tiling_base/tiling_templates_registry.h"
+#include "op_host/tiling_templates_registry.h"
 #include "../../../../common/op_host/op_tiling/tiling_type.h"
 #include "op_cache_tiling.h"
 
 #include "quant_batch_matmul_v4_basic_block_tiling.h"
 #include "../../../../weight_quant_batch_matmul_v2/op_host/op_tiling/weight_quant_batch_matmul_v2_tiling_tool.h"
 #include "../quant_batch_matmul_v4_compile_info.h"
-#include "../../../op_kernel/arch35/quant_batch_matmul_v4_tiling_data.h"
+#include "../../../op_kernel/arch35/quant_batch_matmul_v4_tiling_data_apt.h"
 
 namespace optiling {
 using matmul_tiling::MatrixTraverse;
@@ -57,8 +57,8 @@ constexpr size_t GROUP_SIZE_INDEX = 4UL;
 // valid dim
 constexpr size_t VALID_INPUT_DIM_NUM = 2UL;
 constexpr size_t MATMUL_SHAPE_DIM_NUM = 2UL;
-constexpr size_t VALID_X1_SCALE_DIM_NUM = 2UL;
-constexpr size_t VALID_X2_SCALE_DIM_NUM = 2UL;
+constexpr size_t VALID_X1_SCALE_DIM_NUM = 3UL;
+constexpr size_t VALID_X2_SCALE_DIM_NUM = 3UL;
 constexpr size_t VALID_WEIGHT_NZ_DIM_NUM = 4UL;
 constexpr size_t VALID_BIAS_MIN_DIM = 1;
 constexpr size_t VALID_BIAS_MAX_DIM = 2;
@@ -70,8 +70,8 @@ constexpr uint64_t INT4_DTYPE_PARAM = 2;
 constexpr uint32_t WORKSPACE_SIZE = 16777216; // 16 * 1024 * 1024
 constexpr int32_t DB_BUFFER = 2;
 constexpr int32_t EXTRA_GROUP_NUM = 2;
-constexpr uint64_t K_ALIGN_SIZE = 64;
-constexpr uint64_t N_ALIGN_SIZE = 64;
+constexpr uint64_t K_ALIGN_SIZE = 32;
+constexpr uint64_t N_ALIGN_SIZE = 8;
 
 constexpr int64_t B64_BITS = 64;
 constexpr int64_t B8_BITS = 8;
@@ -99,7 +99,8 @@ enum class QuantType : uint32_t {
     PER_CHANNEL = 2,
     PER_GROUP = 3,
     MX = 4,
-    PER_TILE = 5
+    PER_TILE = 5,
+    INT4_ASYMMETRICAL = 6
 };
 
 enum class KernelTemplateType : uint32_t {
@@ -215,7 +216,10 @@ protected:
     void Convert2AscendCTiling(const CacheTilingData &tbeTiling, TCubeTiling &matmulTiling);
     MatrixTraverse GetIteratorOrder(const CacheTilingData &tbeTiling, int32_t singleCoreM, int32_t singleCoreN,
                                     int32_t singleCoreK) const;
-
+    virtual bool CheckCoreNum() const
+    {
+        return true;
+    }
     matmul_v4::QuantBatchMatmulInfo inputParams_;
     uint64_t cubeBaseN_;
     int32_t templateId_ = -1;
@@ -252,6 +256,7 @@ protected:
     void GetBubTilingA8W4BySize(int64_t &nBubSize, int64_t &kBubSize,
         int64_t &kBl1Size, int64_t &nBl1Size) const;
     bool CustomCheck() const;
+    bool CheckA8W4Params() const;
     ge::graphStatus DoOpTiling() override;
     ge::graphStatus DoLibApiTiling() override
     {
@@ -279,6 +284,7 @@ protected:
     uint64_t GetBubSize(uint64_t bubN, uint64_t bubD, bool isWeightNz) const;
     void PrintCVTilingData(const bool debugLevel) const;
     ge::graphStatus PostTiling() override;
+    bool CheckCoreNum() const override;
 
     QuantBatchMatmulV4BasicBlockTiling tilingSolver_;
 };

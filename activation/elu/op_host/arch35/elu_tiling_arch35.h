@@ -19,8 +19,8 @@
 #include "atvoss/elewise/elewise_tiling.h"
 #include "../../op_kernel/arch35/elu_tiling_struct.h"
 
-using namespace EluNs;
 namespace optiling {
+using namespace EluNs;
 
 struct EluCompileInfo {
     uint64_t coreNum = 0;
@@ -31,7 +31,7 @@ class EluTiling {
 public:
     explicit EluTiling(gert::TilingContext* context) : tilingContext(context) {};
     ge::graphStatus RunTiling();
-    EluTilingData* tiling;
+    EluTilingData* tiling = nullptr;
 
 protected:
     ge::graphStatus CalcOutputDtype();
@@ -41,7 +41,7 @@ private:
     ge::graphStatus CheckShape();
 
     gert::TilingContext* tilingContext;
-    ge::DataType outputDtype;
+    ge::DataType outputDtype = ge::DT_UNDEFINED;
 };
 } // namespace optiling
 #endif // OPS_BUILD_IN_OP_TILING_RUNTIME_ELU_TILING_H

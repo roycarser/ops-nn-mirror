@@ -19,7 +19,6 @@
 #include "conv_bp_config_base.h"
 #include "conv_bp_func.h"
 #include "conv_bp_util.h"
-#include "kernel_utils.h"
 #include "kernel_operator.h"
 #include "../conv3d_backprop_filter_v2_tiling_data.h"
 namespace ConvolutionBackprop {
@@ -103,7 +102,7 @@ public:
         DEFINE_STUCT_FIELD(uint32_t, bL1PadUpPing);
         DEFINE_STUCT_FIELD(uint32_t, bL1PadUpPong);
         DEFINE_STUCT_FIELD(uint32_t, curLoadKal1_);
-#if defined(__DAV_C310__)
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
         DEFINE_STUCT_FIELD(LoadData2DParamsV2, load2dv2_);
 #endif
         using LoadData3DParamsV2SrcT = LoadData3DParamsV2<typename Intf::SrcT>;

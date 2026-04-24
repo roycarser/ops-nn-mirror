@@ -15,7 +15,7 @@
 
 #ifndef CMCT_INCLUDE_EPILOGUE_BLOCK_EPILOGUE_FIXPIPE_H
 #define CMCT_INCLUDE_EPILOGUE_BLOCK_EPILOGUE_FIXPIPE_H
-#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3101)
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
 #if ASC_DEVKIT_MAJOR >= 9
 #include "kernel_basic_intf.h"
 #else
@@ -100,6 +100,8 @@ public:
             0};
         if constexpr (DispatchPolicy::enableRelu && !AscendC::IsSameType<DataTypeOut, bfloat16_t>::value) {
             AscendC::Relu(ubLocalTmp_, ubLocalTmp_, blockShapeM * blockShapeN);
+            AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(0x0);
+            AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(0x0);
         }
         DataCopyPad<DataTypeOut>(outputGlobal_[offset], ubLocalTmp_, copyParams);
     }

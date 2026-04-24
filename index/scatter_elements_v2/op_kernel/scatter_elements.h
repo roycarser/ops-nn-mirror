@@ -159,7 +159,7 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(USED_THREAD) inline void SimtComputeDim8(
     __gm__ CAST_T* xWorkspaceGm, __ubuf__ uint64_t* TilingUint64Ub, COMP_T allAxis, __ubuf__ COMP_T* params);
 
 template <typename DATA_T, typename COMP_T, typename CAST_T, const uint32_t REDU>
-__aicore__ inline void ReplaceOut(__gm__ DATA_T* updates, __gm__ DATA_T* y, __gm__ CAST_T* updatesWorkspaceGm,
+__simt_callee__ __aicore__ inline void ReplaceOut(__gm__ DATA_T* updates, __gm__ DATA_T* y, __gm__ CAST_T* updatesWorkspaceGm,
                                   __gm__ CAST_T* xWorkspaceGm, COMP_T yOffset, COMP_T updatesOffset);
 
 template <typename DATA_T, typename IDX_T, typename COMP_T, typename CAST_T, const uint32_t REDU, const uint32_t TEMPLATE_V2=0>
@@ -480,7 +480,7 @@ __aicore__ inline void KernelScatterElements<DATA_T, IDX_T, COMP_T, CAST_T, REDU
 }
 
 template <typename DATA_T, typename COMP_T, typename CAST_T, const uint32_t REDU>
-__aicore__ inline void ReplaceOut(__gm__ DATA_T* updates, __gm__ DATA_T* y, __gm__ CAST_T* updatesWorkspaceGm,
+__simt_callee__ __aicore__ inline void ReplaceOut(__gm__ DATA_T* updates, __gm__ DATA_T* y, __gm__ CAST_T* updatesWorkspaceGm,
                                   __gm__ CAST_T* xWorkspaceGm, COMP_T yOffset, COMP_T updatesOffset)
 {
     if constexpr (REDU == REDU_ADD) {
@@ -514,9 +514,9 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(THREAD_USED) inline void SimtComputeDim2(
     __gm__ IDX_T* indices, __gm__ DATA_T* updates, __gm__ DATA_T* y, __gm__ CAST_T* updatesWorkspaceGm,
     __gm__ CAST_T* xWorkspaceGm, __ubuf__ uint64_t* TilingUint64Ub, COMP_T allAxis, COMP_T m0, COMP_T shift0)
 {
-    uint64_t dataStride[TILING_ARRAY_LEN] = {};
-    uint64_t indicesStride[TILING_ARRAY_LEN] = {};
-    uint64_t updatesStride[TILING_ARRAY_LEN] = {};
+    COMP_T dataStride[TILING_ARRAY_LEN] = {};
+    COMP_T indicesStride[TILING_ARRAY_LEN] = {};
+    COMP_T updatesStride[TILING_ARRAY_LEN] = {};
     for (uint32_t i = 0; i < TILING_DATA_UINT64_NUM; i++) {
         if (i < TILING_ARRAY_LEN) {
             dataStride[i] = TilingUint64Ub[i];
@@ -549,9 +549,9 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(THREAD_USED) inline void SimtComputeDim3(
     __gm__ CAST_T* xWorkspaceGm, __ubuf__ uint64_t* TilingUint64Ub, COMP_T allAxis, COMP_T m0,
     COMP_T shift0, COMP_T m1, COMP_T shift1)
 {
-    uint64_t dataStride[TILING_ARRAY_LEN] = {};
-    uint64_t indicesStride[TILING_ARRAY_LEN] = {};
-    uint64_t updatesStride[TILING_ARRAY_LEN] = {};
+    COMP_T dataStride[TILING_ARRAY_LEN] = {};
+    COMP_T indicesStride[TILING_ARRAY_LEN] = {};
+    COMP_T updatesStride[TILING_ARRAY_LEN] = {};
     for (uint32_t i = 0; i < TILING_DATA_UINT64_NUM; i++) {
         if (i < TILING_ARRAY_LEN) {
             dataStride[i] = TilingUint64Ub[i];
@@ -592,9 +592,9 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(USED_THREAD) inline void SimtComputeDim4(
     __gm__ CAST_T* xWorkspaceGm, __ubuf__ uint64_t* TilingUint64Ub, COMP_T allAxis, COMP_T m0,
     COMP_T shift0, COMP_T m1, COMP_T shift1, COMP_T m2, COMP_T shift2)
 {
-    uint64_t dataStride[TILING_ARRAY_LEN] = {};
-    uint64_t indicesStride[TILING_ARRAY_LEN] = {};
-    uint64_t updatesStride[TILING_ARRAY_LEN] = {};
+    COMP_T dataStride[TILING_ARRAY_LEN] = {};
+    COMP_T indicesStride[TILING_ARRAY_LEN] = {};
+    COMP_T updatesStride[TILING_ARRAY_LEN] = {};
     for (uint32_t i = 0; i < TILING_DATA_UINT64_NUM; i++) {
         if (i < TILING_ARRAY_LEN) {
             dataStride[i] = TilingUint64Ub[i];
@@ -641,9 +641,9 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(USED_THREAD) inline void SimtComputeDim5(
     __gm__ IDX_T* indices, __gm__ DATA_T* updates, __gm__ DATA_T* y, __gm__ CAST_T* updatesWorkspaceGm,
     __gm__ CAST_T* xWorkspaceGm, __ubuf__ uint64_t* TilingUint64Ub, COMP_T allAxis, __ubuf__ COMP_T* params)
 {
-    uint64_t dataStride[TILING_ARRAY_LEN] = {};
-    uint64_t indicesStride[TILING_ARRAY_LEN] = {};
-    uint64_t updatesStride[TILING_ARRAY_LEN] = {};
+    COMP_T dataStride[TILING_ARRAY_LEN] = {};
+    COMP_T indicesStride[TILING_ARRAY_LEN] = {};
+    COMP_T updatesStride[TILING_ARRAY_LEN] = {};
     for (uint32_t i = 0; i < TILING_DATA_UINT64_NUM; i++) {
         if (i < TILING_ARRAY_LEN) {
             dataStride[i] = TilingUint64Ub[i];
@@ -709,9 +709,9 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(USED_THREAD) inline void SimtComputeDim6(
     __gm__ IDX_T* indices, __gm__ DATA_T* updates, __gm__ DATA_T* y, __gm__ CAST_T* updatesWorkspaceGm,
     __gm__ CAST_T* xWorkspaceGm, __ubuf__ uint64_t* TilingUint64Ub, COMP_T allAxis, __ubuf__ COMP_T* params)
 {
-    uint64_t dataStride[TILING_ARRAY_LEN] = {};
-    uint64_t indicesStride[TILING_ARRAY_LEN] = {};
-    uint64_t updatesStride[TILING_ARRAY_LEN] = {};
+    COMP_T dataStride[TILING_ARRAY_LEN] = {};
+    COMP_T indicesStride[TILING_ARRAY_LEN] = {};
+    COMP_T updatesStride[TILING_ARRAY_LEN] = {};
     for (uint32_t i = 0; i < TILING_DATA_UINT64_NUM; i++) {
         if (i < TILING_ARRAY_LEN) {
             dataStride[i] = TilingUint64Ub[i];
@@ -789,9 +789,9 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(USED_THREAD) inline void SimtComputeDim7(
     __gm__ IDX_T* indices, __gm__ DATA_T* updates, __gm__ DATA_T* y, __gm__ CAST_T* updatesWorkspaceGm,
     __gm__ CAST_T* xWorkspaceGm, __ubuf__ uint64_t* TilingUint64Ub, COMP_T allAxis, __ubuf__ COMP_T* params)
 {
-    uint64_t dataStride[TILING_ARRAY_LEN] = {};
-    uint64_t indicesStride[TILING_ARRAY_LEN] = {};
-    uint64_t updatesStride[TILING_ARRAY_LEN] = {};
+    COMP_T dataStride[TILING_ARRAY_LEN] = {};
+    COMP_T indicesStride[TILING_ARRAY_LEN] = {};
+    COMP_T updatesStride[TILING_ARRAY_LEN] = {};
     for (uint32_t i = 0; i < TILING_DATA_UINT64_NUM; i++) {
         if (i < TILING_ARRAY_LEN) {
             dataStride[i] = TilingUint64Ub[i];
@@ -883,9 +883,9 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(USED_THREAD) inline void SimtComputeDim8(
     __gm__ IDX_T* indices, __gm__ DATA_T* updates, __gm__ DATA_T* y, __gm__ CAST_T* updatesWorkspaceGm,
     __gm__ CAST_T* xWorkspaceGm, __ubuf__ uint64_t* TilingUint64Ub, COMP_T allAxis, __ubuf__ COMP_T* params)
 {
-    uint64_t dataStride[TILING_ARRAY_LEN] = {};
-    uint64_t indicesStride[TILING_ARRAY_LEN] = {};
-    uint64_t updatesStride[TILING_ARRAY_LEN] = {};
+    COMP_T dataStride[TILING_ARRAY_LEN] = {};
+    COMP_T indicesStride[TILING_ARRAY_LEN] = {};
+    COMP_T updatesStride[TILING_ARRAY_LEN] = {};
     for (uint32_t i = 0; i < TILING_DATA_UINT64_NUM; i++) {
         if (i < TILING_ARRAY_LEN) {
             dataStride[i] = TilingUint64Ub[i];

@@ -20,7 +20,7 @@
 #include "log/log.h"
 #include "util/math_util.h"
 #include "tiling/platform/platform_ascendc.h"
-#include "tiling_base/tiling_util.h"
+#include "op_host/tiling_util.h"
 #include "platform/platform_infos_def.h"
 #include "error_util.h"
 
@@ -116,7 +116,7 @@ private:
     void CalculateMaxUbSizePerRow(ge::DataType xDtype);
     bool SetSpecialTilingForDs(gert::TilingContext* context);
     bool CalcTilingForMultiRow(gert::TilingContext* context);
-    bool CheckMultiRowPreconditions(gert::TilingContext* context, uint32_t& maxUbLen);
+    bool CheckMultiRowPreconditions(const gert::TilingContext* context, uint32_t& maxUbLen);
     void CalculateMultiRowCoreDistribution(uint32_t maxUbLen, uint32_t& perCoreLoop, uint32_t& extraRows);
     ge::graphStatus GetCompileInfo(gert::TilingContext* context);
 
@@ -548,7 +548,7 @@ bool DynamicQuantTiling::SetSpecialTilingForDs(gert::TilingContext* context)
     return true;
 }
 
-bool DynamicQuantTiling::CheckMultiRowPreconditions(gert::TilingContext* context, uint32_t& maxUbLen)
+bool DynamicQuantTiling::CheckMultiRowPreconditions(const gert::TilingContext* context, uint32_t& maxUbLen)
 {
     // 仅非moe场景、对称量化可以使用当前模板
     auto groupDesc = context->GetOptionalInputDesc(GROUP_INDEX);

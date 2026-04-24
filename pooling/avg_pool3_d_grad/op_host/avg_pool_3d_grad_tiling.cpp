@@ -20,8 +20,8 @@
 #include "log/log.h"
 #include "register/op_impl_registry.h"
 #include "register/tilingdata_base.h"
-#include "tiling_base/tiling_base.h"
-#include "tiling_base/tiling_templates_registry.h"
+#include "op_host/tiling_base.h"
+#include "op_host/tiling_templates_registry.h"
 #include "util/math_util.h"
 #include "avg_pool_3d_grad_tiling.h"
 
@@ -595,7 +595,6 @@ ge::graphStatus AvgPool3dGradTiling::InitBaseParams(gert::Shape& gradShape, ge::
     countIncludePad_ = static_cast<uint64_t>(*attrs->GetAttrPointer<bool>(COUNT_IDX));
     divisorOverride_ = static_cast<int64_t>(*attrs->GetAttrPointer<int>(DIVISOR_IDX));
     dataFormat_ = attrs->GetStr(FORMAT_IDX);
-
     if (dataFormat_ != "NDHWC" && dataFormat_ != "NCDHW") {
         OP_LOGE(tilingContext_->GetNodeName(), "invalid data_format, should be NCDHW or NDHWC");
         return ge::GRAPH_FAILED;

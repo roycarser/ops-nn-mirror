@@ -48,8 +48,21 @@ static __aicore__ inline void CalcSetFmatrixParams(Intf *self, uint32_t fmapH, u
             self->ctx.load3d_.padList[2] = 0;
         }
     } else {
-        self->ctx.load3d_.padList[0] = self->ctx.tiling_->backpropPadLeft;
-        self->ctx.load3d_.padList[1] = self->ctx.tiling_->backpropPadRight;
+        if (self->ctx.tiling_->backpropPadLeft < 0) {
+            self->ctx.load3d_.padList[0] = DivCeil(abs(self->ctx.tiling_->backpropPadLeft), self->ctx.tiling_->strideW) * 
+                                           self->ctx.tiling_->strideW + self->ctx.tiling_->backpropPadLeft;
+        } else {
+            self->ctx.load3d_.padList[0] = self->ctx.tiling_->backpropPadLeft;
+        }
+
+        if (self->ctx.tiling_->backpropPadRight < 0) {
+            uint32_t woExpand = ((self->ctx.tiling_->wo - 1) * self->ctx.tiling_->strideW) + 1;
+            uint32_t woEnd = DivCeil((woExpand + self->ctx.tiling_->backpropPadRight), self->ctx.tiling_->strideW);
+            self->ctx.load3d_.padList[1] = woExpand + self->ctx.tiling_->backpropPadRight - ((woEnd - 1) * self->ctx.tiling_->strideW + 1);
+        } else {
+            self->ctx.load3d_.padList[1] = self->ctx.tiling_->backpropPadRight;
+        }
+
         if (self->ctx.curHoIdx_ < 0) {
             self->ctx.load3d_.padList[2] = abs(self->ctx.curHoIdx_);
         } else {
@@ -231,10 +244,24 @@ static __aicore__ inline void CalcLoadToA1Dn2NzParams(Intf *self, Dn2NzParams &d
     CalcCurCoutSizeA1(self, kIdx, curCoutIdx, curCoutSize);
     uint32_t loadToA1HLoop = 0;
     uint32_t woExpand = ((self->ctx.tiling_->wo - 1) * self->ctx.tiling_->strideW) + 1;
+    bool resetWoExpand = self->ctx.tiling_->backpropPadLeft < 0 || self->ctx.tiling_->backpropPadRight < 0;
+    uint32_t woStart = self->ctx.tiling_->backpropPadLeft < 0 ? 
+                       DivCeil(abs(self->ctx.tiling_->backpropPadLeft), self->ctx.tiling_->strideW) : 0;
+    uint32_t woEnd = self->ctx.tiling_->backpropPadRight < 0 ? 
+                     DivCeil((woExpand + self->ctx.tiling_->backpropPadRight), self->ctx.tiling_->strideW) :
+                     DivCeil(woExpand, self->ctx.tiling_->strideW);
+
+    if (resetWoExpand) {
+        woExpand = (woEnd - woStart - 1) * self->ctx.tiling_->strideW + 1;
+    }
     CalcOutToA1DstAddr(self, strideH, curHoSize, loadToA1HLoop, out2A1DstAddrOffset, woExpand);
 
-    if (unlikely(self->ctx.tiling_->strideW * strideH > 1 || self->ctx.realWoSize_ != self->ctx.tiling_->wo)) {
+    if (unlikely(self->ctx.tiling_->strideW * strideH > 1 || self->ctx.realWoSize_ != self->ctx.tiling_->wo || 
+        resetWoExpand)) {
         dn2NzParams.dnNum = loadToA1HLoop;
+        if (resetWoExpand) {
+            self->ctx.realWoSize_ = woEnd - woStart;
+        }
         dn2NzParams.nValue = self->ctx.realWoSize_;
         dn2NzParams.dValue = curCoutSize;
         dn2NzParams.srcDnMatrixStride = self->ctx.tiling_->wo;
@@ -269,10 +296,29 @@ static __aicore__ inline void CalcLoadToA1Nd2NzParams(Intf *self, Nd2NzParams &n
     CalcCurCoutSizeA1(self, kIdx, curCoutIdx, curCoutSize);
     uint32_t loadToA1HLoop = 0;
     uint32_t woExpand = ((self->ctx.tiling_->wo - 1) * self->ctx.tiling_->strideW) + 1;
+    uint32_t woStart = 0;
+    uint32_t woEnd = DivCeil(woExpand, self->ctx.tiling_->strideW);
+    bool resetWoExpand = false;
+    if (self->ctx.tiling_->backpropPadLeft < 0) {
+        resetWoExpand = true;
+        woStart = DivCeil(abs(self->ctx.tiling_->backpropPadLeft), self->ctx.tiling_->strideW);
+    }
+    if (self->ctx.tiling_->backpropPadRight < 0) {
+        resetWoExpand = true;
+        woEnd = DivCeil((woExpand + self->ctx.tiling_->backpropPadRight), self->ctx.tiling_->strideW);
+    }
+
+    if (resetWoExpand) {
+        woExpand = (woEnd - woStart - 1) * self->ctx.tiling_->strideW + 1;
+    }
     CalcOutToA1DstAddr(self, strideH, curHoSize, loadToA1HLoop, out2A1DstAddrOffset, woExpand);
 
-    if (unlikely(self->ctx.tiling_->strideW * strideH > 1 || self->ctx.realWoSize_ != self->ctx.tiling_->wo)) {
+    if (unlikely(self->ctx.tiling_->strideW * strideH > 1 || self->ctx.realWoSize_ != self->ctx.tiling_->wo || 
+        resetWoExpand)) {
         nd2NzParams.ndNum = loadToA1HLoop;
+        if (resetWoExpand) {
+            self->ctx.realWoSize_ = woEnd - woStart;
+        }
         nd2NzParams.nValue = self->ctx.realWoSize_;
         nd2NzParams.dValue = curCoutSize;
         nd2NzParams.srcNdMatrixStride = self->ctx.tiling_->wo * self->ctx.tiling_->cout;
@@ -295,7 +341,7 @@ static __aicore__ inline void CalcLoadToA1Nd2NzParams(Intf *self, Nd2NzParams &n
 }
 
 template <class Intf, class src0_T>
-__aicore__ inline void LoadToA1ForDn2Nz(Intf *self, LocalTensor<typename Intf::SrcT> &useA1Buf,
+__aicore__ inline void LoadToA1ForDn2Nz(Intf *self, LocalTensor<typename Intf::SrcAT> &useA1Buf,
     uint32_t kIdx, uint32_t curDoutIdx)
 {
     Dn2NzParams dn2NzParams;
@@ -322,9 +368,9 @@ __aicore__ inline void LoadToA1ForDn2Nz(Intf *self, LocalTensor<typename Intf::S
             strideH = 1;
         }
         if (unlikely(self->ctx.tiling_->strideW * strideH > 1)) {
-            InitZeroValue(self, useA1Buf);
+            InitZeroValue<Intf, typename Intf::SrcAT>(self, useA1Buf);
         }
-        CalcLoadToA1Dn2NzParams<Intf, typename Intf::SrcT>(self, dn2NzParams, out2A1DstAddrOffset,
+        CalcLoadToA1Dn2NzParams<Intf, typename Intf::SrcAT>(self, dn2NzParams, out2A1DstAddrOffset,
             curCoutIdx, kIdx);
         if (strideH > 1) {
             curHoIdx = self->ctx.curHoIdx_ < 0 ? 0 : self->ctx.curHoIdx_;
@@ -338,11 +384,16 @@ __aicore__ inline void LoadToA1ForDn2Nz(Intf *self, LocalTensor<typename Intf::S
     if constexpr (Intf::conv3dConfig.loadB1Condition == TPL_GM_TO_L1_NO_HK_WK) {
         woOffset += (self->ctx.curWoLeftIdx_ <= 0 ? 0 : DivCeil(self->ctx.curWoLeftIdx_, self->ctx.tiling_->strideW));
     }
+    
+    if (self->ctx.tiling_->backpropPadLeft < 0) {
+        woOffset += DivCeil(abs(self->ctx.tiling_->backpropPadLeft), self->ctx.tiling_->strideW);
+    }
+
     uint64_t doOffset = static_cast<uint64_t>(curDoutIdx) * self->ctx.hoWo_;
     uint64_t out2A1SrcAddrOffset = coOffset + doOffset + hoOffset + woOffset;
     if (dn2NzParams.dnNum > 0) { // dn2nz参数有效时，才执行加载，否则先跳过；后续考虑提前计算dn2nz参数减少无效计算
         if constexpr (Intf::conv3dConfig.enableC04Flag) {
-            DataCopy<typename Intf::SrcT, true>(useA1Buf[out2A1DstAddrOffset], self->ctx.outBackPropGlobal_[out2A1SrcAddrOffset], dn2NzParams);
+            DataCopy<typename Intf::SrcAT, true>(useA1Buf[out2A1DstAddrOffset], self->ctx.outBackPropGlobal_[out2A1SrcAddrOffset], dn2NzParams);
         } else {
             DataCopy(useA1Buf[out2A1DstAddrOffset], self->ctx.outBackPropGlobal_[out2A1SrcAddrOffset], dn2NzParams);
         }
@@ -350,7 +401,7 @@ __aicore__ inline void LoadToA1ForDn2Nz(Intf *self, LocalTensor<typename Intf::S
 }
 
 template <class Intf, class src0_T>
-__aicore__ inline void LoadToA1ForNd2Nz(Intf *self, LocalTensor<typename Intf::SrcT> &useA1Buf,
+__aicore__ inline void LoadToA1ForNd2Nz(Intf *self, LocalTensor<typename Intf::SrcAT> &useA1Buf,
     uint32_t kIdx, uint32_t curDoutIdx)
 {
     Nd2NzParams nd2NzParams;
@@ -371,14 +422,14 @@ __aicore__ inline void LoadToA1ForNd2Nz(Intf *self, LocalTensor<typename Intf::S
             strideH = 1;
         }
         if (unlikely(self->ctx.tiling_->strideW * strideH > 1)) {
-            InitZeroValue(self, useA1Buf);
+            InitZeroValue<Intf, typename Intf::SrcAT>(self, useA1Buf);
         }
 
         uint32_t curCoutIdx = 0;
         if constexpr (!Intf::conv3dConfig.enableC04Flag) {
             curCoutIdx = DivHkWk<Intf>(self, kIdx * self->ctx.tiling_->baseK);
         }
-        CalcLoadToA1Nd2NzParams<Intf, typename Intf::SrcT>(self, nd2NzParams, out2A1DstAddrOffset,
+        CalcLoadToA1Nd2NzParams<Intf, typename Intf::SrcAT>(self, nd2NzParams, out2A1DstAddrOffset,
             curCoutIdx, kIdx);
         coOffset = curCoutIdx;
         if (strideH > 1) {
@@ -395,11 +446,16 @@ __aicore__ inline void LoadToA1ForNd2Nz(Intf *self, LocalTensor<typename Intf::S
         woOffset = (self->ctx.curWoLeftIdx_ <= 0 ? 0 :
             DivCeil(self->ctx.curWoLeftIdx_, self->ctx.tiling_->strideW) * self->ctx.tiling_->cout);
     }
+    
+    if (self->ctx.tiling_->backpropPadLeft < 0) {
+        woOffset += DivCeil(abs(self->ctx.tiling_->backpropPadLeft), self->ctx.tiling_->strideW) * self->ctx.tiling_->cout;
+    }
+
     uint64_t doOffset = static_cast<uint64_t>(curDoutIdx) * self->ctx.hoWo_ * self->ctx.tiling_->cout;
     uint64_t out2A1SrcAddrOffset = coOffset + doOffset + hoOffset + woOffset;
     if (nd2NzParams.ndNum > 0) { // nd2nz参数有效时，才执行加载，否则先跳过；后续考虑提前计算dn2nz参数减少无效计算
         if constexpr (Intf::conv3dConfig.enableC04Flag) {
-            DataCopy<typename Intf::SrcT, true>(useA1Buf[out2A1DstAddrOffset], self->ctx.outBackPropGlobal_[out2A1SrcAddrOffset], nd2NzParams);
+            DataCopy<typename Intf::SrcAT, true>(useA1Buf[out2A1DstAddrOffset], self->ctx.outBackPropGlobal_[out2A1SrcAddrOffset], nd2NzParams);
         } else {
             DataCopy(useA1Buf[out2A1DstAddrOffset], self->ctx.outBackPropGlobal_[out2A1SrcAddrOffset], nd2NzParams);
         }
@@ -412,11 +468,11 @@ __aicore__ inline void LoadToA1(Intf *self, uint32_t kIdx, uint32_t curDoutIdx, 
     if (!loadFlag || unlikely(kIdx >= self->ctx.kIter_ || (self->ctx.isA1FullLoadFlag_ && !self->ctx.isLoadA1_))) {
         return;
     }
-    LocalTensor<typename Intf::SrcT> useA1Buf = self->ctx.inQueL1A_.template AllocTensor<typename Intf::SrcT>();
+    LocalTensor<typename Intf::SrcAT> useA1Buf = self->ctx.inQueL1A_.template AllocTensor<typename Intf::SrcAT>();
     if constexpr (Intf::Config::cType::format == Convolution3DBackprop::CubeFormat::NCDHW) {
-        LoadToA1ForDn2Nz<Intf, typename Intf::SrcT>(self, useA1Buf, kIdx, curDoutIdx);
+        LoadToA1ForDn2Nz<Intf, typename Intf::SrcAT>(self, useA1Buf, kIdx, curDoutIdx);
     } else {
-        LoadToA1ForNd2Nz<Intf, typename Intf::SrcT>(self, useA1Buf, kIdx, curDoutIdx);
+        LoadToA1ForNd2Nz<Intf, typename Intf::SrcAT>(self, useA1Buf, kIdx, curDoutIdx);
     }
     self->ctx.inQueL1A_.EnQue(useA1Buf);
 }

@@ -16,15 +16,15 @@
 #include "adaptive_sliding_window_basic_api_v4_tiling.h"
 
 #include "../../../op_kernel/arch35/quant_batch_matmul_v4_tiling_key.h"
-#include "common/inc/error_util.h"
+#include "error_util.h"
 #include "common/op_host/op_tiling/tiling_type.h"
 #include "graph/utils/type_utils.h"
 #include "log/log.h"
 #include "op_cache_tiling.h"
-#include "op_util.h"
+#include "op_api/op_util.h"
 #include "quant_batch_matmul_v4_checker_for_mmads8s4.h"
 #include "quant_batch_matmul_v4_tiling.h"
-#include "tiling_base/tiling_templates_registry.h"
+#include "op_host/tiling_templates_registry.h"
 
 using Ops::NN::MathUtil;
 
@@ -38,6 +38,9 @@ constexpr size_t LAST_FIRST_DIM_INDEX = 1;
 constexpr size_t LAST_SECOND_DIM_INDEX = 2;
 constexpr uint64_t PER_BLOCK_SIZE = 128;
 constexpr size_t DIM_NUM_TWO = 2;
+
+// 控核比例
+constexpr uint32_t CORE_RATIO = 2U;
 }  // namespace
 
 namespace optiling {
@@ -91,7 +94,7 @@ bool AdaptiveSlidingWindowBasicTilingV4::CheckPertileDtype()
         OP_LOGD(inputParams_.opName, "x1Scale or x2Scale is nullptr.");
         return false;
     }
-    
+
     inputParams_.scaleDtype = scaleDesc->GetDataType();
     inputParams_.perTokenScaleDtype = pertokenScaleDesc->GetDataType();
     auto biasDesc = context_->GetOptionalInputDesc(GetBiasIdx());
@@ -121,7 +124,6 @@ bool AdaptiveSlidingWindowBasicTilingV4::IsCapable()
     auto* platformInfoPtr = context_->GetPlatformInfo();
     OP_CHECK_NULL_WITH_CONTEXT(context_, platformInfoPtr);
     auto ascendcPlatform = platform_ascendc::PlatformAscendC(platformInfoPtr);
-
     if (!(ascendcPlatform.GetCurNpuArch() == NpuArch::DAV_3510)) {
         return false;
     }
@@ -359,7 +361,17 @@ bool AdaptiveSlidingWindowBasicTilingV4::CheckBatchValidInPertileMode(const gert
      aicoreParams_.l0cSize = compileInfoPtr_->l0cSize;
      aicoreParams_.blockDim = 0;
      return true;
- }
+}
+bool AdaptiveSlidingWindowBasicTilingV4::CheckCoreNum() const
+{
+    auto aicNum = compileInfoPtr_->aicNum;
+    auto aivNum = compileInfoPtr_->aivNum;
+    if (aivNum != CORE_RATIO * aicNum) {
+        OP_LOGE(inputParams_.opName, "aicNum:aivNum should be 1:2, actual aicNum: %u, aivNum: %u.", aicNum, aivNum);
+        return false;
+    }
+    return true;
+}
 
 uint64_t AdaptiveSlidingWindowBasicTilingV4::GetTilingKey() const
 {

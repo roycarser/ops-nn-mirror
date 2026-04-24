@@ -90,4 +90,25 @@ struct alignas(8) QuantBatchMatmulV3TilingData{
 };
 #pragma pack(pop)
 
+#pragma pack(push, 8)
+struct QuantMatmulPertokenTilingDataArch20 {
+    uint32_t batchSize;
+    uint32_t m;
+    uint32_t k;
+    uint32_t n;
+    uint32_t m0;
+    uint32_t k0;
+    uint32_t n0;
+    uint32_t mLoop;
+    uint32_t kLoop;
+    uint32_t nLoop;
+    uint32_t coreLoop;
+    uint32_t blockDim;
+    uint32_t swizzleDirect;
+    uint32_t swizzleCount;
+    bool withBias;
+    bool biasWithBatch;
+};
+#pragma pack(pop)
+
 #endif

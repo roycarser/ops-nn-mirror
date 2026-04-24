@@ -130,6 +130,50 @@ __aicore__ inline void UpdateHoL0WoL0(Intf *self)
 }
 
 template <class Intf>
+__aicore__ inline void CalcGroupOptParamForHWMode(Intf *self)
+{
+    if (((self->ctx.groupOptIter + 1 == self->ctx.singleGroupOpt - 1 && self->ctx.groupOptIter != 0) ||
+        self->ctx.singleGroupOpt == 1) && self->ctx.updateEnlarge != self->ctx.convTiling->enlarge) {
+        self->ctx.singleGroups = self->ctx.updateEnlarge;
+        self->ctx.singleGroups = self->ctx.singleGroups == 0 ? self->ctx.convTiling->enlarge : self->ctx.singleGroups;
+    }
+    uint64_t enlargeTail = self->ctx.singleGroups % self->ctx.convTiling->enlarge;
+    enlargeTail = enlargeTail == 0 ? self->ctx.convTiling->enlarge : enlargeTail;
+    if (enlargeTail != self->ctx.convTiling->enlarge) {
+        self->ctx.singleCoreCi = enlargeTail * (self->ctx.convTiling->orgCi / self->ctx.convTiling->groups);
+        if (self->ctx.groupOptIter == self->ctx.singleGroupOpt - 1) {
+            self->ctx.singleCoreCo = self->ctx.updateSingleCoOpt;
+
+            uint64_t totalKAlignK0 = AlignB(self->ctx.singleCoreCi, Intf::k0) * self->ctx.convTiling->kernelHxkernelW;
+            self->ctx.ddr2l0LoopK = CeilDiv(totalKAlignK0, self->ctx.convTiling->kL0);
+            self->ctx.maxKL0Iter = self->ctx.ddr2l0LoopK - 1;
+            self->ctx.kL0Tail = totalKAlignK0 % self->ctx.convTiling->kL0;
+            if constexpr (Intf::k0 != Intf::k0FmapTail) {
+                self->ctx.kAL0Tail = AlignB(self->ctx.singleCoreCi, Intf::k0FmapTail) *
+                    self->ctx.convTiling->kernelHxkernelW % self->ctx.convTiling->kL0;
+                self->ctx.kAL0Tail = self->ctx.kAL0Tail == 0 ? self->ctx.convTiling->kL0 : self->ctx.kAL0Tail;
+            }
+            self->ctx.kL0Tail = self->ctx.kL0Tail == 0 ? self->ctx.convTiling->kL0 : self->ctx.kL0Tail;
+            
+            InitCoDirectionValue<Intf>(self);
+        }
+    }
+    if ASCEND_IS_AIC_CONV {
+        CalcCoDirectionVar<Intf>(self);
+        CalcHoDirectionVar<Intf>(self);
+        CalcWoDirectionVar<Intf>(self);
+        if constexpr (Intf::groupOptPreloadFlag) { 
+            OptGroupCalcBL1LoadTimes<Intf>(self);
+        }
+    }
+    if ASCEND_IS_AIV_CONV {
+        if constexpr (Intf::groupOptNDFlag) {
+            OptGroupInitKValue<Intf>(self);
+        }
+    }
+}
+
+template <class Intf>
 __aicore__ inline void FirstIterateImplHWMode(Intf *self)
 {
     self->ctx.nL0Iter = 0;
@@ -153,6 +197,23 @@ __aicore__ inline void FirstIterateImplHWMode(Intf *self)
     CalcWoDirectionVar<Intf>(self);
     CalcHoDirectionVar<Intf>(self);
     CalcCoDirectionVar<Intf>(self);
+
+    if constexpr (Intf::groupOptPreloadFlag) {
+        if (self->ctx.singleGroupOpt == 1 && self->ctx.updateEnlarge != self->ctx.convTiling->enlarge) {
+            self->ctx.singleGroups = self->ctx.updateEnlarge;
+            self->ctx.singleGroups = self->ctx.singleGroups == 0 ?
+                self->ctx.convTiling->enlarge : self->ctx.singleGroups;
+            CalcGroupOptParamForHWMode<Intf>(self);
+        }
+        LoadAL1BaseModule<Intf>(self);
+        self->ctx.loadAL1Flag = true;
+        if (self->ctx.singleGroupOpt == 2 && self->ctx.updateEnlarge != self->ctx.convTiling->enlarge) {
+            self->ctx.singleGroups = self->ctx.updateEnlarge;
+            self->ctx.singleGroups = self->ctx.singleGroups == 0 ?
+                self->ctx.convTiling->enlarge : self->ctx.singleGroups;
+            CalcGroupOptParamForHWMode<Intf>(self);
+        }
+    }
 }
 
 template <class Intf>
@@ -252,8 +313,10 @@ __aicore__ inline bool IterateMFirstHWMode(Intf *self)
     }
 
     if ASCEND_IS_AIC_CONV {
-        if (self->ctx.kAL1fullload) {
-            self->ctx.queueAL1.FreeTensor(self->ctx.al1);
+        if constexpr (!Intf::groupOptPreloadFlag) {
+            if (self->ctx.kAL1fullload) {
+                self->ctx.queueAL1.FreeTensor(self->ctx.al1);
+            }
         }
     }
 
@@ -280,8 +343,10 @@ __aicore__ inline bool IterateMFirstHWMode(Intf *self)
     }
 
     if ASCEND_IS_AIC_CONV {
-        if (self->ctx.kBL1fullload) {
-            self->ctx.queueBL1.FreeTensor(self->ctx.bl1);
+        if constexpr (!Intf::groupOptPreloadFlag) {
+            if (self->ctx.kBL1fullload) {
+                self->ctx.queueBL1.FreeTensor(self->ctx.bl1);
+            }
         }
     }
 
@@ -294,6 +359,22 @@ __aicore__ inline bool IterateMFirstHWMode(Intf *self)
         }
     }
 
+    if constexpr (Intf::groupOptPreloadFlag) {
+        self->ctx.nBL1Iter = 0;
+        self->ctx.groupOptIter++;
+        self->ctx.vecId = (self->ctx.groupOptIter % VEC_NUM) * VEC_ID_MAX;
+        CalcGroupOptParamForHWMode<Intf>(self);
+        if (self->ctx.groupOptIter != self->ctx.singleGroupOpt) {
+            return true;
+        } else if (self->ctx.groupOptIter == self->ctx.singleGroupOpt - 1) {
+            if (self->ctx.updateSingleCoOpt == 0 && self->ctx.updateEnlarge != self->ctx.convTiling->enlarge) {
+                return false;
+            }
+            return true;
+        } else {
+            self->ctx.loadAL1Flag = false;
+        }
+    }
     return false;
 }
 

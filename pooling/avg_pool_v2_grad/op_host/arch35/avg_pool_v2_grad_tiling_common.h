@@ -20,7 +20,7 @@
 
 #include "register/op_def_registry.h"
 #include "tiling/tiling_api.h"
-#include "tiling_base/tiling_base.h"
+#include "op_host/tiling_base.h"
 #include "util/math_util.h"
 #include "op_common/op_host/util/platform_util.h"
 
@@ -29,6 +29,7 @@ namespace optiling
 const int32_t HW_DIMS = 2;
 const int32_t PAD_DIMS = 4;
 
+const int32_t ZERO_DIMS = 0;
 const int32_t ONE_DIMS = 1;
 const int32_t CHW_DIMS = 3;
 const int32_t NCHW_DIMS = 4;
@@ -51,7 +52,7 @@ struct AvgPoolV2GradInputInfo {
     std::array<int64_t, HW_DIMS> kernelSize;
     std::array<int64_t, HW_DIMS> stride;
     std::array<int64_t, PAD_DIMS> pad;
-    bool ceilMode = false; 
+    bool ceilMode = false;
     bool countIncludePad = true;
     bool globalPooling = false;
     int64_t divisorOverride = 0;
@@ -61,11 +62,11 @@ struct AvgPoolV2GradInputInfo {
     int64_t hasDivisor = 0;
 };
 
-static const gert::Shape& EnsureNotScalar(const gert::Shape& inShape) {
- if (inShape.IsScalar()) {
-   return g_vec_1_shape;
- }
- return inShape;
+static inline const gert::Shape& EnsureNotScalar(const gert::Shape& inShape) {
+if (inShape.IsScalar()) {
+  return g_vec_1_shape;
+}
+  return inShape;
 }
 } // namespace optiling
 

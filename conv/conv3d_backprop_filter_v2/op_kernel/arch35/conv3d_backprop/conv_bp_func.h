@@ -196,7 +196,7 @@ __aicore__ inline void InitParamsPart2(Intf *self)
     self->ctx.nIter_ = 0;
     self->ctx.kIter_ = 0;
 
-#if defined(__DAV_C310__)
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
     self->ctx.enableStepNIncludeDkNocinhwk_ = false;
     self->ctx.enableStepNTail_ = false;
     self->ctx.isSplitWo_ = false;
@@ -256,7 +256,7 @@ __aicore__ inline void InitParams(Intf *self)
 template <class Intf>
 __aicore__ inline void InitTque(Intf *self)
 {
-#if defined(__DAV_C310__)
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
     // streamK场景，AIV需要申请UB空间，扩维场景AIC,AIV需要申请UB空间
     self->ctx.pipe_.InitBuffer(self->ctx.vecBuf_, AscendC::TOTAL_UB_SIZE);
 
@@ -373,8 +373,10 @@ __aicore__ inline void ComputeNormal(Intf *self, Out2L1ScalarParams& out2L1Param
                 if (isBL1PingPong) {
                     b1PingPongFlag = (curNKL1Idx + kbStepIdx + 1) & 1;
                 }
-                ConvolutionBackpropFunc::LoadToB1<Intf, typename Intf::SrcT>(self, b1PingPongFlag, out2L1Params,
-                            isLoadB1, kbStepIdx, skipCurrentHiCompute);
+                if (isLoadB1) {
+                    ConvolutionBackpropFunc::LoadToB1<Intf, typename Intf::SrcT>(self, b1PingPongFlag, out2L1Params,
+                        kbStepIdx, skipCurrentHiCompute);
+                }
                 if (skipCurrentHiCompute) {
                     UpdateIdx(isLastStepKa, isLastStepKb, kaIdx, kbIdx, kaStepIdx, kbStepIdx);
                     continue;
@@ -383,7 +385,7 @@ __aicore__ inline void ComputeNormal(Intf *self, Out2L1ScalarParams& out2L1Param
                     a1PingPongFlag = (curMKL1Idx + kaStepIdx + 1) & 1;
                 }
                 ConvolutionBackpropFunc::LoadToA1<Intf, typename Intf::SrcT>(self, a1PingPongFlag, k,
-                                                                            out2L1Params, isLoadA1, kaStepIdx);
+                    out2L1Params, isLoadA1, kaStepIdx);
 
                 WaitFlag<HardEvent::M_MTE1>(self->ctx.l0aPingPongFlag_ & 1);
 

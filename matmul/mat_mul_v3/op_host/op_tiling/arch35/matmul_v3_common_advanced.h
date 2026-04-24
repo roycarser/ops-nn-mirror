@@ -31,9 +31,11 @@ constexpr uint64_t BASIC_BLOCK_SIZE_16 = 16UL;
 constexpr uint64_t BASIC_BLOCK_SIZE_64 = 64UL;
 constexpr uint64_t BASIC_BLOCK_K_256_BYTE = 256UL;
 constexpr uint64_t BASIC_BLOCK_K_128_BYTE = 128UL;
+constexpr uint64_t NUM_ONE = 1UL;
 constexpr uint64_t NUM_TWO = 2UL;
 constexpr uint64_t NUM_THREE = 3UL;
 constexpr uint64_t NUM_FOUR = 4UL;
+constexpr uint64_t NUM_FIVE = 5UL;
 constexpr uint64_t CACHELINE = 512UL;
 constexpr uint64_t BLOCK_BYTE_SIZE = 32UL;
 constexpr uint64_t BIAS_TABLE_NUM = 256UL;
@@ -78,6 +80,7 @@ struct MatMulV3Args {
     bool isBTrans = false;
     bool isHf32 = false;
     bool hasBias = false;
+    bool hasScale = false;
     ge::DataType aType = ge::DT_FLOAT16;
     ge::DataType bType = ge::DT_FLOAT16;
     ge::DataType cType = ge::DT_FLOAT16;
@@ -96,6 +99,7 @@ struct MatMulV3Args {
     uint64_t fusedOpType = 0UL;
     uint64_t batchX3 = 1UL;
     bool hasX3Input = false;
+    bool isForceGrpAccForFp32 = false;
     MatMulV3BatchInfo *batchInfo = nullptr;
 };
 
@@ -124,6 +128,16 @@ struct BatchMatMulV3ToMulInfo {
     uint64_t alignNum = 1UL;
 };
 
+struct MatMulV3ToMulInfo {
+    uint64_t tileNum = 1UL;
+    uint64_t baseMN = 1UL;
+    uint64_t tailMN = 1UL;
+    uint64_t baseK = 1UL;
+    uint64_t tailK = 1UL;
+    uint64_t loopK = 1UL;
+    bool dataCopyMode = false;
+};
+
 struct MatMulV3RunInfo {
     uint64_t usedCoreNum = 1UL;
     uint64_t singleCoreM = 1UL;
@@ -149,11 +163,15 @@ struct MatMulV3RunInfo {
     double defaultBalance = 0.0;    // 默认负载均衡率
     double redundantData = 0.0;    // 默认重复搬运量
     uint64_t totalDataAmount = 1UL;
+    uint64_t mergeBatchAL1 = 1UL; 
+    uint64_t mergeBatchBL1 = 1UL; 
+    uint64_t mergeBatchL0 = 1UL;
     bool needNdDma = false;
     MatMulV3TailInfo tailInfo;
     BatchMatMulV3RunInfo bmmRunInfo;
     MatMulV3MixInfo mixInfo;
-    BatchMatMulV3ToMulInfo toMulInfo;
+    BatchMatMulV3ToMulInfo bmmToMulInfo;
+    MatMulV3ToMulInfo mmToMulInfo;
 };
 }
 }

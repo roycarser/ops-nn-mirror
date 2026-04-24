@@ -18,7 +18,7 @@
 #include <cmath>
 #include "register/tilingdata_base.h"
 #include "tiling/tiling_api.h"
-#include "tiling_base/tiling_base.h"
+#include "op_host/tiling_base.h"
 #include "gather_v2_tiling_arch35.h"
 
 namespace optiling {
@@ -210,8 +210,8 @@ private:
 #endif
     gert::Shape xShape_;
     gert::Shape indicesShape_;
-    ge::DataType xDtype_;
-    ge::DataType indicesDtype_;
+    ge::DataType xDtype_ = ge::DT_FLOAT;
+    ge::DataType indicesDtype_ = ge::DT_FLOAT;
     int64_t axis_ = 0;
     int64_t batchDims_ = 0;
     int64_t ySize_ = 1;

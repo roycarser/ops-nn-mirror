@@ -85,19 +85,19 @@ bool QuantBatchMatmulV4PerblockTiling::AnalyzeAttrs()
                     return false);
     inputParams_.groupSize = static_cast<uint64_t>(*groupSizePtr);
     inputParams_.groupSizeM = (static_cast<uint64_t>(inputParams_.groupSize) >> GROUP_M_OFFSET) & GROUP_MNK_BIT_SIZE;
-    inputParams_.groupSizeK = (static_cast<uint64_t>(inputParams_.groupSize) >> GROUP_N_OFFSET) & GROUP_MNK_BIT_SIZE;
-    inputParams_.groupSizeN = static_cast<uint64_t>(inputParams_.groupSize) & GROUP_MNK_BIT_SIZE;
+    inputParams_.groupSizeN = (static_cast<uint64_t>(inputParams_.groupSize) >> GROUP_N_OFFSET) & GROUP_MNK_BIT_SIZE;
+    inputParams_.groupSizeK = static_cast<uint64_t>(inputParams_.groupSize) & GROUP_MNK_BIT_SIZE;
     OP_TILING_CHECK(inputParams_.groupSize == 0,
                     VECTOR_INNER_ERR_REPORT_TILIING(inputParams_.opName, "Group size cannot be 0."),
                     return false);
     OP_TILING_CHECK(inputParams_.groupSizeM == 0,
                     VECTOR_INNER_ERR_REPORT_TILIING(inputParams_.opName, "Group size M cannot be 0."),
                     return false);
-    OP_TILING_CHECK(inputParams_.groupSizeK == 0,
-                    VECTOR_INNER_ERR_REPORT_TILIING(inputParams_.opName, "Group size K cannot be 0."),
+    OP_TILING_CHECK(inputParams_.groupSizeK != 128,
+                    VECTOR_INNER_ERR_REPORT_TILIING(inputParams_.opName, "Group size K should be 128."),
                     return false);
-    OP_TILING_CHECK(inputParams_.groupSizeN == 0,
-                    VECTOR_INNER_ERR_REPORT_TILIING(inputParams_.opName, "Group size N cannot be 0."),
+    OP_TILING_CHECK(inputParams_.groupSizeN != 128,
+                    VECTOR_INNER_ERR_REPORT_TILIING(inputParams_.opName, "Group size N should be 128."),
                     return false);
 
     // check transposeX1
@@ -359,7 +359,6 @@ ge::graphStatus QuantBatchMatmulV4PerblockTiling::DoOpTiling()
         return ge::GRAPH_FAILED);
     SetTilingData();
 
-    constexpr uint32_t SYS_WORKSPACE_SIZE = 16U * 1024U * 1024U;
     workspaceSize_ = SYS_WORKSPACE_SIZE +
                      compileInfo_.aicNum * basicTiling_.baseN * basicTiling_.baseM * sizeof(int32_t) * CV_PARALL_NUM;
     return ge::GRAPH_SUCCESS;
@@ -407,7 +406,7 @@ ge::graphStatus QuantBatchMatmulV4PerblockTiling::DoLibApiTiling()
     size_t tilingDataSize = sizeof(QuantBatchMatmulV4PerblockTilingData);
     context_->SetBlockDim(compileInfo_.aicNum);
     context_->SetScheduleMode(1);   // 独占全核，设置以后会让所有核空闲以后才启动，有多核同步指令需要做此设置避免影响整网其他算子
-    errno_t ret = memcpy_s(context_->GetRawTilingData()->GetData(), context_->GetRawTilingData()->GetCapacity(), reinterpret_cast<void *>(&tilingData_), tilingDataSize);
+    errno_t ret = memcpy_s(context_->GetRawTilingData()->GetData(), context_->GetRawTilingData()->GetCapacity(), reinterpret_cast<void *>(tilingData_), tilingDataSize);
     if (ret != EOK){
         OP_LOGE(context_->GetNodeName(), "memcpy_s failed, ret=%d", ret);
         return ge::GRAPH_FAILED;

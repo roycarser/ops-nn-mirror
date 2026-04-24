@@ -17,7 +17,7 @@
 
 #include "register/tilingdata_base.h"
 #include "tiling/tiling_api.h"
-#include "tiling_base/tiling_base.h"
+#include "op_host/tiling_base.h"
 
 #include "../fused_quant_matmul_common.h"
 #include "matmul/quant_batch_matmul_v3/op_host/op_tiling/arch35/quant_batch_matmul_v3_checker_for_mmads8s4.h"
@@ -45,7 +45,7 @@ protected:
     bool CheckShapeInRangeForOptionalInputs(const gert::StorageShape *scaleShape, const gert::StorageShape *biasShape,
                                             const gert::StorageShape *offsetShape) const;
     bool CheckDimValue(const gert::StorageShape *scaleShape, const gert::StorageShape *biasShape,
-                       const gert::StorageShape *offsetShape, const std::vector<int64_t> &DimValueOfMKN) const;
+                       const gert::StorageShape *offsetShape, const std::vector<int64_t> &dimValueOfMKN) const;
 };
 } // namespace optiling
 #endif // FUSED_QUANT_MATMUL_CHECKER_H

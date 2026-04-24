@@ -23,13 +23,13 @@ extern "C" {
  * @brief aclnnQuantMatmulV5的第一段接口，根据具体的计算流程，计算workspace大小。
  * @domain aclnn_ops_infer
  * 算子功能：实现量化场景的矩阵乘。
- * @param [in] x1: matmul左矩阵，数据类型支持：float4_e2m1, int8, float8_e4m3fn, float8_e5m2, hifloat8。
- * @param [in] x2: matmul右矩阵，数据类型支持：float4_e2m1, int8, float8_e4m3fn, float8_e5m2, hifloat8。
+ * @param [in] x1: matmul左矩阵，数据类型支持：float4_e2m1, int8, int4, float8_e4m3fn, float8_e5m2, hifloat8。
+ * @param [in] x2: matmul右矩阵，数据类型支持：float4_e2m1, int8, int4, float8_e4m3fn, float8_e5m2, hifloat8。
  * @param [in] x1Scale: x1量化参数，数据类型支持：float8_e8m0, float32。
  * @param [in] x2Scale: x2量化参数，数据类型支持：float8_e8m0, bfloat16, float32, int64, uint64。
  * @param [in] yScale: y量化参数，数据类型支持：int64、uint64。
  * @param [in] x1Offset: 预留参数，当前接口不支持该参数。
- * @param [in] x2Offset: 量化参数，数据类型支持：float32。
+ * @param [in] x2Offset: 量化参数，数据类型支持：float32, float16。
  * @param [in] yOffset: 预留参数，当前接口不支持该参数。
  * @param [in] bias: 偏置，数据类型支持：int32, bfloat16, float16, float32。
  * @param [in] transposeX1: x1矩阵是否转置。

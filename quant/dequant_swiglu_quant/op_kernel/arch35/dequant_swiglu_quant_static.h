@@ -17,7 +17,11 @@
 #define DEQUANT_SWIGLU_QUANT_STATIC_H
 
 #include "kernel_tiling/kernel_tiling.h"
-#include "kernel_operator.h"
+#if ASC_DEVKIT_MAJOR >= 9
+    #include "basic_api/kernel_vec_intf.h"
+#else
+    #include "kernel_operator.h"
+#endif
 #include "dequant_swiglu_quant_common.h"
 
 namespace DequantSwigluQuantV35Ops {
@@ -360,7 +364,6 @@ __aicore__ inline void DequantSwigluQuantBaseStatic<TActScale, TQuantScale, TGro
         dataCopyWeightScaleParams.dstStride = 0;
         DataCopyPad(inScaleLocal[0], weightScaleGm_[groupIdx * tl_->inDimy], dataCopyWeightScaleParams, padParams);
       }
-      
     }
 
     // copy_in: quant_scale(G, H)
@@ -517,10 +520,20 @@ __aicore__ inline void DequantSwigluQuantBaseStatic<TActScale, TQuantScale, TGro
       }
       
       // static_quant
-      VF_CALL<StaticQuant>(tmpXPtr, qScalePtr, qOffsetPtr, tmpXPtr, width, xDimPerLoop, repeatTimes,
+      if (tl_->quantIsOne == 1 && hasQuantOffset_) {
+        VF_CALL<StaticQuantWithQuantOffsetOne>(tmpXPtr, qScalePtr, qOffsetPtr, tmpXPtr, width, xDimPerLoop, repeatTimes,
                            sizePerRepeat, xTypeUbAlignB32_, static_cast<uint16_t>(tl_->quantIsOne), hasQuantOffset_);
+      } else if (tl_->quantIsOne == 1 && !hasQuantOffset_) {
+        VF_CALL<StaticQuantWithOne>(tmpXPtr, qScalePtr, qOffsetPtr, tmpXPtr, width, xDimPerLoop, repeatTimes,
+                           sizePerRepeat, xTypeUbAlignB32_, static_cast<uint16_t>(tl_->quantIsOne), hasQuantOffset_);
+      } else if (tl_->quantIsOne != 1 && hasQuantOffset_) {
+        VF_CALL<StaticQuantWithQuantOffset>(tmpXPtr, qScalePtr, qOffsetPtr, tmpXPtr, width, xDimPerLoop, repeatTimes,
+                           sizePerRepeat, xTypeUbAlignB32_, static_cast<uint16_t>(tl_->quantIsOne), hasQuantOffset_);
+      } else if (tl_->quantIsOne != 1 && !hasQuantOffset_) {
+        VF_CALL<StaticQuant>(tmpXPtr, qScalePtr, qOffsetPtr, tmpXPtr, width, xDimPerLoop, repeatTimes,
+                           sizePerRepeat, xTypeUbAlignB32_, static_cast<uint16_t>(tl_->quantIsOne), hasQuantOffset_);
+      }
       
-    
       xActQueue_.FreeTensor(xActLocal);
 
       // cast y

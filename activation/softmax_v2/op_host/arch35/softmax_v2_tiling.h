@@ -17,9 +17,8 @@
 #define SOFTMAX_V2_TILING_BASE_H_
 #include <cmath>
 #include "register/tilingdata_base.h"
-#include "tiling_base/tiling_base.h"
+#include "op_host/tiling_base.h"
 #include "register/op_impl_registry.h"
-#include "op_util.h"
 #include <vector>
 #include <exe_graph/runtime/tiling_context.h>
 
@@ -158,6 +157,8 @@ constexpr int64_t FLOAT16_BYTES = 2;
 constexpr int64_t FP32_BLOCK_ALIGN_NUM = 8;
 constexpr int64_t FP16_BLOCK_ALIGN_NUM = 16;
 constexpr int64_t DATA_BLOCK_COUNT = 16;
+constexpr int64_t MAX_A_LEN = 160;
+constexpr int64_t MIN_A_LEN = 5;
 
 constexpr int64_t DIM_NUM_ONE = 1;
 constexpr int64_t MAX_DIMS = 8;

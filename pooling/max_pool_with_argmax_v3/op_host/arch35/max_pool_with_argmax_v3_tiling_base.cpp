@@ -13,7 +13,7 @@
  * \brief
  */
 
-#include "tiling_base/tiling_templates_registry.h"
+#include "op_host/tiling_templates_registry.h"
 #include "log/log.h"
 #include "error_util.h"
 #include "platform/platform_info.h"
@@ -46,7 +46,7 @@ ge::graphStatus MaxPoolWithArgmaxV3BaseTiling::GetPlatformInfo()
 {
     auto platformPtr = context_->GetPlatformInfo();
     if (platformPtr == nullptr) {
-        auto compileInfoPtr = reinterpret_cast<const MaxPoolWithArgmaxV3CompileInfo*>(context_->GetCompileInfo());
+        auto compileInfoPtr = static_cast<const MaxPoolWithArgmaxV3CompileInfo*>(context_->GetCompileInfo());
         OP_CHECK_IF(
             compileInfoPtr == nullptr, CUBE_INNER_ERR_REPORT(context_, "compile info is null"),
             return ge::GRAPH_FAILED);

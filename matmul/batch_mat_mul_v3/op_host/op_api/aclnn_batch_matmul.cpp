@@ -95,6 +95,10 @@ static bool CheckShape(const aclTensor* selfTensor, const aclTensor* otherTensor
     const op::Shape self = selfTensor->GetViewShape();
     const op::Shape other = otherTensor->GetViewShape();
     const op::Shape out = outTensor->GetViewShape();
+    if ((other[1] == 1 || other[2] == 1) && otherTensor->GetStorageFormat() == Format::FORMAT_FRACTAL_NZ) {
+        OP_LOGE(ACLNN_ERR_PARAM_INVALID, "The k-axis or n-axis can not be 1.");
+        return false;
+    }
     // selfDimNum - 1 means self's last dim, and otherDimNum - 2 means mat2's penultimate dim
     if (selfDimNum < 2 || otherDimNum < 2 || outDimNum < 2) {
         OP_LOGE(
@@ -161,7 +165,7 @@ static aclnnStatus CheckParamsV2(const aclTensor* self, const aclTensor* mat2, c
     CHECK_RET(CheckNotNull(self, mat2, out), ACLNN_ERR_PARAM_NULLPTR);
 
     // 2. 检查输入的数据类型是否在API支持的数据类型范围之内，需要根据api定义校验
-    auto archRule = NpuArchMatMulRule::getInstance();
+    auto archRule = BuildRule();
     CHECK_RET(archRule != nullptr, ACLNN_ERR_PARAM_INVALID);
     CHECK_RET(
         archRule -> CheckInput(self, mat2, nullptr, out, cubeMathType),
@@ -170,7 +174,7 @@ static aclnnStatus CheckParamsV2(const aclTensor* self, const aclTensor* mat2, c
     // 3. 检查self和mat2的shape是否符合要求
     CHECK_RET(CheckShape(self, mat2, out), ACLNN_ERR_PARAM_INVALID);
     
-    // 4. 检查self和mat2的format是否符合要求
+    // 4. 检查self和out的format是否符合要求
     CHECK_RET(CheckFormat(self, mat2, out), ACLNN_ERR_PARAM_INVALID);
     return ACLNN_SUCCESS;
 }
@@ -197,7 +201,7 @@ static inline bool CheckMathType(const aclTensor* self, const aclTensor* mat2, i
 bool CheckDtypeValidWeightNz(const aclTensor* self, const aclTensor* mat2, const aclTensor* out)
 {
     auto npuArch = GetCurrentPlatformInfo().GetCurNpuArch();
-    if (npuArch != NpuArch::DAV_2201) {
+    if ((npuArch != NpuArch::DAV_2201) && (npuArch != NpuArch::DAV_3510)) {
         OP_LOGE(
             ACLNN_ERR_PARAM_INVALID,
             "batchmatmulweightnz is unsupported in this npu arch");

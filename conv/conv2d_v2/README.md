@@ -85,7 +85,7 @@
 <td>输出</td>
 <td>公式中的输出张量 y。</td>
 <td>FLOAT16、FLOAT、BFLOAT16、HIFLOAT8</td>
-<td>NCDHW、NDHWC</td>
+<td>NCHW、NHWC</td>
 </tr>
 <tr>
 <td>strides</td>
@@ -152,7 +152,6 @@
   - 对于 `filter` 输入，`H`、`W` 的大小应该在 [1, 511] 的范围内。`N` 维度大小应该大于等于 0（等于 0 的场景仅在 `bias`、`output` 的 `N` 维度也等于 0 时支持），`C` 维度大小的支持情况与输入 `x` 的 `C` 维度一致。
   - 当 `x` 和 `filter` 数据类型是 `HIFLOAT8` 时，`bias` 数据类型会转成 `FLOAT` 参与计算。
 
-
   <table>
   <tr>
   <th style="text-align:center; width:80px">张量</th>
@@ -208,7 +207,6 @@
 - 如果任何参数超出上述范围，算子的正确性无法保证。
 
 - 由于硬件资源限制，算子在部分参数取值组合场景下会执行失败，请根据日志信息提示分析并排查问题。若无法解决，请单击 [Link](https://www.hiascend.com/support) 获取技术支持。
-
 
 ## 调用说明
 

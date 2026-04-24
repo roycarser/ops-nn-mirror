@@ -25,6 +25,75 @@ function(add_modules)
   endforeach()
 endfunction()
 
+# 添加opbase object
+function(add_opbase_modules)
+  if(TARGET opbase_infer_objs OR TARGET opbase_tiling_objs OR TARGET opbase_util_objs)
+    return()
+  endif()
+  file(GLOB_RECURSE OPS_BASE_INFER_SRC
+    ${OPBASE_SOURCE_PATH}/src/op_common/op_host/infershape_broadcast_util.cpp
+    ${OPBASE_SOURCE_PATH}/src/op_common/op_host/infershape_elewise_util.cpp
+    ${OPBASE_SOURCE_PATH}/src/op_common/op_host/infershape_reduce_util.cpp
+  )
+
+  file(GLOB_RECURSE OPS_BASE_TILING_SRC
+    ${OPBASE_SOURCE_PATH}/src/op_common/atvoss/elewise/*.cpp
+    ${OPBASE_SOURCE_PATH}/src/op_common/atvoss/broadcast/*.cpp
+    ${OPBASE_SOURCE_PATH}/src/op_common/atvoss/reduce/*.cpp
+  )
+
+  file(GLOB_RECURSE OPS_BASE_UTIL_SRC
+    ${OPBASE_SOURCE_PATH}/src/op_common/op_host/util/*.cpp
+    ${OPBASE_SOURCE_PATH}/src/op_common/log/*.cpp
+  )
+
+  if(OPS_BASE_INFER_SRC)
+    add_library(opbase_infer_objs OBJECT ${OPS_BASE_INFER_SRC})
+    target_include_directories(opbase_infer_objs PRIVATE ${OP_PROTO_INCLUDE})
+    target_compile_options(opbase_infer_objs
+        PRIVATE
+        $<$<NOT:$<BOOL:${ENABLE_TEST}>>:-DDISABLE_COMPILE_V1> -Dgoogle=ascend_private
+        -fvisibility=hidden
+    )
+    target_link_libraries(
+      opbase_infer_objs
+      PRIVATE $<BUILD_INTERFACE:$<IF:$<BOOL:${ENABLE_TEST}>,intf_llt_pub_asan_cxx17,intf_pub_cxx17>>
+              $<BUILD_INTERFACE:dlog_headers>
+      )
+  endif()
+
+  if(OPS_BASE_TILING_SRC)
+    add_library(opbase_tiling_objs OBJECT ${OPS_BASE_TILING_SRC})
+    target_include_directories(opbase_tiling_objs PRIVATE ${OP_TILING_INCLUDE})
+    target_compile_options(opbase_tiling_objs
+        PRIVATE
+        $<$<NOT:$<BOOL:${ENABLE_TEST}>>:-DDISABLE_COMPILE_V1> -Dgoogle=ascend_private
+                                        -fvisibility=hidden -fno-strict-aliasing
+    )
+    target_link_libraries(
+      opbase_tiling_objs
+      PRIVATE $<BUILD_INTERFACE:$<IF:$<BOOL:${ENABLE_TEST}>,intf_llt_pub_asan_cxx17,intf_pub_cxx17>>
+              $<BUILD_INTERFACE:dlog_headers>
+              tiling_api
+      )
+  endif()
+
+  if(OPS_BASE_UTIL_SRC)
+    add_library(opbase_util_objs OBJECT ${OPS_BASE_UTIL_SRC})
+    target_include_directories(opbase_util_objs PRIVATE ${OP_TILING_INCLUDE})
+    target_compile_options(opbase_util_objs
+        PRIVATE
+        $<$<NOT:$<BOOL:${ENABLE_TEST}>>:-DDISABLE_COMPILE_V1> -Dgoogle=ascend_private
+        -fvisibility=hidden
+    )
+    target_link_libraries(
+      opbase_util_objs
+      PRIVATE $<BUILD_INTERFACE:$<IF:$<BOOL:${ENABLE_TEST}>,intf_llt_pub_asan_cxx17,intf_pub_cxx17>>
+              $<BUILD_INTERFACE:dlog_headers>
+      )
+  endif()
+endfunction()
+
 # 添加infer object
 function(add_infer_modules)
   if(NOT TARGET ${OPHOST_NAME}_infer_obj)
@@ -46,8 +115,8 @@ function(add_infer_modules)
       ${OPHOST_NAME}_infer_obj
       PRIVATE $<BUILD_INTERFACE:$<IF:$<BOOL:${ENABLE_TEST}>,intf_llt_pub_asan_cxx17,intf_pub_cxx17>>
               $<BUILD_INTERFACE:dlog_headers>
-              $<$<TARGET_EXISTS:ops_base_util_objs>:$<TARGET_OBJECTS:ops_base_util_objs>>
-              $<$<TARGET_EXISTS:ops_base_infer_objs>:$<TARGET_OBJECTS:ops_base_infer_objs>>
+              $<$<TARGET_EXISTS:opbase_util_objs>:$<TARGET_OBJECTS:opbase_util_objs>>
+              $<$<TARGET_EXISTS:opbase_infer_objs>:$<TARGET_OBJECTS:opbase_infer_objs>>
       )
   endif()
 endfunction()
@@ -87,8 +156,8 @@ function(add_tiling_modules)
       PRIVATE $<BUILD_INTERFACE:$<IF:$<BOOL:${ENABLE_TEST}>,intf_llt_pub_asan_cxx17,intf_pub_cxx17>>
               $<BUILD_INTERFACE:dlog_headers>
               $<$<TARGET_EXISTS:${COMMON_NAME}_obj>:$<TARGET_OBJECTS:${COMMON_NAME}_obj>>
-              $<$<TARGET_EXISTS:ops_base_util_objs>:$<TARGET_OBJECTS:ops_base_util_objs>>
-              $<$<TARGET_EXISTS:ops_base_tiling_objs>:$<TARGET_OBJECTS:ops_base_tiling_objs>>
+              $<$<TARGET_EXISTS:opbase_util_objs>:$<TARGET_OBJECTS:opbase_util_objs>>
+              $<$<TARGET_EXISTS:opbase_tiling_objs>:$<TARGET_OBJECTS:opbase_tiling_objs>>
               tiling_api
       )
   endif()
@@ -219,6 +288,7 @@ function(add_graph_plugin_modules)
     target_include_directories(${GRAPH_PLUGIN_NAME}_obj PRIVATE 
       ${OP_PROTO_INCLUDE}
       ${PROJECT_SOURCE_DIR}/common/inc
+      ${PROJECT_SOURCE_DIR}/common/graph_fusion
       ${ASCEND_DIR}/include
       ${ASCEND_DIR}/include/external
       ${ASCEND_DIR}/include/exe_graph
@@ -241,8 +311,8 @@ function(add_graph_plugin_modules)
       ${GRAPH_PLUGIN_NAME}_obj
       PRIVATE $<BUILD_INTERFACE:$<IF:$<BOOL:${ENABLE_TEST}>,intf_llt_pub_asan_cxx17,intf_pub_cxx17>>
               $<BUILD_INTERFACE:dlog_headers>
-              $<$<TARGET_EXISTS:ops_base_util_objs>:$<TARGET_OBJECTS:ops_base_util_objs>>
-              $<$<TARGET_EXISTS:ops_base_infer_objs>:$<TARGET_OBJECTS:ops_base_infer_objs>>
+              $<$<TARGET_EXISTS:opbase_util_objs>:$<TARGET_OBJECTS:opbase_util_objs>>
+              $<$<TARGET_EXISTS:opbase_infer_objs>:$<TARGET_OBJECTS:opbase_infer_objs>>
               metadef
               graph
               register
@@ -253,8 +323,8 @@ function(add_graph_plugin_modules)
       ${GRAPH_PLUGIN_NAME}_obj
       PRIVATE $<BUILD_INTERFACE:$<IF:$<BOOL:${ENABLE_TEST}>,intf_llt_pub_asan_cxx17,intf_pub_cxx17>>
               $<BUILD_INTERFACE:dlog_headers>
-              $<$<TARGET_EXISTS:ops_base_util_objs>:$<TARGET_OBJECTS:ops_base_util_objs>>
-              $<$<TARGET_EXISTS:ops_base_infer_objs>:$<TARGET_OBJECTS:ops_base_infer_objs>>
+              $<$<TARGET_EXISTS:opbase_util_objs>:$<TARGET_OBJECTS:opbase_util_objs>>
+              $<$<TARGET_EXISTS:opbase_infer_objs>:$<TARGET_OBJECTS:opbase_infer_objs>>
       )
     endif()
   endif()
@@ -321,71 +391,6 @@ macro(add_category_subdirectory)
   endif()
 endmacro()
 
-function(concat_op_names)
-  set(multiValueArgs OPTYPE ACLNNTYPE ACLNN_EXTRA_VERSION)
-  cmake_parse_arguments(ARG "" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
-
-  if(${ARG_ACLNNTYPE} STREQUAL "aclnn")
-    set(ACLNN_PREFIX aclnn_${ARG_OPTYPE})
-    set(ACLNN_EXTRA_HEADER "")
-    set(ACLNN_EXTRA_SRC "")
-
-    list(LENGTH ARG_ACLNN_EXTRA_VERSION AclnnExtraVersionLen)
-    math(EXPR index "${AclnnExtraVersionLen} - 1")
-    if (index GREATER_EQUAL 0)
-      foreach(i RANGE ${index})
-        list(GET ARG_ACLNN_EXTRA_VERSION ${i} version)
-        list(APPEND ACLNN_EXTRA_HEADER ${ACLNN_PREFIX}_${version}.h)
-        list(APPEND ACLNN_EXTRA_SRC ${ACLNN_PREFIX}_${version}.cpp)
-      endforeach()
-    endif()
-
-    list(APPEND ACLNN_EXTRA_HEADERS ${ACLNN_EXTRA_HEADER})
-    list(REMOVE_DUPLICATES ACLNN_EXTRA_HEADERS)
-    list(APPEND ACLNN_EXTRA_SRCS ${ACLNN_EXTRA_SRC})
-    list(REMOVE_DUPLICATES ACLNN_EXTRA_SRCS)
-
-    set(ACLNN_EXTRA_HEADERS
-      ${ACLNN_EXTRA_HEADERS}
-      CACHE STRING "Aclnn Extra Headers" FORCE
-    )
-    set(ACLNN_EXTRA_SRCS
-      ${ACLNN_EXTRA_SRCS}
-      CACHE STRING "Aclnn Extra Sources" FORCE
-    )
-
-  elseif(${ARG_ACLNNTYPE} STREQUAL "aclnn_inner")
-    set(ACLNNINNER_PREFIX aclnnInner_${ARG_OPTYPE})
-    set(ACLNNINNER_EXTRA_HEADER "")
-    set(ACLNNINNER_EXTRA_SRC "")
-
-    list(LENGTH ARG_ACLNN_EXTRA_VERSION AclnnExtraVersionLen)
-    math(EXPR index "${AclnnExtraVersionLen} - 1")
-    if (index GREATER_EQUAL 0)
-      foreach(i RANGE ${index})
-        list(GET ARG_ACLNN_EXTRA_VERSION ${i} version)
-        list(APPEND ACLNNINNER_EXTRA_HEADER ${ACLNNINNER_PREFIX}_${version}.h)
-        list(APPEND ACLNNINNER_EXTRA_SRC ${ACLNNINNER_PREFIX}_${version}.cpp)
-      endforeach()
-    endif()
-
-    list(APPEND ACLNNINNER_EXTRA_HEADERS ${ACLNNINNER_EXTRA_HEADER})
-    list(REMOVE_DUPLICATES ACLNNINNER_EXTRA_HEADERS)
-    list(APPEND ACLNNINNER_EXTRA_SRCS ${ACLNNINNER_EXTRA_SRC})
-    list(REMOVE_DUPLICATES ACLNNINNER_EXTRA_SRCS)
-
-    set(ACLNNINNER_EXTRA_HEADERS
-      ${ACLNNINNER_EXTRA_HEADERS}
-      CACHE STRING "AclnnInner Extra Headers" FORCE
-    )
-    set(ACLNNINNER_EXTRA_SRCS
-      ${ACLNNINNER_EXTRA_SRCS}
-      CACHE STRING "AclnnInner Extra Sources" FORCE
-    )
-
-  endif()
-endfunction()
-
 # 从两个长度一致的列表中查找相同位置的元素
 function(find_value_by_key key_list value_list search_key result)
   list(LENGTH key_list key_list_length)
@@ -426,25 +431,20 @@ function(add_tiling_sources source_dir tiling_dir disable_in_opp)
   endif()
 endfunction()
 
-# useage: add_modules_sources(DIR OPTYPE ACLNNTYPE ACLNN_EXTRA_VERSION DEPENDENCIES COMPUTE_UNIT TILING_DIR DISABLE_IN_OPP) ACLNNTYPE 支持类型aclnn/aclnn_inner/aclnn_exclude OPTYPE 和 ACLNNTYPE
+# useage: add_modules_sources(DIR OPTYPE ACLNNTYPE DEPENDENCIES COMPUTE_UNIT TILING_DIR DISABLE_IN_OPP) ACLNNTYPE 支持类型aclnn/aclnn_inner/aclnn_exclude OPTYPE 和 ACLNNTYPE
 # DEPENDENCIES 算子依赖
-# ACLNNEXTRAVERSION 算子版本(ex., v2, v3, 5, etc.)
 # COMPUTE_UNIT 设置支持芯片版本号，必须与TILING_DIR一一对应，示例：ascend910b ascend950
 # TILING_DIR 设置所支持芯片类型对应的tiling文件目录，必须与COMPUTE_UNIT一一对应，示例：arch32 arch35
 # DISABLE_IN_OPP 设置是否在opp包中编译tiling文件，布尔类型：TRUE，FALSE
 # 需一一对应
 function(add_modules_sources)
-  set(multiValueArgs OPTYPE ACLNNTYPE ACLNN_EXTRA_VERSION DEPENDENCIES COMPUTE_UNIT TILING_DIR)
+  set(multiValueArgs OPTYPE ACLNNTYPE DEPENDENCIES COMPUTE_UNIT TILING_DIR)
   set(oneValueArgs DIR DISABLE_IN_OPP)
 
   cmake_parse_arguments(MODULE "" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
   set(SOURCE_DIR ${MODULE_DIR})
 
-  list(LENGTH MODULE_OPTYPE OpTypeLen)
-  list(LENGTH MODULE_ACLNN_EXTRA_VERSION AclnnExtraVersionLen)
-  if((AclnnExtraVersionLen GREATER 1) AND (OpTypeLen GREATER 1))
-    message(FATAL_ERROR "There should be only 1 optype if there are more than 1 aclnn extra versions!")
-  endif()
+  add_opbase_modules()
 
   # opapi 默认全部编译
   file(GLOB OPAPI_SRCS ${SOURCE_DIR}/op_api/*.cpp)
@@ -511,11 +511,12 @@ function(add_modules_sources)
          OR ${AclnnType} STREQUAL "aclnn_exclude"
         )
         file(GLOB OPDEF_SRCS ${SOURCE_DIR}/${OpType}_def*.cpp)
+        if(NOT ${MODULE_EXT} STREQUAL "")
+            file(GLOB OPDEF_EXT_SRCS ${MODULE_EXT}/${op_category}/${OP_NAME}/op_host/${OpType}*_def*.cpp)
+            list(APPEND OPDEF_SRCS ${OPDEF_EXT_SRCS})
+        endif()
         if(OPDEF_SRCS)
           target_sources(${OPHOST_NAME}_opdef_${AclnnType}_obj INTERFACE ${OPDEF_SRCS})
-        endif()
-        if(AclnnExtraVersionLen GREATER 0)
-          concat_op_names(OPTYPE ${OpType} ACLNNTYPE ${AclnnType} ACLNN_EXTRA_VERSION ${MODULE_ACLNN_EXTRA_VERSION})
         endif()
       elseif(${AclnnType} STREQUAL "no_need_aclnn")
         message(STATUS "aicpu or host aicpu no need aclnn.")
@@ -742,9 +743,71 @@ function(add_onnx_plugin_modules)
       ${ONNX_PLUGIN_NAME}_obj
       PRIVATE $<BUILD_INTERFACE:$<IF:$<BOOL:${ENABLE_TEST}>,intf_llt_pub_asan_cxx17,intf_pub_cxx14>>
               $<BUILD_INTERFACE:dlog_headers>
-              $<$<TARGET_EXISTS:ops_base_util_objs>:$<TARGET_OBJECTS:ops_base_util_objs>>
-              $<$<TARGET_EXISTS:ops_base_infer_objs>:$<TARGET_OBJECTS:ops_base_infer_objs>>
+              $<$<TARGET_EXISTS:opbase_util_objs>:$<TARGET_OBJECTS:opbase_util_objs>>
+              $<$<TARGET_EXISTS:opbase_infer_objs>:$<TARGET_OBJECTS:opbase_infer_objs>>
       )
+  endif()
+endfunction()
+
+# 添加 cube_utils 插件模块
+function(add_cube_utils_plugin_modules)
+  if (NOT TARGET ${CUBE_UTILS_PLUGIN_NAME}_obj)
+    if(BUILD_WITH_INSTALLED_DEPENDENCY_CANN_PKG)
+      npu_op_library(${CUBE_UTILS_PLUGIN_NAME}_obj GRAPH)
+    else()
+      add_library(${CUBE_UTILS_PLUGIN_NAME}_obj OBJECT)
+    endif()
+
+    # 设置 C++14 标准
+    set_target_properties(${CUBE_UTILS_PLUGIN_NAME}_obj PROPERTIES
+      CXX_STANDARD 14
+      CXX_STANDARD_REQUIRED ON
+      CXX_EXTENSIONS OFF
+    )
+    
+    # 设置头文件包含路径
+    target_include_directories(${CUBE_UTILS_PLUGIN_NAME}_obj PRIVATE 
+      ${OP_PROTO_INCLUDE} 
+      ${ASCEND_DIR}/include
+      ${CMAKE_CURRENT_SOURCE_DIR}
+      ${PROJECT_SOURCE_DIR}/common/inc
+    )
+    
+    # 设置编译定义
+    target_compile_definitions(${CUBE_UTILS_PLUGIN_NAME}_obj PRIVATE 
+      OPS_UTILS_LOG_SUB_MOD_NAME="CUBE_UTILS_PLUGIN" 
+      LOG_CPP
+    )
+
+    # 设置编译选项
+    if(BUILD_WITH_INSTALLED_DEPENDENCY_CANN_PKG)
+      target_compile_options(
+        ${CUBE_UTILS_PLUGIN_NAME}_obj PRIVATE 
+          -Dgoogle=ascend_private 
+          -fvisibility=hidden 
+          -Wno-shadow 
+          -Wno-unused-parameter
+          -Wno-deprecated-declarations
+      )
+    else()
+      target_compile_options(
+        ${CUBE_UTILS_PLUGIN_NAME}_obj PRIVATE 
+          $<$<NOT:$<BOOL:${ENABLE_TEST}>>:-DDISABLE_COMPILE_V1> 
+          -Dgoogle=ascend_private
+          -fvisibility=hidden 
+          -Wno-shadow 
+          -Wno-unused-parameter
+      )
+    endif()
+
+    # 设置链接库
+    target_link_libraries(
+      ${CUBE_UTILS_PLUGIN_NAME}_obj
+      PRIVATE 
+        $<BUILD_INTERFACE:$<IF:$<BOOL:${ENABLE_TEST}>,intf_llt_pub_asan_cxx17,intf_pub_cxx14>>
+        $<BUILD_INTERFACE:dlog_headers>
+        eager_style_graph_builder_base
+    )
   endif()
 endfunction()
 
@@ -758,4 +821,156 @@ macro(add_onnx_plugin_sources)
   else()
     message(STATUS "ONNX_PLUGIN_SRCS is empty")
   endif()
+  endmacro()
+
+# 添加 cube_utils 插件源文件
+macro(add_cube_utils_plugin_sources)
+  set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+
+  # 收集所有 cube_utils/*.cc 文件
+  file(GLOB CUBE_UTILS_PLUGIN_SRCS ${SOURCE_DIR}/cube_utils/*.cc)
+  if(CUBE_UTILS_PLUGIN_SRCS)
+    add_cube_utils_plugin_modules()
+    target_sources(${CUBE_UTILS_PLUGIN_NAME}_obj PRIVATE ${CUBE_UTILS_PLUGIN_SRCS})
+  else()
+    message(STATUS "CUBE_UTILS_PLUGIN_SRCS is empty")
+  endif()
+endmacro()
+
+# 设置包和版本号
+function(set_package name)
+  cmake_parse_arguments(VERSION "" "VERSION" "" ${ARGN})
+  set(VERSION "${VERSION_VERSION}")
+  if(NOT name)
+      message(FATAL_ERROR "The name parameter is not set in set_package.")
+  endif()
+  if(NOT VERSION)
+      message(FATAL_ERROR "The VERSION parameter is not set in set_package(${name}).")
+  endif()
+  string(REGEX MATCH "^([0-9]+\\.[0-9]+)" VERSION_MAJOR_MINOR "${VERSION}")
+  set(CANN_VERSION_PACKAGES "${name}" PARENT_SCOPE)
+  set(CANN_VERSION "${VERSION}" PARENT_SCOPE)
+  set(CANN_VERSION_MAJOR_MINOR "${VERSION_MAJOR_MINOR}" PARENT_SCOPE)
+  set(CANN_VERSION_BUILD_DEPS PARENT_SCOPE)
+  set(CANN_VERSION_RUN_DEPS PARENT_SCOPE)
+endfunction()
+
+# 设置构建依赖
+function(set_build_dependencies pkg_name depend)
+  if(NOT CANN_VERSION_PACKAGES)
+      message(FATAL_ERROR "The set_package must be invoked first.")
+  endif()
+  if(NOT pkg_name)
+      message(FATAL_ERROR "The pkg_name parameter is not set in set_build_dependencies.")
+  endif()
+  if(NOT depend)
+      message(FATAL_ERROR "The depend parameter is not set in set_build_dependencies.")
+  endif()
+  
+  list(APPEND CANN_VERSION_BUILD_DEPS "${pkg_name}" "${depend}")
+  set(CANN_VERSION_BUILD_DEPS "${CANN_VERSION_BUILD_DEPS}" PARENT_SCOPE)
+endfunction()
+
+# 设置运行依赖
+function(set_run_dependencies pkg_name depend)
+  if(NOT CANN_VERSION_PACKAGES)
+      message(FATAL_ERROR "The set_package must be invoked first.")
+  endif()
+  if(NOT pkg_name)
+      message(FATAL_ERROR "The pkg_name parameter is not set in set_run_dependencies.")
+  endif()
+  if(NOT depend)
+      message(FATAL_ERROR "The depend parameter is not set in set_run_dependencies.")
+  endif()
+  
+  list(APPEND CANN_VERSION_RUN_DEPS "${pkg_name}" "${depend}")
+  set(CANN_VERSION_RUN_DEPS "${CANN_VERSION_RUN_DEPS}" PARENT_SCOPE)
+endfunction()
+
+# 检查构建依赖
+function(check_pkg_build_deps pkg_name)
+  execute_process(
+      COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_build_dependencies.py "${ASCEND_DIR}" ${CANN_VERSION_BUILD_DEPS}
+      RESULT_VARIABLE result
+  )
+  if(result)
+      message(FATAL_ERROR "Check ${pkg_name} build dependencies failed!")
+  endif()
+endfunction()
+
+# 添加生成version.info的目标
+# 目标名格式为：version.info
+function(add_version_info_targets)
+  execute_process(
+    COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_version_info.py --output ${CMAKE_BINARY_DIR}/version.info
+            "${CANN_VERSION}" ${CANN_VERSION_RUN_DEPS}
+    RESULT_VARIABLE result
+  )
+  if(result)
+      message(FATAL_ERROR "Generate ${pkg_name} version.info failed!")
+  endif()
+endfunction()
+
+# PyTorch extension
+# usage: add_sources("--npu-arch=dav-3510")
+# usage: add_sources("--npu-arch=dav-3510" "file1.cpp;file2.cpp;file3.cpp")
+macro(add_sources ARGS)
+    # 解析参数
+    set(COMPILE_ARGS "${ARGS}")  # 第一个参数为编译参数
+    set(CUSTOM_SOURCES "")       # 第二个参数为自定义源文件列表（可选）
+    
+    # 检查是否有第二个参数
+    if(${ARGC} GREATER 1)
+        set(CUSTOM_SOURCES "${ARGV1}")
+    endif()
+
+    message(STATUS "CMAKE_CURRENT_SOURCE_DIR = ${CMAKE_CURRENT_SOURCE_DIR}")
+
+    # get parent dir name as OP_NAME
+    get_filename_component(OP_NAME ${CMAKE_CURRENT_SOURCE_DIR} NAME)
+    message(STATUS "OP_NAME: ${OP_NAME}")
+
+    # get compile flags for current op
+    set(COMPILE_FLAGS "${COMPILE_ARGS} -xasc ")
+    message(STATUS "COMPILE FLAGS: ${COMPILE_FLAGS}")
+
+    file(GLOB_RECURSE SOURCE_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
+
+    # 根据是否传入自定义源文件列表决定如何获取源文件
+    if(CUSTOM_SOURCES)
+        foreach(SRC ${CUSTOM_SOURCES})
+            # 确保文件存在
+            if(EXISTS ${SRC})
+                # 获取相对于当前源目录的相对路径
+                file(RELATIVE_PATH REL_SRC ${CMAKE_CURRENT_SOURCE_DIR} ${SRC})
+                list(APPEND SOURCE_FILES ${REL_SRC})
+            else()
+                message(WARNING "Source file not found: ${SRC}")
+            endif()
+        endforeach()
+    endif()
+    
+    message(STATUS "SOURCE FILES: ${SOURCE_FILES}")
+    if(SOURCE_FILES STREQUAL "")
+        message(FATAL_ERROR "No source files found")
+    endif()
+
+    # set_source_files_properties
+    set_source_files_properties(
+        ${SOURCE_FILES} PROPERTIES
+        LANGUAGE CXX
+        COMPILE_FLAGS "${COMPILE_FLAGS}"
+    )
+
+    # set target name
+    set(TARGET_NAME ${OP_NAME}_obj)
+    add_library(${TARGET_NAME} OBJECT ${SOURCE_FILES})
+    target_compile_options(${TARGET_NAME} PRIVATE ${COMPILE_OPTIONS})
+    target_include_directories(${TARGET_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${INCLUDE_DIRECTORIES})
+
+    # add target obj to PE_OBJECTS_LIST
+    set(NEW_OBJECT_EXPRESSION $<TARGET_OBJECTS:${TARGET_NAME}>)
+    set(TEMP_LIST ${PE_OBJECTS_LIST})
+    list(APPEND TEMP_LIST ${NEW_OBJECT_EXPRESSION})
+    set(PE_OBJECTS_LIST ${TEMP_LIST} CACHE INTERNAL "List of PyTorch extension objects" FORCE)
 endmacro()

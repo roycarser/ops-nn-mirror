@@ -15,7 +15,7 @@
 #include "transpose_batch_mat_mul_base_tiling.h"
 #include "util/math_util.h"
 #include "log/log.h"
-#include "tiling_base/tiling_key.h"
+#include "op_host/tiling_key.h"
 #include "error_util.h"
 #include "op_cache_tiling.h"
 #include "runtime_kb_api.h"
@@ -37,6 +37,7 @@ constexpr size_t KA_IDX = 2;
 constexpr size_t KB_IDX = 1;
 constexpr size_t N_IDX = 2;
 constexpr size_t BIAS_IDX = 2;
+constexpr size_t SCALE_IDX = 3;
 constexpr uint64_t BLOCK_CUBE = 16;
 constexpr uint64_t NO_BATCH_SHAPE_DIM = 2;
 constexpr uint64_t ONE_BATCH_SHAPE_DIM = 3;
@@ -47,6 +48,7 @@ constexpr uint64_t DEFAULT_SIZE = 32;
 constexpr uint64_t NUM_TWO = 2;
 constexpr uint64_t BASIC_BLOCK_SIZE_128 = 128;
 constexpr uint64_t BASIC_BLOCK_SIZE_256 = 256;
+constexpr int64_t kSupportedInnerAxis = 65536;
 }  // namespace
 
 
@@ -234,6 +236,8 @@ static void TuneBaseMKN(matmul_v3::MatmulV3RunInfo &runInfo,
 
 void TransposeBatchMatMulBaseTiling::ResetBasicBlock(uint64_t tempBaseM, uint64_t tempBaseN)
 {
+    OP_TILING_CHECK(tempBaseM == 0 && tempBaseN == 0,
+                    OP_LOGW(args_.opName, "tempBaseM == 0 && tempBaseN == 0 is invalid"), return);
     uint64_t baseKAlignNum =
         (!args_.isATrans && args_.isBTrans) ? GetAlignNumWithDataType(BASIC_BLOCK_SIZE_256, args_.aType) : BLOCK_CUBE;
     uint64_t kValueAlign = ops::CeilAlign(static_cast<uint64_t>(args_.kValue), baseKAlignNum);
@@ -264,19 +268,19 @@ void TransposeBatchMatMulBaseTiling::BaseLoadBalance()
         if (mMaxTile < nMaxTile || (mMaxTile == nMaxTile && baseNAlignNum == BLOCK_CUBE)) {
             tempBaseM = ops::CeilAlign(ops::CeilDiv(args_.mValue, mCore), baseMAlignNum);
             mCore = ops::CeilDiv(args_.mValue, tempBaseM);
-            nCore = coreNumMN / mCore;
+            nCore = ops::FloorDiv(coreNumMN, mCore);
             tempBaseN = ops::CeilAlign(ops::CeilDiv(args_.nValue, nCore), baseNAlignNum);
         } else {
             tempBaseN = ops::CeilAlign(ops::CeilDiv(args_.nValue, nCore), baseNAlignNum);
             nCore = ops::CeilDiv(args_.nValue, tempBaseN);
-            mCore = coreNumMN / nCore;
+            mCore = ops::FloorDiv(coreNumMN, nCore);
             tempBaseM = ops::CeilAlign(ops::CeilDiv(args_.mValue, mCore), baseMAlignNum);
         }
 
         while (tempBaseN >= tempBaseM * NUM_TWO && nCore < coreNumMN / NUM_TWO &&
             tempBaseN != baseNAlignNum) {
             nCore *= NUM_TWO;
-            mCore = coreNumMN / nCore;
+            mCore = ops::FloorDiv(coreNumMN, nCore);
             tempBaseM = ops::CeilAlign(ops::CeilDiv(args_.mValue, mCore), baseMAlignNum);
             tempBaseN = ops::CeilAlign(ops::CeilDiv(args_.nValue, nCore), baseNAlignNum);
             mCore = ops::CeilDiv(args_.mValue, static_cast<uint64_t>(tempBaseM));
@@ -286,7 +290,7 @@ void TransposeBatchMatMulBaseTiling::BaseLoadBalance()
         while (tempBaseM >= tempBaseN * NUM_TWO && mCore < coreNumMN / NUM_TWO &&
             tempBaseM != baseMAlignNum) {
             mCore *= NUM_TWO;
-            nCore = coreNumMN / mCore;
+            nCore = ops::FloorDiv(coreNumMN, mCore);
             tempBaseM = ops::CeilAlign(ops::CeilDiv(args_.mValue, mCore), baseMAlignNum);
             tempBaseN = ops::CeilAlign(ops::CeilDiv(args_.nValue, nCore), baseNAlignNum);
             mCore = ops::CeilDiv(args_.mValue, static_cast<uint64_t>(tempBaseM));
@@ -420,6 +424,12 @@ ge::graphStatus TransposeBatchMatMulBaseTiling::CheckArgs()
     idx++;
     if (context_->GetOptionalInputShape(2)!= nullptr) { // bias是第2入参
         args_.hasBias = true;
+    }
+    auto* shape_scale = context_->GetOptionalInputShape(SCALE_IDX);
+    if (shape_scale != nullptr) {
+        OP_TILING_CHECK(shape_scale->GetShape().GetDim(0) >= kSupportedInnerAxis,
+                        CUBE_INNER_ERR_REPORT(args_.opName, "batch mul n should be less than 65536."),
+                        return ge::GRAPH_FAILED);
     }
     if (attrs->GetAttrNum() >= ATTR_NUM) {
         OPS_CHECK_NULL_WITH_CONTEXT(context_,
@@ -602,7 +612,6 @@ ge::graphStatus TransposeBatchMatMulBaseTiling::GetShape()
     }
     OP_LOGI(args_.opName, "transA: %lu, transB: %lu", transA_, transB_);
 
-    uint64_t dtypeSize = GetSizeByDataType(args_.aType);
     uint64_t input_batch = batchInfo_.batchC;
     uint64_t input_k = args_.kValue;
     uint64_t input_n = args_.nValue;

@@ -28,6 +28,7 @@ public:
     __aicore__ __forceinline__ void CalcStartAddrOriGroupHWC(const uint64_t doIdxStart, const int64_t diIdxStart);
     __aicore__ __forceinline__ void CalcStartAddrOriGroupCHW(const uint64_t doIdxStart, const int64_t diIdxStart);
     __aicore__ __forceinline__ void ConvKernelImplOriGroup();
+    __aicore__ __forceinline__ void ConvKernelImplOptGroupPreload();
 
     __aicore__ __forceinline__ void UpdateRealCoutOptGroup();
 
@@ -255,7 +256,6 @@ __aicore__ __forceinline__ void ConvGroupCommon<CONV, RUN_INFO>::
 {
     convOps->singleCoreN = convOps->singleCoOpt;
 
-    // update singleGroups : real groups nums in singlecore
     enlargeTail = convRunInfo->groups % convRunInfo->enlarge;
 
     if (unlikely(convOps->isGroupDimTail && enlargeTail != 0)) {
@@ -390,6 +390,10 @@ __aicore__ __forceinline__ void ConvGroupCommon<CONV, RUN_INFO>::
     ConvKernelImplOptGroup()
 {
     convOps->conv.SetWeightStartPosition(convOps->nIdxStart);
+    if (CONV::IS_OPTGROUP_PRELOAD) {
+        ConvKernelImplOptGroupPreload();
+        return;
+    }
     for (uint64_t groupOptIter = 0; groupOptIter < convOps->singleGroupOpt; ++groupOptIter) {
         if (unlikely(convOps->isGroupDimTail && enlargeTail != 0 &&  groupOptIter == convOps->singleGroupOpt - 1)) {
             if (unlikely(convOps->singleCoOpt == 0)) {
@@ -426,6 +430,45 @@ __aicore__ __forceinline__ void ConvGroupCommon<CONV, RUN_INFO>::
 
 template <class CONV, class RUN_INFO>
 __aicore__ __forceinline__ void ConvGroupCommon<CONV, RUN_INFO>::
+    ConvKernelImplOptGroupPreload()
+{
+    uint64_t groupOptIter = 0;
+    
+    if (convOps->isGroupDimTail && enlargeTail != 0) {
+        if (unlikely(convOps->singleCoOpt == 0 && convOps->singleGroupOpt == 1)) {
+            return;
+        }
+        convOps->conv.SetOptGroupParams(enlargeTail, convOps->singleGroupOpt, convOps->singleCoOpt);
+    } else {
+        convOps->conv.SetOptGroupParams(convRunInfo->enlarge, convOps->singleGroupOpt, convOps->singleCoOpt);
+    }
+
+    convOps->conv.SetIterIndex(groupOptIter);
+
+    convOps->conv.SetFmap(convOps->fmapGm);
+    convOps->conv.SetWeight(convOps->filterGm);
+
+    if (convRunInfo->hasBias) {
+        convOps->conv.SetBias(convOps->biasGm);
+    }
+    
+    // quant need, current not care
+    DealFixpiepParams(groupOptIter, convRunInfo->coutOpt);
+
+    if constexpr (CONV::IS_EXTEND_CONV2D) {
+        if (convOps->dualOutput) {
+            convOps->conv.IterateAll(convOps->outputGm, convOps->output1Gm);
+        } else {
+            convOps->conv.IterateAll(convOps->outputGm);
+        }
+    } else {
+        convOps->conv.IterateAll(convOps->outputGm);
+    }
+    convOps->conv.End();
+}
+
+template <class CONV, class RUN_INFO>
+__aicore__ __forceinline__ void ConvGroupCommon<CONV, RUN_INFO>::
     SetOptGroupTail()
 {
     if (convOps->singleCoOpt != convOps->singleCoreN) {
@@ -447,7 +490,7 @@ __aicore__ __forceinline__ void ConvGroupCommon<CONV, RUN_INFO>::
         }
     }
 
-    convOps->conv.SetOptGroupParams(convOps->singleGroups, convOps->singleGroupOpt);
+    convOps->conv.SetOptGroupParams(convOps->singleGroups, convOps->singleGroupOpt, convOps->singleCoOpt);
 }
 
 #endif // CONV_GROUP_COMMON_H

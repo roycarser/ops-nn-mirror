@@ -16,7 +16,7 @@
 #define __OP_HOST_TRANSPOSE_BATCH_MAT_MUL_EINSUM_TILING_H__
 
 #include "transpose_batch_mat_mul_tiling.h"
-#include "tiling_base/tiling_base.h"
+#include "op_host/tiling_base.h"
 #include "tiling/platform/platform_ascendc.h"
 #include "pp_matmul_default.h"
 
@@ -36,6 +36,11 @@ class TransposeBatchMatMulEinsumTiling : public pp_matmul::PpMatMulDefault
 public:
     explicit TransposeBatchMatMulEinsumTiling(gert::TilingContext* context)
        : PpMatMulDefault(context) {}
+    TransposeBatchMatMulEinsumTiling(gert::TilingContext *context, bool isQuantBatchMatmulV3)
+        : PpMatMulDefault(context),
+          isQuantBatchMatmulV3_(isQuantBatchMatmulV3)
+    {
+    }
     ~TransposeBatchMatMulEinsumTiling() override = default;
 
     void DoTiling();
@@ -46,6 +51,7 @@ public:
 private:
     const gert::ContinuousVector *aPermList_ = nullptr;
     const gert::ContinuousVector *bPermList_ = nullptr;
+    bool isQuantBatchMatmulV3_ = false;
 };
 } // namespace transpose_batch_mat_mul
 } // namespace optiling

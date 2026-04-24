@@ -18,8 +18,8 @@
 #include "log/log.h"
 #include "register/op_impl_registry.h"
 #include "register/tilingdata_base.h"
-#include "tiling_base/tiling_base.h"
-#include "tiling_base/tiling_templates_registry.h"
+#include "op_host/tiling_base.h"
+#include "op_host/tiling_templates_registry.h"
 #include "util/math_util.h"
 #include "max_pool3d_grad_with_argmax_tiling.h"
 #include "../op_kernel/arch35/max_pool3d_grad_with_argmax_struct.h"
@@ -28,10 +28,10 @@
 #include "tiling/tiling_api.h"
 #include "op_common/op_host/util/platform_util.h"
 
-using namespace MaxPool3DGradWithArgmaxOp;
+
 namespace optiling {
 using Ops::NN::Optiling::TilingBaseClass;
-
+using namespace MaxPool3DGradWithArgmaxOp;
 struct MaxPool3DGradWithArgmaxInputInfo {
     int64_t dPad{0};
     int64_t hPad{0};

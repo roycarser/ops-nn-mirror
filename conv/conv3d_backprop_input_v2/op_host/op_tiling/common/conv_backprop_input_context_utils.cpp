@@ -321,39 +321,46 @@ bool CheckAttrRangeStrides(const gert::TilingContext *context, const int64_t *st
 
 bool CheckAttrRangePads(const gert::TilingContext *context, const int64_t *pads) {
     const auto op_name = context->GetNodeName();
-    int32_t kPadUpTmp = kDimUp;
+    int32_t padHwUp = kPadUp;
+    int32_t padDUp = kDimUp;
+    
     if (IsSocVersionFuse(context)) {
-      kPadUpTmp = kPadUp;
+      padDUp = kPadUp;
     }
+
+    if (IsArchAfter35(context)) {
+        padHwUp = kDimUp;
+    }
+
     OP_CHECK_IF(
-      !CheckRangeInt64(pads[K_CONV3D_PAD_HEAD_IDX], 0, kPadUpTmp),
+      !CheckRangeInt64(pads[K_CONV3D_PAD_HEAD_IDX], 0, padDUp),
       OP_LOGE(op_name, "pad_h value [%ld] is invalid, support range [%d, %d]",
-              pads[K_CONV3D_PAD_HEAD_IDX], 0, kPadUpTmp),
+              pads[K_CONV3D_PAD_HEAD_IDX], 0, padDUp),
       return false);
     OP_CHECK_IF(
-      !CheckRangeInt64(pads[K_CONV3D_PAD_TAIL_IDX], 0, kPadUpTmp),
+      !CheckRangeInt64(pads[K_CONV3D_PAD_TAIL_IDX], 0, padDUp),
       OP_LOGE(op_name, "pad_t value [%ld] is invalid, support range [%d, %d]",
-              pads[K_CONV3D_PAD_TAIL_IDX], 0, kPadUpTmp),
+              pads[K_CONV3D_PAD_TAIL_IDX], 0, padDUp),
       return false);
     OP_CHECK_IF(
-      !CheckRangeInt64(pads[K_CONV3D_PAD_UP_IDX], 0, kPadUp),
+      !CheckRangeInt64(pads[K_CONV3D_PAD_UP_IDX], 0, padHwUp),
       OP_LOGE(op_name, "pad_u value [%ld] is invalid, support range [%d, %d]",
-              pads[K_CONV3D_PAD_UP_IDX], 0, kPadUp),
+              pads[K_CONV3D_PAD_UP_IDX], 0, padHwUp),
       return false);
     OP_CHECK_IF(
-      !CheckRangeInt64(pads[K_CONV3D_PAD_DOWN_IDX], 0, kPadUp),
+      !CheckRangeInt64(pads[K_CONV3D_PAD_DOWN_IDX], 0, padHwUp),
       OP_LOGE(op_name, "pad_d value [%ld] is invalid, support range [%d, %d]",
-              pads[K_CONV3D_PAD_DOWN_IDX], 0, kPadUp),
+              pads[K_CONV3D_PAD_DOWN_IDX], 0, padHwUp),
       return false);
     OP_CHECK_IF(
-      !CheckRangeInt64(pads[K_CONV3D_PAD_LEFT_IDX], 0, kPadUp),
+      !CheckRangeInt64(pads[K_CONV3D_PAD_LEFT_IDX], 0, padHwUp),
       OP_LOGE(op_name, "pad_l value [%ld] is invalid, support range [%d, %d]",
-              pads[K_CONV3D_PAD_LEFT_IDX], 0, kPadUp),
+              pads[K_CONV3D_PAD_LEFT_IDX], 0, padHwUp),
       return false);
     OP_CHECK_IF(
-      !CheckRangeInt64(pads[K_CONV3D_PAD_RIGHT_IDX], 0, kPadUp),
+      !CheckRangeInt64(pads[K_CONV3D_PAD_RIGHT_IDX], 0, padHwUp),
       OP_LOGE(op_name, "pad_r value [%ld] is invalid, support range [%d, %d]",
-              pads[K_CONV3D_PAD_RIGHT_IDX], 0, kPadUp),
+              pads[K_CONV3D_PAD_RIGHT_IDX], 0, padHwUp),
       return false);
 
     return true;
@@ -917,6 +924,7 @@ static bool CalPads(gert::TilingContext *context, Conv3dBpInputV2RunInfo &runInf
                              0L);
     int32_t pad_left = static_cast<int32_t>((static_cast<uint32_t>(pad_w) >> 1U));
     int32_t pad_right = pad_w - pad_left;
+
     runInfoV2.pad_h = pad_head;
     runInfoV2.pad_t = pad_tail;
     runInfoV2.pad_u = pad_up;
@@ -930,6 +938,62 @@ static bool CalPads(gert::TilingContext *context, Conv3dBpInputV2RunInfo &runInf
   }
 
   return CheckCalPads(context, runInfoV2, op_type, otherParams);
+}
+
+static int32_t CalFmapH(gert::TilingContext *context, const Conv3dBpInputV2RunInfo &runInfoV2, const OtherParams& otherParams)
+{
+    int32_t minBaseM = 1024;
+
+    int64_t dedx_w = otherParams.c_shape.w;
+    OP_CHECK_IF(dedx_w == 0, OP_LOGE(context, "dedx_w is 0"), return 0);
+
+    constexpr int32_t FMAP_H_NUM = 2;
+    int32_t hiCal;
+
+    if (minBaseM % dedx_w == 0 || dedx_w % minBaseM == 0) {
+        hiCal = Ops::Base::CeilDiv(static_cast<int64_t>(minBaseM), dedx_w);
+    } else if (minBaseM > dedx_w) {
+        hiCal = minBaseM / dedx_w + FMAP_H_NUM;
+    } else {
+        hiCal = FMAP_H_NUM;
+    }
+    // L1HKhk=1dilation
+    int32_t khDilation = (otherParams.b_shape.h - 1) * runInfoV2.dilation_h + 1;
+    int32_t hoCal = (hiCal - 1) + khDilation;
+    int64_t hoExpand = static_cast<int64_t>(otherParams.a_shape.h - 1) * runInfoV2.stride_h + 1;
+    return static_cast<int32_t>(std::min(static_cast<int64_t>(hoCal), hoExpand));
+}
+
+static bool IsNeedTilingHkWk(gert::TilingContext *context, const Conv3dBpInputV2RunInfo &runInfoV2, const OtherParams& otherParams)
+{
+    uint32_t minBaseN = 16;
+    uint32_t dtypeByteL0a_ = runInfoV2.a_dtype_bytes;
+    uint32_t dtypeByteL0b_ = runInfoV2.b_dtype_bytes;
+    uint32_t blockSize_ = BYTE_BLOCK / dtypeByteL0b_;
+    uint64_t l1_size  = 0;
+
+    fe::PlatFormInfos* platformInfo = context->GetPlatformInfo();
+    OP_CHECK_IF(platformInfo == nullptr, OP_LOGE(context, "platformInfoPtr is null"), return false);
+    auto ascendcPlatform = platform_ascendc::PlatformAscendC(platformInfo);
+    ascendcPlatform.GetCoreMemSize(platform_ascendc::CoreMemType::L1, l1_size);
+
+    int64_t bpPadRight = otherParams.c_shape.w - (static_cast<int64_t>(otherParams.a_shape.w - 1) * runInfoV2.stride_w + 1) +
+        (otherParams.b_shape.w - 1) * runInfoV2.dilation_w - runInfoV2.backprop_pad_l;
+    int32_t curHo = CalFmapH(context, runInfoV2, otherParams);
+    uint64_t minA1Size = static_cast<uint64_t>(dtypeByteL0a_) * curHo *
+        otherParams.a_shape.w * runInfoV2.stride_w * blockSize_;
+    uint64_t lenHkWkC0 = otherParams.b_shape.h * otherParams.b_shape.w * blockSize_;
+    uint64_t minB1Size = static_cast<uint64_t>(dtypeByteL0b_) * lenHkWkC0 * minBaseN;
+
+    if ((minA1Size + minB1Size) <= l1_size &&
+        runInfoV2.backprop_pad_l <= PAD_DIM_UP && bpPadRight <= PAD_DIM_UP &&
+        runInfoV2.backprop_pad_u <= PAD_DIM_UP && runInfoV2.backprop_pad_d <= PAD_DIM_UP &&
+        runInfoV2.dilation_h <= PAD_DIM_UP && runInfoV2.dilation_w <= PAD_DIM_UP) {
+        return false;
+    }
+
+    OP_LOGD(context, "need tiling hw wk");
+    return true;
 }
 
 static bool CalRealG(gert::TilingContext *context, Conv3dBpInputV2RunInfo &runInfoV2, OtherParams& otherParams) {
@@ -973,7 +1037,7 @@ static bool CalRealG(gert::TilingContext *context, Conv3dBpInputV2RunInfo &runIn
     bool nonExtendedDtype = (filter_desc->GetDataType() == ge::DT_FLOAT8_E4M3FN || filter_desc->GetDataType() == ge::DT_HIFLOAT8 ||
       filter_desc->GetDataType() == ge::DT_INT8) || (out_backprop_desc->GetDataType() == ge::DT_FLOAT8_E4M3FN ||
       out_backprop_desc->GetDataType() == ge::DT_HIFLOAT8 || out_backprop_desc->GetDataType() == ge::DT_INT8);
-    if (disableGroupEnlarge || nonExtendedDtype) {
+    if (disableGroupEnlarge || nonExtendedDtype || IsNeedTilingHkWk(context, runInfoV2, otherParams)) {
       otherParams.multiple_extend = 1;
       runInfoV2.real_g = runInfoV2.groups;
       otherParams.ci1g = Ops::Base::CeilDiv(otherParams.b_shape.c, static_cast<int64_t>(kBlockSize));
@@ -1046,22 +1110,9 @@ static bool CalModifyBackpropPadHW(gert::TilingContext *context, Conv3dBpInputV2
 
   otherParams.pad_left_before = CalBackpropPadBefore(filterShape.w, runInfoV2.dilation_w, runInfoV2.pad_l);
   otherParams.pad_up_before = CalBackpropPadBefore(filterShape.h, runInfoV2.dilation_h, runInfoV2.pad_u);
-  int32_t kPadUpTmp = (IsArchAfter35(context) || IsSocVersionFuse(context)) ? kDimUp : kPadUp;
 
-  OP_CHECK_IF(!CheckRange(otherParams.pad_left_before, 0, kPadUpTmp),
-              OP_LOGE(context, "backprop_pad_left=((kw - 1) * dilation_w - pad_left)=[%d] is invalid, it should be in [%d, %d]",
-                      otherParams.pad_left_before, 0 , kPadUpTmp),
-              return false);
-  OP_CHECK_IF(!CheckRange(otherParams.pad_up_before, 0, kPadUpTmp),
-              OP_LOGE(context, "backprop_pad_up=((kh - 1) * dilation_h - pad_up)=[%d] is invalid, it should be in [%d, %d]",
-                      otherParams.pad_up_before, 0 , kPadUpTmp),
-              return false);
   if (IsArchAfter35(context) || IsSocVersionFuse(context)) {
     otherParams.pad_head_before = CalBackpropPadBefore(filterShape.d, runInfoV2.dilation_d, runInfoV2.pad_h);
-    OP_CHECK_IF(!CheckRange(otherParams.pad_head_before, 0, kPadUpTmp),
-                OP_LOGE(context, "backprop_pad_head=((kd - 1) * dilation_d - pad_head)=[%d] is invalid, it should be in [%d, %d]",
-                        otherParams.pad_head_before, 0 , kPadUpTmp),
-                return false);
   }
 
   otherParams.shape_left_modify = (otherParams.pad_left_before - abs(otherParams.pad_left_before)) / kNumTwo;
@@ -1070,22 +1121,8 @@ static bool CalModifyBackpropPadHW(gert::TilingContext *context, Conv3dBpInputV2
   int64_t pad_right_after = CalBackpropPadAfter(dedxShape.w, dedyShape.w, runInfoV2.stride_w, runInfoV2.pad_l);
   int64_t pad_down_after = CalBackpropPadAfter(dedxShape.h, dedyShape.h, runInfoV2.stride_h, runInfoV2.pad_u);
 
-  OP_CHECK_IF(IsOverflowInt32(pad_right_after) || !CheckRange(static_cast<int32_t>(pad_right_after), -kPadUpTmp, kPadUpTmp),
-              OP_LOGE(context, "backprop_right_pad = (inputW - outputW * strideW + padLeft)=%ld is invalid, it should be in[%d, %d]",
-                      pad_right_after, -kPadUpTmp, kPadUpTmp),
-              return false);
-
-  OP_CHECK_IF(IsOverflowInt32(pad_down_after) || !CheckRange(static_cast<int32_t>(pad_down_after), -kPadUpTmp, kPadUpTmp),
-              OP_LOGE(context, "backprop_down_pad = (inputH - outputH * strideH + padUp)=%ld is invalid, it should be in[%d, %d]",
-                      pad_down_after, -kPadUpTmp, kPadUpTmp),
-              return false);
-
   int64_t shape_down_modify = (pad_down_after - abs(pad_down_after)) / kNumTwo;
   int64_t shape_right_modify = (pad_right_after - abs(pad_right_after)) / kNumTwo;
-
-  otherParams.pad_left_before = (otherParams.pad_left_before + abs(otherParams.pad_left_before)) / kNumTwo;
-  pad_down_after = (pad_down_after + abs(pad_down_after)) / kNumTwo;
-  pad_right_after = (pad_right_after + abs(pad_right_after)) / kNumTwo;
 
   otherParams.pad_right_after = pad_right_after;
   otherParams.pad_down_after = pad_down_after;
@@ -1399,8 +1436,8 @@ bool Conv3DBackpropInputParseFunc(gert::TilingContext *context, optiling::OpType
                 OP_LOGE(context, "failed to get input output format"), return false);
     OP_CHECK_IF(!CalGroups(context, otherParams, runInfoV2), OP_LOGE(op_name, "Calc groups failed."), return false);
     OP_CHECK_IF(!CalPads(context, runInfoV2, opType, otherParams), OP_LOGE(op_name, "Calc pads failed."), return false);
-    OP_CHECK_IF(!CalRealG(context, runInfoV2, otherParams), OP_LOGE(op_name, "Calc real_g failed."), return false);
     OP_CHECK_IF(!CalModify(context, runInfoV2, otherParams), OP_LOGE(op_name, "Modify pad failed."), return false);
+    OP_CHECK_IF(!CalRealG(context, runInfoV2, otherParams), OP_LOGE(op_name, "Calc real_g failed."), return false);
     OP_CHECK_IF(!CalScale(context, runInfoV2, otherParams), OP_LOGE(op_name, "Sacle size too big, not support."), return false);
     return true;
 }
@@ -1696,9 +1733,11 @@ bool CheckAttrs(const gert::TilingContext *context, Conv3dBpInputV2RunInfo &runI
       CUBE_INNER_ERR_REPORT(opName, "cannot support dilation_w: [%d] != 1 while kernel_w: [%ld] = 1",
       runInfoV2.dilation_w, otherParams.b_shape.w), return false);
 
-  OP_CHECK_IF(runInfoV2.stride_d > otherParams.b_shape.d,
+  if (!IsArchAfter35(context)) {
+      OP_CHECK_IF(runInfoV2.stride_d > otherParams.b_shape.d,
       OP_LOGE(opName, "cannot support stride_d: %d > kernel_d: %ld", runInfoV2.stride_d, otherParams.b_shape.d),
       return false);
+  }
 
   OP_CHECK_IF(CheckRange(runInfoV2.stride_h, DIM_LOW, strideHwUp) == false,
       OP_LOGE(opName, "stride_h: %d is invalid, support range [%d, %d]", runInfoV2.stride_h, DIM_LOW, strideHwUp),
@@ -1723,32 +1762,28 @@ bool CheckAttrs(const gert::TilingContext *context, Conv3dBpInputV2RunInfo &runI
   return true;
 }
 
-bool CheckPadRange(const gert::TilingContext *context, Conv3dBpInputV2RunInfo &runInfoV2, const char* opName, OtherParams& otherParams) {
+bool CheckPadRange(const gert::TilingContext *context, Conv3dBpInputV2RunInfo &runInfoV2, const char* opName) {
     int32_t padDimUp = PAD_DIM_UP;
     if (IsArchAfter35(context)) {
         padDimUp = kDimUp;
     }
-
-    int32_t padHDimUp = std::min(padDimUp, static_cast<int32_t>(otherParams.b_shape.d - 1));
-    int32_t padUDimUp = std::min(padDimUp, static_cast<int32_t>(otherParams.b_shape.h - 1));
-    int32_t padLDimUp = std::min(padDimUp, static_cast<int32_t>(otherParams.b_shape.w - 1));
-    OP_CHECK_IF(CheckRange(runInfoV2.pad_h, PAD_DIM_LOW, padHDimUp) == false,
-                OP_LOGE(opName, "pad head: %d invalid, it should be in [%d, %d]", runInfoV2.pad_h, PAD_DIM_LOW, padHDimUp),
+    OP_CHECK_IF(CheckRange(runInfoV2.pad_h, PAD_DIM_LOW, padDimUp) == false,
+                OP_LOGE(opName, "pad head: %d invalid, it should be in [%d, %d]", runInfoV2.pad_h, PAD_DIM_LOW, padDimUp),
                 return false);
-    OP_CHECK_IF(CheckRange(runInfoV2.pad_t, PAD_DIM_LOW, padHDimUp) == false,
-                OP_LOGE(opName, "pad tail: %d invalid, it should be in [%d, %d]", runInfoV2.pad_t, PAD_DIM_LOW, padHDimUp),
+    OP_CHECK_IF(CheckRange(runInfoV2.pad_t, PAD_DIM_LOW, padDimUp) == false,
+                OP_LOGE(opName, "pad tail: %d invalid, it should be in [%d, %d]", runInfoV2.pad_t, PAD_DIM_LOW, padDimUp),
                 return false);
-    OP_CHECK_IF(CheckRange(runInfoV2.pad_u, PAD_DIM_LOW, padUDimUp) == false,
-                OP_LOGE(opName, "pad up: %d invalid, it should be in [%d, %d]", runInfoV2.pad_u, PAD_DIM_LOW, padUDimUp),
+    OP_CHECK_IF(CheckRange(runInfoV2.pad_u, PAD_DIM_LOW, padDimUp) == false,
+                OP_LOGE(opName, "pad up: %d invalid, it should be in [%d, %d]", runInfoV2.pad_u, PAD_DIM_LOW, padDimUp),
                 return false);
-    OP_CHECK_IF(CheckRange(runInfoV2.pad_d, PAD_DIM_LOW, padUDimUp) == false,
-                OP_LOGE(opName, "pad down: %d invalid, it should be in [%d, %d]", runInfoV2.pad_d, PAD_DIM_LOW, padUDimUp),
+    OP_CHECK_IF(CheckRange(runInfoV2.pad_d, PAD_DIM_LOW, padDimUp) == false,
+                OP_LOGE(opName, "pad down: %d invalid, it should be in [%d, %d]", runInfoV2.pad_d, PAD_DIM_LOW, padDimUp),
                 return false);
-    OP_CHECK_IF(CheckRange(runInfoV2.pad_l, PAD_DIM_LOW, padLDimUp) == false,
-                OP_LOGE(opName, "pad left: %d invalid, it should be in [%d, %d]", runInfoV2.pad_l, PAD_DIM_LOW, padLDimUp),
+    OP_CHECK_IF(CheckRange(runInfoV2.pad_l, PAD_DIM_LOW, padDimUp) == false,
+                OP_LOGE(opName, "pad left: %d invalid, it should be in [%d, %d]", runInfoV2.pad_l, PAD_DIM_LOW, padDimUp),
                 return false);
-    OP_CHECK_IF(CheckRange(runInfoV2.pad_r, PAD_DIM_LOW, padLDimUp) == false,
-                OP_LOGE(opName, "pad right: %d invalid, it should be in [%d, %d]", runInfoV2.pad_r, PAD_DIM_LOW, padLDimUp),
+    OP_CHECK_IF(CheckRange(runInfoV2.pad_r, PAD_DIM_LOW, padDimUp) == false,
+                OP_LOGE(opName, "pad right: %d invalid, it should be in [%d, %d]", runInfoV2.pad_r, PAD_DIM_LOW, padDimUp),
                 return false);
     return true;
 }
@@ -1871,7 +1906,7 @@ bool SetRunInfoToV2(gert::TilingContext* context, Conv3dBpInputV2RunInfo& runInf
     }
 
     if (!CheckCalPads(context, runInfoV2, opType, otherParams) || !CheckParams(runInfoV2, context, otherParams) ||
-        !CheckAttrs(context, runInfoV2, context->GetNodeName(), otherParams) || !CheckPadRange(context, runInfoV2, context->GetNodeName(), otherParams)) {
+        !CheckAttrs(context, runInfoV2, context->GetNodeName(), otherParams) || !CheckPadRange(context, runInfoV2, context->GetNodeName())) {
         OP_LOGE(context, "params is invalid");
         return false;
     }

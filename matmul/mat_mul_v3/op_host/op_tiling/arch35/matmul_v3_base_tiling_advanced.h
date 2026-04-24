@@ -386,7 +386,7 @@ protected:
             tilingData.sliceM = runInfo_.baseM;
             tilingData.srcNdStride = 1;
         }
-
+        tilingData.innerBatch = runInfo_.innerBatch;
         return ge::GRAPH_SUCCESS;
     };
 
@@ -410,18 +410,36 @@ protected:
         return ge::GRAPH_SUCCESS;
     };
 
-    virtual ge::graphStatus GetTilingDataProcess(BatchMatMulToMulBasicTilingData &matmulToMulBasicData) const
+    virtual ge::graphStatus GetTilingDataProcess(
+        BatchMatMulV3MergeBatchBasicTilingData &mergebatchTilingBasicData) const
     {
-        matmulToMulBasicData.m = runInfo_.toMulInfo.m;
-        matmulToMulBasicData.n = runInfo_.toMulInfo.n;
-        matmulToMulBasicData.b = runInfo_.toMulInfo.b;
-        matmulToMulBasicData.usedCoreNum = runInfo_.toMulInfo.usedCoreNum;
-        matmulToMulBasicData.singleCoreBatch = runInfo_.toMulInfo.singleCoreBatch;
-        matmulToMulBasicData.batchNum = runInfo_.toMulInfo.batchNum;
-        matmulToMulBasicData.batchNumLastRound = runInfo_.toMulInfo.batchNumLastRound;
-        matmulToMulBasicData.batchNumLastRoundTail = runInfo_.toMulInfo.batchNumLastRoundTail;
-        matmulToMulBasicData.lastCoreNum = runInfo_.toMulInfo.lastCoreNum;
-        matmulToMulBasicData.alignNum = runInfo_.toMulInfo.alignNum;
+        mergebatchTilingBasicData.m = args_.mValue;
+        mergebatchTilingBasicData.n = args_.nValue;
+        mergebatchTilingBasicData.k = args_.kValue;
+        mergebatchTilingBasicData.b = batchInfo_->batchC;
+        mergebatchTilingBasicData.batchAL1 = runInfo_.mergeBatchAL1;
+        mergebatchTilingBasicData.batchBL1 = runInfo_.mergeBatchBL1;
+        mergebatchTilingBasicData.batchL0 = runInfo_.mergeBatchL0;
+        mergebatchTilingBasicData.baseK = runInfo_.baseK;
+        mergebatchTilingBasicData.kL1 = runInfo_.stepKa * runInfo_.baseK;
+        mergebatchTilingBasicData.isHf32 = args_.isHf32;
+        mergebatchTilingBasicData.l2CacheDisable =
+            SetDisableL2cache(args_.mValue, mergebatchTilingBasicData.kL1, mergebatchTilingBasicData.kL1, args_.nValue);
+        return ge::GRAPH_SUCCESS; 
+    };
+
+    virtual ge::graphStatus GetTilingDataProcess(BatchMatMulToMulBasicTilingData &bmmToMulBasicData) const
+    {
+        bmmToMulBasicData.m = runInfo_.bmmToMulInfo.m;
+        bmmToMulBasicData.n = runInfo_.bmmToMulInfo.n;
+        bmmToMulBasicData.b = runInfo_.bmmToMulInfo.b;
+        bmmToMulBasicData.usedCoreNum = runInfo_.bmmToMulInfo.usedCoreNum;
+        bmmToMulBasicData.singleCoreBatch = runInfo_.bmmToMulInfo.singleCoreBatch;
+        bmmToMulBasicData.batchNum = runInfo_.bmmToMulInfo.batchNum;
+        bmmToMulBasicData.batchNumLastRound = runInfo_.bmmToMulInfo.batchNumLastRound;
+        bmmToMulBasicData.batchNumLastRoundTail = runInfo_.bmmToMulInfo.batchNumLastRoundTail;
+        bmmToMulBasicData.lastCoreNum = runInfo_.bmmToMulInfo.lastCoreNum;
+        bmmToMulBasicData.alignNum = runInfo_.bmmToMulInfo.alignNum;
         return ge::GRAPH_SUCCESS;
     };
 
@@ -429,6 +447,22 @@ protected:
     {
         kEqZeroBasicTilingData.totalDataAmount = runInfo_.totalDataAmount;
         kEqZeroBasicTilingData.aivNum = runInfo_.usedCoreNum;
+        return ge::GRAPH_SUCCESS;
+    }
+
+    virtual ge::graphStatus GetTilingDataProcess(MatMulToMulBasicTilingData &matmulToMulBasicData) const
+    {
+        matmulToMulBasicData.usedCoreNum = runInfo_.usedCoreNum;
+        matmulToMulBasicData.tileNum = runInfo_.mmToMulInfo.tileNum;
+        matmulToMulBasicData.m = args_.mValue;
+        matmulToMulBasicData.n = args_.nValue;
+        matmulToMulBasicData.k = args_.kValue;
+        matmulToMulBasicData.baseMN = runInfo_.mmToMulInfo.baseMN;
+        matmulToMulBasicData.tailMN = runInfo_.mmToMulInfo.tailMN;
+        matmulToMulBasicData.baseK = runInfo_.mmToMulInfo.baseK;
+        matmulToMulBasicData.tailK = runInfo_.mmToMulInfo.tailK;
+        matmulToMulBasicData.loopK = runInfo_.mmToMulInfo.loopK;
+        matmulToMulBasicData.dataCopyMode = runInfo_.mmToMulInfo.dataCopyMode;
         return ge::GRAPH_SUCCESS;
     }
 
@@ -445,7 +479,8 @@ private:
         { ge::DT_FLOAT, matmul_tiling::DataType::DT_FLOAT },
         { ge::DT_BF16, matmul_tiling::DataType::DT_BF16 },
         { ge::DT_FLOAT8_E5M2, matmul_tiling::DataType::DT_FLOAT8_E5M2 },
-        { ge::DT_FLOAT8_E4M3FN, matmul_tiling::DataType::DT_FLOAT8_E4M3FN }
+        { ge::DT_FLOAT8_E4M3FN, matmul_tiling::DataType::DT_FLOAT8_E4M3FN },
+        { ge::DT_INT8, matmul_tiling::DataType::DT_INT8 }
     };
 };
 } // namespace matmul_v3

@@ -17,16 +17,16 @@
 #define MAX_POOL_GRAD_WITH_AGRMAX_V3_NHWC_TILING_H_
 
 #include "max_pool_grad_with_argmax_v3_tiling_base.h"
-#include "../../max_pool_grad_with_argmax_common/op_host/max_pool_grad_with_argmax_nhwc_tiling_common.h"
+#include "../../pool_grad_common/op_host/arch35/max_pool_grad_with_argmax_nhwc_tiling_common.h"
 
 namespace optiling {
 
 class MaxPoolGradWithArgmaxV3NHWCTiling : public MaxPoolGradWithArgmaxV3BaseTiling {
 public:
     explicit MaxPoolGradWithArgmaxV3NHWCTiling(gert::TilingContext* context)
-        : MaxPoolGradWithArgmaxV3BaseTiling(context)
+        : MaxPoolGradWithArgmaxV3BaseTiling(context),
+          NHWCBase(new MaxPoolGradWithArgmaxNHWCTilingCommon(&inputData))
     {
-        NHWCBase = new MaxPoolGradWithArgmaxNHWCTilingCommon(&inputData);
     }
 
     ~MaxPoolGradWithArgmaxV3NHWCTiling() override

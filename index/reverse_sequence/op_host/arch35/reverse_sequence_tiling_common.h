@@ -20,8 +20,8 @@
 
 #include "register/tilingdata_base.h"
 #include "tiling/tiling_api.h"
-#include "tiling_base/tiling_base.h"
-#include "tiling_base/tiling_templates_registry.h"
+#include "op_host/tiling_base.h"
+#include "op_host/tiling_templates_registry.h"
 #include "register/op_impl_registry.h"
 #include "op_common/log/log.h"
 #include "op_common/op_host/util/platform_util.h"
@@ -39,6 +39,7 @@ struct ReverseInputInfo {
     int64_t inputDim[allDims] = {0, 0, 0, 0, 0};
     int64_t comBineDims = 0;
     int64_t xDtypeSize = 0;
+    int64_t seqLengthsDtypeSize = 0;
     int64_t xShapeSize = 0;
     int64_t batchSize = 1;
     int64_t reverseSize = 1;

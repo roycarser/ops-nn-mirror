@@ -39,7 +39,7 @@ public:
     __aicore__ inline void Init(
         GM_ADDR grad_out, GM_ADDR log_probs, GM_ADDR targets, GM_ADDR input_lengths, GM_ADDR target_lengths,
         GM_ADDR neg_log_likelihood, GM_ADDR log_alpha, GM_ADDR grad, GM_ADDR workspace,
-        const CTCLossV2GradTilingData4AscnedC* tilingData);
+        const CTCLossV2GradTilingData4AscendC* tilingData);
 
     __aicore__ inline void Process();
 
@@ -48,7 +48,7 @@ private:
 
 private:
     // tiling data
-    const CTCLossV2GradTilingData4AscnedC* tilingData_;
+    const CTCLossV2GradTilingData4AscendC* tilingData_;
     // 输入参数gradOut
     GlobalTensor<T> gradOutGm;
     // 输入参数LogProbs
@@ -110,7 +110,7 @@ template <typename T, typename DataType, typename ThreadType>
 __aicore__ inline void CTCLossV2Grad<T, DataType, ThreadType>::Init(
     GM_ADDR gradOut, GM_ADDR logProbs, GM_ADDR targets, GM_ADDR inputLengths, GM_ADDR targetLengths,
     GM_ADDR negLogLikelihood, GM_ADDR logAlpha, GM_ADDR grad, GM_ADDR workspace,
-    const CTCLossV2GradTilingData4AscnedC* tilingData)
+    const CTCLossV2GradTilingData4AscendC* tilingData)
 {
     tilingData_ = tilingData;
     gradOutGm.SetGlobalBuffer((__gm__ T*)(gradOut));
@@ -135,7 +135,7 @@ __aicore__ inline void CTCLossV2Grad<T, DataType, ThreadType>::Init(
 }
 
 template <typename T, typename DataType, typename ThreadType>
-__aicore__ __attribute__((always_inline)) inline ThreadType ProcessTgBatchOffsets(
+__simt_callee__ __aicore__ __attribute__((always_inline)) inline ThreadType ProcessTgBatchOffsets(
     ThreadType idx, __gm__ DataType* targetLengthsGm, ThreadType targetsDimNum, ThreadType sDimRange)
 {
     if (targetsDimNum == 1) {
@@ -150,7 +150,7 @@ __aicore__ __attribute__((always_inline)) inline ThreadType ProcessTgBatchOffset
 }
 
 template <typename T, typename DataType, typename ThreadType>
-__aicore__ __attribute__((always_inline)) inline ThreadType GetTargetPrime(
+__simt_callee__ __aicore__ __attribute__((always_inline)) inline ThreadType GetTargetPrime(
     __gm__ DataType* targetsGm, ThreadType offset, ThreadType stride, ThreadType idx, ThreadType blank)
 {
     if ((idx & 1) == 0) {

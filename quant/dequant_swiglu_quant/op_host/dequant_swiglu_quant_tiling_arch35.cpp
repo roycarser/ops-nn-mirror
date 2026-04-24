@@ -15,10 +15,10 @@
 
 #include <cmath>
 #include "dequant_swiglu_quant_tiling.h"
-#include "tiling_base/tiling_templates_registry.h"
+#include "op_host/tiling_templates_registry.h"
 #include "dequant_swiglu_quant_tiling.h"
-#include "tiling_base/tiling_base.h"
-#include "tiling_base/tiling_util.h"
+#include "op_host/tiling_base.h"
+#include "op_host/tiling_util.h"
 
 using namespace AscendC;
 using namespace ge;
@@ -60,6 +60,19 @@ constexpr int64_t BIAS_FACTOR = 1000;
 constexpr int64_t ACT_SCALE_FACTOR = 100;
 constexpr int64_t QUANT_SCALE_FACTOR = 10;
 constexpr int64_t GROUP_INDEX_FACTOR = 1;
+constexpr int64_t DIM_TWO = 2;
+constexpr int64_t PLACEHOLDER = 1000000;
+constexpr int64_t QUANT_MODE_FACTOR = 100000;
+constexpr int64_t BIAS_FACTOR_FOR_NOT_FULL = 10000;
+constexpr int64_t ACTIVATE_FACTOR_FOR_NOT_FULL = 1000;
+constexpr int64_t QUANT_SCALE_FACTOR_FOR_NOT_FULL = 100;
+constexpr int64_t QUANT_OFFSET_FACTOR_FOR_NOT_FULL = 10;
+constexpr int64_t SPECIAL_GROUP_NUM_64 = 64; // groupIndex存在时走特殊分核的group条件
+constexpr int64_t SPECIAL_GROUP_NUM_32 = 32; // groupIndex不存在时走特殊分核的group条件
+constexpr int64_t SPECIAL_GROUP_NUM_16 = 16; // 走特殊分核场景的分组条件
+constexpr float CLAMP_LIMIT_DEFAULT= 7.0;
+constexpr float GLU_ALPHA_DEFAULT = 1.702;
+constexpr float GLU_BIAS_DEFAULT = 1.0;
 static const gert::Shape g_vec_1_shape = {1};
 
 inline const gert::Shape &EnsureNotScalar(const gert::Shape &in_shape) {
@@ -438,7 +451,7 @@ ge::graphStatus DequantSwigluQuantV35DskTiling::CheckInputQuantScale()
                         OP_LOGE(context_->GetNodeName(),
                         "quant_scale shape[0] must be equal to group_index shape[0] when static_quant and group_index exists, please check."),
                         return ge::GRAPH_FAILED);
-            if (qScaleDimNum == 2) {
+            if (qScaleDimNum == DIM_TWO) {
               OP_CHECK_IF(!((qScaleShape.GetDim(qScaleDimNum - 1) == yShape.GetDim(xDimNum_ - 1)) || (qScaleShape.GetDim(qScaleDimNum - 1) == 1)),
                           OP_LOGE(context_->GetNodeName(),
                           "quant_scale shape[-1] must be equal to or can be broadcast to y shape[-1] when static_quant and group_index exists, please check."),
@@ -450,9 +463,9 @@ ge::graphStatus DequantSwigluQuantV35DskTiling::CheckInputQuantScale()
                         "quant_scale shape must be [ group_index_shape[0], y_shape[-1] ] when dynamic quant and group_index exists, please check."),
                         return ge::GRAPH_FAILED);
           }
-          quantIsOne_ =  (qScaleDimNum == 2 && qScaleShape.GetDim(qScaleDimNum - 1) == yShape.GetDim(xDimNum_ - 1)) ? 0 : 1;
+          quantIsOne_ = (qScaleDimNum == DIM_TWO && qScaleShape.GetDim(qScaleDimNum - 1) == yShape.GetDim(xDimNum_ - 1)) ? 0 : 1;
         } else {
-          if (qScaleDimNum == 2) {
+          if (qScaleDimNum == DIM_TWO) {
             OP_CHECK_IF(qScaleShape.GetDim(0) != 1,
                         OP_LOGE(context_->GetNodeName(),
                         "if dim of quant_scale is 2, shape[0] must be [1] when group_index not exists, please check."),
@@ -516,14 +529,14 @@ ge::graphStatus DequantSwigluQuantV35DskTiling::CheckInputQuantOffset()
                     OP_LOGE(context_->GetNodeName(),
                     "quant_offset shape[0] must be equal to group_index shape[0] when group_index exists, please check."),
                     return ge::GRAPH_FAILED);
-        if (qOffsetDimNum == 2) {
+        if (qOffsetDimNum == DIM_TWO) {
               OP_CHECK_IF(qOffsetShape.GetDim(qOffsetDimNum - 1) != 1 && qOffsetShape.GetDim(qOffsetDimNum - 1) != yShape.GetDim(xDimNum_ - 1),
                           OP_LOGE(context_->GetNodeName(),
                           "quant_offset shape[-1] must be equal to or can be broadcast to y shape[-1] when group_index exists, please check."),
                           return ge::GRAPH_FAILED);
         }
       } else {
-        if (qOffsetDimNum == 2) {
+        if (qOffsetDimNum == DIM_TWO) {
             OP_CHECK_IF(qOffsetShape.GetDim(0) != 1,
                         OP_LOGE(context_->GetNodeName(),
                         "if dim of quant_offset is 2, shape[0] must be [1] when group_index not exists, please check."),
@@ -642,15 +655,15 @@ ge::graphStatus DequantSwigluQuantV35DskTiling::GetAttr()
               "attr swigluMode_ only support [0, 1] currently, please check."),
               return ge::GRAPH_FAILED);
   auto* attrClampLimit = attrs->GetAttrPointer<float>(ATTR_CLAMP_LIMIT_INDEX);
-  clampLimit_ = (attrClampLimit == nullptr) ? 7.0 : *attrClampLimit;
+  clampLimit_ = (attrClampLimit == nullptr) ? CLAMP_LIMIT_DEFAULT : *attrClampLimit;
   OP_CHECK_IF(!(std::isfinite(clampLimit_) && clampLimit_ > 0.0), 
               OP_LOGE(context_->GetNodeName(),
               "attr clamp_limit should be positive finite but current is %f, please check.", clampLimit_),
               return ge::GRAPH_FAILED);
   auto* attrGluAlpha = attrs->GetAttrPointer<float>(ATTR_GLU_ALPHA_INDEX);
-  gluAlpha_ = (attrGluAlpha == nullptr) ? 1.702 : *attrGluAlpha;
+  gluAlpha_ = (attrGluAlpha == nullptr) ? GLU_ALPHA_DEFAULT : *attrGluAlpha;
   auto* attrGluBias = attrs->GetAttrPointer<float>(ATTR_GLU_BIAS_INDEX);
-  gluBias_ = (attrGluBias == nullptr) ? 1.0 : *attrGluBias;
+  gluBias_ = (attrGluBias == nullptr) ? GLU_BIAS_DEFAULT : *attrGluBias;
   return ge::GRAPH_SUCCESS;
 }
 
@@ -687,10 +700,14 @@ ge::graphStatus DequantSwigluQuantV35DskTiling::GetShapeAttrsInfo() {
     int64_t xTotalNum = xShape_.GetShapeSize();
     inDimy_ = xShape_.GetDim(xDimNum_ - 1);
     inDimx_ = xTotalNum / inDimy_;
-    if ((speGroupType_ == 1) && (groupNum_ >= 64) && (inDimx_ / groupNum_ <= 16) && (activateDim_ == static_cast<int64_t>(xDimNum_-1))) {
+    if ((speGroupType_ == 1) && (groupNum_ >= SPECIAL_GROUP_NUM_64) &&
+        (inDimx_ / groupNum_ <= SPECIAL_GROUP_NUM_16) &&
+            (activateDim_ == static_cast<int64_t>(xDimNum_-1))) {
       isSpecialCoreCut_ = 1;
     }
-    if ((speGroupType_ == 0) && (groupNum_ >= 32) && (inDimx_ / groupNum_ <= 16) && (activateDim_ == static_cast<int64_t>(xDimNum_-1)) && (!hasBias_) && (!hasQuantScale_)) {
+    if ((speGroupType_ == 0) && (groupNum_ >= SPECIAL_GROUP_NUM_32) &&
+        (inDimx_ / groupNum_ <= SPECIAL_GROUP_NUM_16) &&
+        (activateDim_ == static_cast<int64_t>(xDimNum_-1)) && (!hasBias_) && (!hasQuantScale_)) {
       isSpecialCoreCut_ = 1;
     }
     auto shapeY = context_->GetOutputShape(0);
@@ -714,7 +731,9 @@ bool DequantSwigluQuantV35DskTiling::IsCapable() {
 void DequantSwigluQuantV35DskTiling::CalcTilingKeyForNotFull() {
   // tilingkey含义：占位\quantMode_\bias\activate_scale\quant_scale\quant_offset\group
   if (quantMode_ == 0) {
-    tilingKey_ = 1000000 + quantMode_ * 100000  + hasBias_ * 10000 + hasActivationScale_ * 1000 + hasQuantScale_ * 100 + hasQuantOffset_ * 10 + hasGroupIndex_;
+    tilingKey_ = PLACEHOLDER + quantMode_ * QUANT_MODE_FACTOR  + hasBias_ * BIAS_FACTOR_FOR_NOT_FULL +
+                 hasActivationScale_ * ACTIVATE_FACTOR_FOR_NOT_FULL + hasQuantScale_ * QUANT_SCALE_FACTOR_FOR_NOT_FULL +
+                 hasQuantOffset_ * QUANT_OFFSET_FACTOR_FOR_NOT_FULL + hasGroupIndex_;
   } else {
     auto biasDesc = context_->GetOptionalInputDesc(BIAS_INDEX);
     int8_t biasDtypeValue = 0;
@@ -740,7 +759,9 @@ void DequantSwigluQuantV35DskTiling::CalcTilingKeyForNotFull() {
       }
     }
     // tilingkey含义：占位\quantMode_\bias\activate_scale\quant_scale\quant\offset
-    tilingKey_ = 1000000 + quantMode_ * 100000  + biasDtypeValue * 10000 + hasActivationScale_ * 1000 + hasQuantScale_ * 100 + hasQuantOffset_ * 10 + hasGroupIndex_;
+    tilingKey_ = PLACEHOLDER + quantMode_ * QUANT_MODE_FACTOR  + biasDtypeValue * BIAS_FACTOR_FOR_NOT_FULL +
+                 hasActivationScale_ * ACTIVATE_FACTOR_FOR_NOT_FULL + hasQuantScale_ * QUANT_SCALE_FACTOR_FOR_NOT_FULL +
+                 hasQuantOffset_ * QUANT_OFFSET_FACTOR_FOR_NOT_FULL + hasGroupIndex_;
   }
 }
 

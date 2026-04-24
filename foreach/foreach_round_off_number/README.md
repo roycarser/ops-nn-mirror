@@ -13,7 +13,6 @@
 |  <term>Kirin X90 处理器系列产品</term> | √ |
 |  <term>Kirin 9030 处理器系列产品</term> | √ |
 
-
 ## 功能说明
 
 - 算子功能：对输入张量列表的每个张量执行指定精度的四舍五入运算，可通过roundMode指定舍入方式。
@@ -27,7 +26,6 @@
   $$
   y_i = round(x_i, roundMode) (i=0,1,...n-1)
   $$
-
 
 ## 参数说明
 
@@ -69,6 +67,8 @@
       <td>ND</td>
     </tr>
   </tbody></table>
+
+- Kirin X90/Kirin 9030处理器系列产品：不支持BFLOAT16。
 
 ## 约束说明
 

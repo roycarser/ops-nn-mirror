@@ -18,8 +18,8 @@
 #include "register/op_def_registry.h"
 #include "register/tilingdata_base.h"
 #include "tiling/tiling_api.h"
-#include "tiling_base/tiling_base.h"
-#include "tiling_base/tiling_util.h"
+#include "op_host/tiling_base.h"
+#include "op_host/tiling_util.h"
 #include "tiling/platform/platform_ascendc.h"
 #include "platform/platform_info_def.h"
 #include "op_common/op_host/util/platform_util.h"
@@ -61,11 +61,11 @@ protected:
     ge::DataType dataType_ = ge::DT_UNDEFINED;
     ge::DataType scalarDtype_ = ge::DT_UNDEFINED;
     int64_t numBlocks_ = 0;
-    int64_t tensorDataCountList_[MAX_TENSOR_CONT_910D] = {0};
-    uint16_t tensorStartList_[MAX_CORE_CONT_910D] = {0};
-    uint16_t tensorEndList_[MAX_CORE_CONT_910D] = {0};
-    int64_t tensorStartOffsetList_[MAX_CORE_CONT_910D] = {0};
-    int64_t tensorEndOffsetList_[MAX_CORE_CONT_910D] = {0};
+    int64_t tensorDataCountList_[MAX_TENSOR_CONT_950] = {0};
+    uint16_t tensorStartList_[MAX_CORE_CONT_950] = {0};
+    uint16_t tensorEndList_[MAX_CORE_CONT_950] = {0};
+    int64_t tensorStartOffsetList_[MAX_CORE_CONT_950] = {0};
+    int64_t tensorEndOffsetList_[MAX_CORE_CONT_950] = {0};
     int64_t totalDataCount_ = 0;
     uint16_t totalTensorCount_ = 0;
     ForeachSoloTilingDataRegbase foreachSoloTilingData_;

@@ -25,15 +25,24 @@ MM_REGISTER_TILING_TEMPLATE(FusedMatMul, FusedMatMulAswBasicApiTiling, DAV_3510,
 
 bool FusedMatMulAswBasicApiTiling::IsCapable()
 {
+    auto attrs = context_->GetAttrs();
+    OPS_CHECK_NULL_WITH_CONTEXT(context_, attrs);
+    std::string opType = attrs->GetAttrPointer<char>(ATTR_OP_TYPE_IDX);
     if (args_.batchInfo->batchC > 1) {
-        OP_LOGD(args_.opName, "bmm only support IterBatch shape");
+        OP_LOGE(args_.opName, "bmm only support IterBatch shape");
         return false;
     }
     if (args_.bFormat != ge::FORMAT_ND || args_.aFormat != ge::FORMAT_ND) {
         OP_LOGD(args_.opName, "ND is the only supported format for basic api");
         return false;
     }
-
+    if (opType == "add" || opType == "mul") {
+        // when optype is "add" or "mul", aivNum must == aicNum * 2
+        if (compileInfo_.aivNum != (compileInfo_.aicNum * NUM_TWO)) {
+            OP_LOGD(args_.opName, "FusedMatMul aswt model only support aivNum == aicNum *2");
+            return false;
+        }
+    }
     OP_LOGI(args_.opName, "FusedMatMul tiling enable state basic api");
     return true;
 }
@@ -55,6 +64,7 @@ ge::graphStatus FusedMatMulAswBasicApiTiling::DoOpTiling() {
         runInfo_.depthB1 = runInfo_.stepKb * DB_SIZE;
         return ge::GRAPH_SUCCESS;
     }
+    // 16cast32 "" 等支持基础API全载模板
     ge::graphStatus status = MatMulV3BasicAswtTiling::DoOpTiling();
     if (l0C2Out_ == MatMulV3L0C2Out::ND_FIXPIPE_1_1) {
         l0C2Out_ = MatMulV3L0C2Out::ON_THE_FLY;

@@ -21,9 +21,9 @@
 #include "util/math_util.h"
 #include "tiling/platform/platform_ascendc.h"
 #include "platform/platform_infos_def.h"
-#include "tiling_base/tiling_base.h"
+#include "op_host/tiling_base.h"
 #include "op_common/op_host/util/platform_util.h"
-#include "tiling_base/tiling_templates_registry.h"
+#include "op_host/tiling_templates_registry.h"
 
 
 namespace optiling {
@@ -146,7 +146,7 @@ struct AddLayerNormCompileInfo {
     uint64_t ubSize_ = 0;
     int64_t vecRegSize_ = 0;
     int64_t blockSize_ = 0;
-    bool isAscend910D_ = false;
+    bool isAscend950_ = false;
 };
 } // namespace optiling
 

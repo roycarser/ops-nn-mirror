@@ -19,7 +19,7 @@
 
 #include "register/op_def_registry.h"
 #include "register/tilingdata_base.h"
-#include "tiling_base/tiling_base.h"
+#include "op_host/tiling_base.h"
 #include "tiling/tiling_api.h"
 #include "util/math_util.h"
 #include "loss/mse_loss/op_kernel/arch35/mse_loss_dag.h"
@@ -72,10 +72,8 @@ ge::graphStatus MseLossTiling::SetTilingData()
     OP_LOGD(tilingContext->GetNodeName(), "Enter SetTilingData");
     auto rawTilingData = tilingContext->GetRawTilingData();
     OP_CHECK_NULL_WITH_CONTEXT(tilingContext, rawTilingData);
-
-    const uint64_t tilingKey = GET_TPL_TILING_KEY(
-        key.ReduceTiling.patternID, key.ReduceTiling.loopARCount, key.ReduceTiling.loopInnerARCount, key.Reduction,
-        key.Dtype);
+    uint64_t tilingKey;
+    GEN_REDUCE_TILING_KEY(tilingKey, key.ReduceTiling, key.Reduction, key.Dtype);
     OP_LOGI(
         tilingContext->GetNodeName(),
         "patternID:%u, loopARCount:%u, loopInnerARCount:%u, Tiling Key is:%lu, Reduction is : %u, Dtype is %u",

@@ -18,7 +18,7 @@
 #include "binary_cross_entropy_tiling_arch35.h"
 #include "tiling/platform/platform_ascendc.h"
 #include "register/op_impl_registry.h"
-#include "op_util.h"
+#include "op_api/op_util.h"
 #include "util/math_util.h"
 #include "util/platform_util.h"
 #include "platform/platform_info.h"
@@ -234,9 +234,9 @@ ge::graphStatus BinaryCrossEntropyTiling::SetTilingData()
     auto rawTilingData = tilingContext->GetRawTilingData();
     OP_CHECK_NULL_WITH_CONTEXT(tilingContext, rawTilingData);
 
-    const uint64_t tilingKey = GET_TPL_TILING_KEY(
-        bceTilingKey.reduceTiling.patternID, bceTilingKey.reduceTiling.loopARCount,
-        bceTilingKey.reduceTiling.loopInnerARCount, bceTilingKey.reduction, bceTilingKey.hasWeight, bceTilingKey.dType);
+    uint64_t tilingKey;
+    GEN_REDUCE_TILING_KEY(tilingKey, bceTilingKey.reduceTiling, bceTilingKey.reduction,
+                          bceTilingKey.hasWeight, bceTilingKey.dType);
     OP_LOGI(tilingContext->GetNodeName(),
             "patternID:%u, loopARCount:%u, loopInnerARCount:%u, Tiling Key is:%lu, reduction is : %u, hasWeight is : "
             "%u, Dtype is %u",

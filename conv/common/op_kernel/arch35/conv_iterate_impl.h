@@ -45,7 +45,9 @@ struct Iterate {
             }
         }
         if ASCEND_IS_AIV_CONV {
-            if constexpr (Intf::groupOptNDFlag) {
+            if constexpr (Intf::groupOptPreloadFlag) {
+                return OptGroupPreloadVecImpl<Intf>(self);
+            }else if constexpr (Intf::groupOptNDFlag) {
                 return OptGroupVecImpl<Intf>(self);
             } else if constexpr (Intf::c04NDFlag) {
                 return self->ctx.c04ProcessTools.C04VecImpl(self);
@@ -72,6 +74,8 @@ struct Iterate {
     static __aicore__ inline void ReduceKPreloadWeightIter(Intf *self, TempIters& tempIters, bool updateIterByFmapTag);
     static __aicore__ inline void ReduceKPreload(Intf *self);
     static __aicore__ inline void ReduceKFmapPreload(Intf *self);
+    static __aicore__ inline void ReduceGroupOptFmapPreload(Intf *self);
+    static __aicore__ inline void UpdateNextGroupOptIters(Intf *self, TempIters& tempIters);
     static __aicore__ inline bool UpdateItersByFmap(Intf *self, TempIters& tempIters, bool updateIterByFmapTag);
     static __aicore__ inline bool UpdateItersByWeight(Intf *self, TempIters& tempIters, bool updateIterByFmapTag);
     static __aicore__ inline bool UpdateCommonIters(Intf *self, TempIters& tempIters);
@@ -81,15 +85,15 @@ template <class Intf, uint32_t ImplType>
 __aicore__ void Iterate<Intf, ImplType>::ReduceOneK(Intf *self)
 {
     if (unlikely(self->ctx.loadAL1Flag)) {
-        LoadAL1Moudle<Intf>(self);
+        LoadAL1Module<Intf>(self);
         self->ctx.al1 = self->ctx.queueAL1.template DeQue<typename Intf::FmapT>();
     }
     if (unlikely(self->ctx.loadBL1Flag)) {
-        LoadBL1Moudle<Intf>(self);
+        LoadBL1Module<Intf>(self);
         self->ctx.bl1 = self->ctx.queueBL1.template DeQue<typename Intf::WeightT>();
     }
 
-    LoadL0Moudle<Intf>(self, self->ctx.kL0FullLoadAl0PingPongFlag, self->ctx.kL0FullLoadBl0PingPongFlag, true);
+    LoadL0Module<Intf>(self, self->ctx.kL0FullLoadAl0PingPongFlag, self->ctx.kL0FullLoadBl0PingPongFlag, true);
 }
 
 template <class Intf, uint32_t ImplType>
@@ -164,7 +168,7 @@ __aicore__ void Iterate<Intf, ImplType>::ReduceKPreloadFmapIter(Intf *self, Temp
                 self->ctx.queueAL1.FreeTensor(self->ctx.al1);
             }
             if (!UpdateItersByFmap(self, tempIters, updateIterByFmapTag)) {
-                LoadAL1BaseMoudle<Intf>(self, tempIters);
+                LoadAL1BaseModule<Intf>(self, tempIters);
             }
         }
         if ((self->ctx.ddr2l0LoopK % self->ctx.multiKAL1 == 0 &&
@@ -190,7 +194,7 @@ __aicore__ void Iterate<Intf, ImplType>::ReduceKPreloadWeightIter(Intf *self, Te
                 self->ctx.queueBL1.FreeTensor(self->ctx.bl1);
             }
             if (!UpdateItersByWeight(self, tempIters, updateIterByFmapTag)) {
-                LoadBL1BaseMoudle<Intf>(self, tempIters);
+                LoadBL1BaseModule<Intf>(self, tempIters);
             }
         }
         if ((self->ctx.ddr2l0LoopK % self->ctx.multiKBL1 == 0 &&
@@ -218,7 +222,7 @@ __aicore__ void Iterate<Intf, ImplType>::ReduceKPreload(Intf *self)
     }
     if (self->ctx.loadAL1Flag || !self->ctx.kAL1fullload) {
         self->ctx.kAL1Iter = 0;
-        LoadAL1BaseMoudle<Intf>(self);
+        LoadAL1BaseModule<Intf>(self);
         if (self->ctx.kAL1fullload) {
             self->ctx.al1 = self->ctx.queueAL1.template DeQue<typename Intf::FmapT>();
             self->ctx.loadAL0Flag = true;
@@ -226,7 +230,7 @@ __aicore__ void Iterate<Intf, ImplType>::ReduceKPreload(Intf *self)
     }
     if (self->ctx.loadBL1Flag || !self->ctx.kBL1fullload) {
         self->ctx.kBL1Iter = 0;
-        LoadBL1BaseMoudle<Intf>(self);
+        LoadBL1BaseModule<Intf>(self);
         if (self->ctx.kBL1fullload) {
             self->ctx.bl1 = self->ctx.queueBL1.template DeQue<typename Intf::WeightT>();
             self->ctx.loadBL0Flag = true;
@@ -242,7 +246,7 @@ __aicore__ void Iterate<Intf, ImplType>::ReduceKPreload(Intf *self)
         ReduceKPreloadFmapIter(self, tempIters, updateIterByFmapTag);
         ReduceKPreloadWeightIter(self, tempIters, updateIterByFmapTag);
 
-        LoadL0Moudle<Intf>(self, al0PingPongFlag, bl0PingPongFlag, isFirst);
+        LoadL0Module<Intf>(self, al0PingPongFlag, bl0PingPongFlag, isFirst);
         isFirst = false;
     }
 }
@@ -259,7 +263,7 @@ __aicore__ void Iterate<Intf, ImplType>::ReduceKFmapPreload(Intf *self)
     }
     if (self->ctx.loadAL1Flag || !self->ctx.kAL1fullload) {
         self->ctx.kAL1Iter = 0;
-        LoadAL1BaseMoudle<Intf>(self);
+        LoadAL1BaseModule<Intf>(self);
         if (self->ctx.kAL1fullload) {
             self->ctx.al1 = self->ctx.queueAL1.template DeQue<typename Intf::FmapT>();
             self->ctx.loadAL0Flag = true;
@@ -275,11 +279,11 @@ __aicore__ void Iterate<Intf, ImplType>::ReduceKFmapPreload(Intf *self)
         ReduceKPreloadFmapIter(self, tempIters, updateIterByFmapTag);
 
         if (self->ctx.loadBL1Flag || self->ctx.kIter % self->ctx.multiKBL1 == 0) {
-            LoadBL1Moudle<Intf>(self);
+            LoadBL1Module<Intf>(self);
             self->ctx.loadBL0Flag = true;
         }
 
-        LoadL0Moudle<Intf>(self, al0PingPongFlag, bl0PingPongFlag, isFirst);
+        LoadL0Module<Intf>(self, al0PingPongFlag, bl0PingPongFlag, isFirst);
         isFirst = false;
     }
 }
@@ -297,13 +301,13 @@ __aicore__ void Iterate<Intf, ImplType>::ReduceK(Intf *self)
             if (self->ctx.kIter != 0) {
                 self->ctx.queueAL1.FreeTensor(self->ctx.al1);
             }
-            LoadAL1Moudle<Intf>(self);
+            LoadAL1Module<Intf>(self);
             self->ctx.al1 = self->ctx.queueAL1.template DeQue<typename Intf::FmapT>();
             self->ctx.loadAL0Flag = true;
         }
         if constexpr (Intf::weightUbTrans) {
             if (self->ctx.loadBL1Flag || self->ctx.kIter % self->ctx.multiKBL1 == 0) {
-                LoadBL1Moudle<Intf>(self);
+                LoadBL1Module<Intf>(self);
                 self->ctx.loadBL0Flag = true;
             }
         } else {
@@ -311,13 +315,79 @@ __aicore__ void Iterate<Intf, ImplType>::ReduceK(Intf *self)
                 if (self->ctx.kIter != 0) {
                     self->ctx.queueBL1.FreeTensor(self->ctx.bl1);
                 }
-                LoadBL1Moudle<Intf>(self);
+                LoadBL1Module<Intf>(self);
                 self->ctx.bl1 = self->ctx.queueBL1.template DeQue<typename Intf::WeightT>();
                 self->ctx.loadBL0Flag = true;
             }
         }
 
-        LoadL0Moudle<Intf>(self, al0PingPongFlag, bl0PingPongFlag, isFirst);
+        LoadL0Module<Intf>(self, al0PingPongFlag, bl0PingPongFlag, isFirst);
+        isFirst = false;
+    }
+}
+
+template <class Intf, uint32_t ImplType>
+__aicore__ void Iterate<Intf, ImplType>::UpdateNextGroupOptIters(Intf *self, TempIters& tempIters)
+{
+    tempIters.batchIter = self->ctx.batchIter;
+    tempIters.groupOptIter = self->ctx.groupOptIter;
+    if constexpr (Intf::outputOrder == static_cast<int8_t>(ConvOutputOrder::M_MODE)) {
+        tempIters.mAL1Iter = self->ctx.mAL1Iter + 1;
+        if (tempIters.mAL1Iter <= self->ctx.maxMAL1Iter) {
+            return;
+        }
+        tempIters.mAL1Iter = 0;
+    } else {
+        tempIters.woAL1Iter = self->ctx.woAL1Iter + 1;
+        if (tempIters.woAL1Iter <= self->ctx.maxWoL1Iter) {
+            return;
+        }
+        tempIters.woAL1Iter = 0;
+        tempIters.hoAL1Iter = self->ctx.hoAL1Iter + 1;
+        if (tempIters.hoAL1Iter <= self->ctx.maxHoL1Iter) {
+            return;
+        }
+        tempIters.hoAL1Iter = 0;
+    }
+
+    tempIters.batchIter = self->ctx.batchIter + 1;
+    if (tempIters.batchIter < self->ctx.ddr2l1LoopBatch) {
+        return;
+    }
+    tempIters.batchIter = 0;
+
+    tempIters.groupOptIter = self->ctx.groupOptIter + 1;
+    if (tempIters.groupOptIter == self->ctx.singleGroupOpt) {
+        tempIters.groupOptIter = 0;
+        tempIters.endTag = true;
+    } else if (tempIters.groupOptIter == self->ctx.singleGroupOpt - 1 && self->ctx.updateSingleCoOpt == 0) {
+        tempIters.endTag = true;
+    }
+}
+
+template <class Intf, uint32_t ImplType>
+__aicore__ void Iterate<Intf, ImplType>::ReduceGroupOptFmapPreload(Intf *self)
+{
+    self->ctx.loadAl1Ins.SetLoad3dFMatrixForOptPreload();
+    TempIters tempIters;
+    UpdateNextGroupOptIters(self, tempIters);
+    if (self->ctx.loadAL1Flag && !tempIters.endTag) {
+        self->ctx.kAL1Iter = 0;
+        self->ctx.mAL1UpdateFlag = true;
+        LoadAL1BaseModule<Intf>(self, tempIters);
+    }
+    self->ctx.al1 = self->ctx.queueAL1.template DeQue<typename Intf::FmapT>();
+    self->ctx.loadAL0Flag = true;
+    // state
+    uint16_t al0PingPongFlag = 0;
+    uint16_t bl0PingPongFlag = 0;
+    bool isFirst = true;
+    if (self->ctx.loadBL1Flag) {
+        LoadBL1Module<Intf>(self);
+        self->ctx.loadBL0Flag = true;
+    }
+    while (self->ctx.kIter < self->ctx.ddr2l0LoopK) {
+        LoadL0Module<Intf>(self, al0PingPongFlag, bl0PingPongFlag, isFirst);
         isFirst = false;
     }
 }
@@ -342,7 +412,9 @@ __aicore__ void Iterate<Intf, ImplType>::IterateK(Intf *self)
     }
 
     // reduceK priority: 1.KL0FullLoad 2.L1DB Preload 3. ordinary reduceK
-    if constexpr (Intf::kl0FullLoadFlag) {
+    if constexpr (Intf::groupOptPreloadFlag) {
+        ReduceGroupOptFmapPreload(self);
+    } else if constexpr (Intf::kl0FullLoadFlag) {
         ReduceOneK(self);
     } else if constexpr (Intf::kPreLoadFlag) {
         if constexpr (Intf::weightUbTrans) {

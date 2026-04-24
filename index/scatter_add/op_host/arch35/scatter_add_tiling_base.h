@@ -21,7 +21,7 @@
 #include "register/op_impl_registry.h"
 #include "register/tilingdata_base.h"
 #include "log/log.h"
-#include "tiling_base/tiling_base.h"
+#include "op_host/tiling_base.h"
 
 namespace optiling
 {
@@ -113,22 +113,22 @@ protected:
     ge::graphStatus TilingCopyCompute();
     ge::graphStatus TilingSimtSort();
     ge::graphStatus TilingSimdCompute();
-    std::set<uint64_t> FindUniqueCut(uint64_t usedCoreNum);
+    std::set<uint64_t> FindUniqueCut(uint64_t usedCoreNum) const;
     std::tuple<uint64_t, uint64_t> SimdTiling(uint64_t usedCoreNum, uint64_t colNumAlign, uint64_t colLimitSize, bool colTileNumMin=false);
     void DoBlockTiling(uint64_t baseCol);
-    uint64_t CalBestBaseSize(uint64_t baseXoStart, uint64_t baseXoEnd);
+    uint64_t CalBestBaseSize(uint64_t baseXoStart, uint64_t baseXoEnd) const;
     ge::graphStatus TilingSimdSupportAtomicAddSortCompute();
     ge::graphStatus TilingSimdSupportAtomicAddCompute();
     ge::graphStatus TilingSimdNotSupportAtomicAddCompute(bool supportAtomicAdd);
     ge::graphStatus ScatterAddDeterministicTiling();
     ge::graphStatus getRestAvailableSize(uint64_t sampleNum, uint64_t valueTypeBytes, uint64_t originalSize,
-        uint64_t postAxisSize, ge::DataType idType);
-    uint64_t GetSortTmpSize(ge::DataType dataType, uint32_t lastAxisNum, bool isDescend);
+        uint64_t postAxisSize, ge::DataType idType) const;
+    uint64_t GetSortTmpSize(ge::DataType dataType, uint32_t lastAxisNum, bool isDescend) const;
     void DumpTilingInfo() override;
     void SetTilingData();
     ge::graphStatus CheckInputDtype();
     ge::graphStatus CheckUpdatesShape(const gert::Shape& varShape, const gert::Shape& indicesShape,
-                                    const gert::Shape& updatesShape);
+                                    const gert::Shape& updatesShape) const;
     ge::graphStatus GetCastType();
 
 private:

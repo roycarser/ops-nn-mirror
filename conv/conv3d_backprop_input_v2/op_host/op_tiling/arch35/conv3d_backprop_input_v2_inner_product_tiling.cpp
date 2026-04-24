@@ -20,8 +20,8 @@
 #include <util/math_util.h>
 #include <graph/utils/type_utils.h>
 #include <register/op_impl_registry.h>
-#include "tiling_base/tiling_templates_registry.h"
-#include "tiling_base/tiling_key.h"
+#include "op_host/tiling_templates_registry.h"
+#include "op_host/tiling_key.h"
 #include "error_util.h"
 #include "conv/common/op_host/op_tiling/platform_util.h"
 #include "conv/conv3d_backprop_input_v2/op_kernel/conv3d_backprop_input_v2_arch35_tiling_key.h"
@@ -193,6 +193,13 @@ bool Conv3DDXV2InnerProductTiling::CheckC04Enable()
     if (minNdUbSize > c04HalfUbSize || minNzUbSize > c04HalfUbSize) {
         return false;
     }
+
+    int64_t bpPadRight = runInfo_.dedx_w - (static_cast<int64_t>(runInfo_.dedy_w - 1) * runInfo_.stride_w + 1) +
+                         (runInfo_.kernel_w - 1) * runInfo_.dilation_w - runInfo_.backprop_pad_l;
+    if (bpPadRight < 0 || runInfo_.backprop_pad_l < 0) {
+        return false;
+    }
+
     OP_LOGD(opName_, "Enable c04 optimization");
     return true;
 }

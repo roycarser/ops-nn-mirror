@@ -19,7 +19,7 @@
 - **计算公式**：
 
   $$
-  (correction_{\beta_1},correction_{\beta_2},)=\begin{cases}
+  (correction_{\beta_1},correction_{\beta_2})=\begin{cases}
   (1,1),&biasCorrection=False\\
   (1-\beta_1^{step},1-\beta_2^{step}),&biasCorrection=True
   \end{cases}
@@ -73,11 +73,11 @@
 
 ```cpp
 aclnnStatus aclnnApplyFusedEmaAdamGetWorkspaceSize(
-    const aclTensor       *grad,
+    const aclTensor *grad,
     aclTensor       *varRef,
     aclTensor       *mRef,
     aclTensor       *vRef,
-    const aclTensor *sRef,
+    aclTensor       *sRef,
     const aclTensor *step,
     double           lr,
     double           emaDecay,
@@ -102,16 +102,16 @@ aclnnStatus aclnnApplyFusedEmaAdam(
 ## aclnnApplyFusedEmaAdamGetWorkspaceSize
 
 - **参数说明：**
-  </style>
-  <table class="tg" style="undefined;table-layout: fixed; width: 1137px"><colgroup>
-  <col style="width: 201px">
-  <col style="width: 88px">
-  <col style="width: 289px">
-  <col style="width: 156px">
+
+  <table class="tg" style="undefined;table-layout: fixed; width: 1500px"><colgroup>
+  <col style="width: 200px">
   <col style="width: 120px">
-  <col style="width: 95px">
-  <col style="width: 108px">
-  <col style="width: 108px">
+  <col style="width: 380px">
+  <col style="width: 220px">
+  <col style="width: 200px">
+  <col style="width: 115px">
+  <col style="width: 120px">
+  <col style="width: 145px">
   </colgroup>
   <thead>
     <tr>
@@ -133,7 +133,7 @@ aclnnStatus aclnnApplyFusedEmaAdam(
       <td class="tg-0pky">FLOAT16、BFLOAT16、FLOAT32</td>
       <td class="tg-0pky">ND</td>
       <td class="tg-0pky">1-8</td>
-      <td class="tg-0pky">x</td>
+      <td class="tg-0pky">√</td>
     </tr>
     <tr>
       <td class="tg-0pky">varRef（aclTensor*）</td>
@@ -143,7 +143,7 @@ aclnnStatus aclnnApplyFusedEmaAdam(
       <td class="tg-0pky">与grad保持一致</td>
       <td class="tg-0pky">ND</td>
       <td class="tg-0pky">1-8</td>
-      <td class="tg-0pky">x</td>
+      <td class="tg-0pky">√</td>
     </tr>
     <tr>
       <td class="tg-0pky">mRef（aclTensor*）</td>
@@ -153,7 +153,7 @@ aclnnStatus aclnnApplyFusedEmaAdam(
       <td class="tg-0pky">与grad保持一致</td>
       <td class="tg-0pky">ND</td>
       <td class="tg-0pky">1-8</td>
-      <td class="tg-0pky">x</td>
+      <td class="tg-0pky">√</td>
     </tr>
     <tr>
       <td class="tg-0pky">vRef（aclTensor*）</td>
@@ -163,7 +163,7 @@ aclnnStatus aclnnApplyFusedEmaAdam(
       <td class="tg-0pky">与grad保持一致</td>
       <td class="tg-0pky">ND</td>
       <td class="tg-0pky">1-8</td>
-      <td class="tg-0pky">x</td>
+      <td class="tg-0pky">√</td>
     </tr>
     <tr>
       <td class="tg-0pky">sRef（aclTensor*）</td>
@@ -173,7 +173,7 @@ aclnnStatus aclnnApplyFusedEmaAdam(
       <td class="tg-0pky">与grad保持一致</td>
       <td class="tg-0pky">ND</td>
       <td class="tg-0pky">1-8</td>
-      <td class="tg-0pky">x</td>
+      <td class="tg-0pky">√</td>
     </tr>
     <tr>
       <td class="tg-0pky">step（aclTensor*）</td>
@@ -183,7 +183,7 @@ aclnnStatus aclnnApplyFusedEmaAdam(
       <td class="tg-0pky">INT64</td>
       <td class="tg-0pky">ND</td>
       <td class="tg-0pky">1</td>
-      <td class="tg-0pky">x</td>
+      <td class="tg-0pky">√</td>
     </tr>
     <tr>
       <td class="tg-0pky">lr（double）</td>
@@ -218,7 +218,7 @@ aclnnStatus aclnnApplyFusedEmaAdam(
     <tr>
       <td class="tg-0pky">beta2（double）</td>
       <td class="tg-0pky">输入</td>
-      <td class="tg-0pky">计算二阶动量的系数，公式中beta1参数，推荐0.9，范围0~1。</td>
+      <td class="tg-0pky">计算二阶动量的系数，公式中beta2参数，推荐0.9，范围0~1。</td>
       <td class="tg-0pky">-</td>
       <td class="tg-0pky">DOUBLE</td>
       <td class="tg-0pky">-</td>
@@ -292,11 +292,11 @@ aclnnStatus aclnnApplyFusedEmaAdam(
   返回aclnnStatus状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 
   第一段接口完成入参校验，出现以下场景时报错：
-  </style>
-  <table class="tg" style="undefined;table-layout: fixed; width: 728px"><colgroup>
-  <col style="width: 267px">
-  <col style="width: 87px">
-  <col style="width: 374px">
+
+  <table class="tg" style="undefined;table-layout: fixed; width: 1150px"><colgroup>
+  <col style="width: 270px">
+  <col style="width: 130px">
+  <col style="width: 750px">
   </colgroup>
   <thead>
     <tr>
@@ -341,7 +341,7 @@ aclnnStatus aclnnApplyFusedEmaAdam(
     <tr>
       <td>workspaceSize</td>
       <td>输入</td>
-      <td>在Device侧申请的workspace大小，由第一段接口aclnnApplyAdamWV2GetWorkspaceSize获取。</td>
+      <td>在Device侧申请的workspace大小，由第一段接口aclnnApplyFusedEmaAdamGetWorkspaceSize获取。</td>
     </tr>
     <tr>
       <td>executor</td>
@@ -474,9 +474,9 @@ int main() {
   std::vector<float> mHostData = {1, 2, 3, 4, 5, 6, 7, 8};
   std::vector<float> vHostData = {1, 2, 3, 4, 5, 6, 7, 8};
   std::vector<float> sHostData = {1, 2, 3, 4, 5, 6, 7, 8};
-  std::vector<float> stepHostData = {10, 10, 10, 10};
+  std::vector<int64_t> stepHostData = {10};
   std::vector<int64_t> inputShape = {2, 2, 2};
-  std::vector<int64_t> stepShape = {2, 2};
+  std::vector<int64_t> stepShape = {1,};
   void *gradDeviceAddr = nullptr;
   void *varDeviceAddr = nullptr;
   void *mDeviceAddr = nullptr;

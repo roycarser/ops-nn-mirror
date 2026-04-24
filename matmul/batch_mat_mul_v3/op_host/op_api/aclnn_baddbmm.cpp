@@ -178,7 +178,7 @@ static aclnnStatus CheckInputParams(
     CHECK_RET(CheckOutputNotNull(out), ACLNN_ERR_PARAM_NULLPTR);
 
     // 2. 检查输入的数据类型是否在API支持的数据类型范围之内，需要根据api定义校验
-    auto archRule = NpuArchMatMulRule::getInstance();
+    auto archRule = BuildRule();
     CHECK_RET(archRule != nullptr, ACLNN_ERR_PARAM_INVALID);
     CHECK_RET(archRule->CheckInput(batch1, batch2, self, out, cubeMathType), ACLNN_ERR_PARAM_INVALID);
 
@@ -190,6 +190,9 @@ static aclnnStatus CheckInputParams(
 
     // 5. 检查batch1, batch2和out的format是否一致，self存在与其他输入format不一样的情况
     CHECK_RET(CheckFormat(batch1, batch2, out), ACLNN_ERR_PARAM_INVALID);
+
+    // 6. 检查cubeMathType是否支持
+ 	CHECK_RET(CheckCubeMathTypeForAddMm(batch1, batch2, self, out, cubeMathType), ACLNN_ERR_PARAM_INVALID);
 
     return ACLNN_SUCCESS;
 }
@@ -266,12 +269,16 @@ public:
             convOut = bmmOut;
             return ACLNN_SUCCESS;
         }
+        if (CheckGemmV3WithAlphaBeta(bias, matA, matB, cubeMathType)) {
+            const aclTensor* bmmOut = ExecGemmV3WithAlphaBetaOp(bias, matA, matB, alpha, beta, executor);
+            CHECK_RET(bmmOut != nullptr, ACLNN_ERR_INNER_NULLPTR);
+            convOut = bmmOut;
+            return ACLNN_SUCCESS;
+        }
         // self(bias) * beta
         const aclTensor* selfContiguous = l0op::Contiguous(bias, executor);
         CHECK_RET(selfContiguous != nullptr, ACLNN_ERR_INNER_NULLPTR);
-        const aclTensor* mulOut = reinterpret_cast<void*>(l0op::MulsInplace) != nullptr ?
-            l0op::MulsInplace(selfContiguous, beta->ToFloat(), executor) :
-            l0op::Muls(selfContiguous, beta->ToFloat(), executor);
+        const aclTensor* mulOut = l0op::Muls(selfContiguous, beta->ToFloat(), executor);
         CHECK_RET(mulOut != nullptr, ACLNN_ERR_INNER_NULLPTR);
 
         // bmmOut = batch1(matA) @ batch2(matB)
@@ -292,13 +299,13 @@ public:
         const aclTensor* addOut = nullptr;
         bool isInplace = bias->GetData() == output->GetData();
         if (std::abs(alpha->ToFloat() - 1.0f) <= std::numeric_limits<float>::epsilon()) {
-            // alpha == 0
+            // alpha == 1
             // addOut = mulOutCasted + bmmOutCasted
             addOut = reinterpret_cast<void*>(l0op::AddInplace) != nullptr && !isInplace && output->GetViewShape() == bmmOutCasted->GetViewShape() ?
                 l0op::AddInplace(mulOutCasted, bmmOutCasted, executor) :
                 l0op::Add(mulOutCasted, bmmOutCasted, executor);
         } else {
-            // alpha != 0
+            // alpha != 1
             // addOut = mulOutCasted + bmmOutCasted * alpha
             addOut = reinterpret_cast<void*>(l0op::AxpyInplace) != nullptr && !isInplace && output->GetViewShape() == bmmOutCasted->GetViewShape() ?
                 l0op::AxpyInplace(mulOutCasted, bmmOutCasted, alpha->ToFloat(), executor) :

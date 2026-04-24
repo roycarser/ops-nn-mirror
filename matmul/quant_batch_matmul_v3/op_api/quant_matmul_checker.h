@@ -28,8 +28,8 @@ namespace op {
 class QuantMatmulChecker {
 public:
     QuantMatmulChecker(const TupleInput &inputTensors, const TupleQuant &quantTensors,
-                       const TupleAttr &boolsTrans, const aclTensor *out)
-     : inputTensors_(inputTensors), quantTensors_(quantTensors), boolsTrans_(boolsTrans), out_(out) {}
+                       const TupleAttr &boolsTrans, const aclTensor *out, const bool isWeightNz = false)
+     : inputTensors_(inputTensors), quantTensors_(quantTensors), boolsTrans_(boolsTrans), out_(out), isWeightNz_(isWeightNz) {}
 
     ~QuantMatmulChecker() = default;
     void Init();
@@ -44,6 +44,7 @@ private:
     aclnnStatus CheckDtypeL0c2outOrL0c2ub() const;
     bool CheckDoubleScaleAndFp8Hif8PertokenPerblock() const;
     bool CheckL0c2outOrL0c2ubPertoken() const;
+    bool CheckL0C2outOrL0C2ubPertokenPergroup() const;
     bool CheckMicroScaling() const;
     bool CheckL0c2outOrL0c2ubPertensorPerchannel() const;
     bool CheckL0c2outOrL0c2ubPertensorPerchannel4Int8Input() const;
@@ -52,6 +53,7 @@ private:
     bool CheckOnlyL0c2outPertoken() const;
     bool CheckL0c2outAndL0c2ubPertensorPerchannel() const;
     bool CheckL0c2outPertensorPerchannel() const;
+    bool CheckOnlyL0c2ubPertoken() const;
     bool CheckFormat() const;
     bool CheckShape() const;
     bool CheckScaleDimRange() const;
@@ -63,7 +65,7 @@ private:
     bool CheckDimValuePertokenDoubleScale() const;
     bool CheckDimValuePerblock() const;
     bool CheckGroupSizeShape(uint64_t groupSizeM) const;
-    bool CheckKDimValueFp4Fp8WeightNZMicroScaling() const;
+    bool CheckMXFP4FP8ParamsNDOrNZ() const;
     bool CheckDimValueMicroScaling() const;
     bool CheckShapeForWeightNz() const;
     bool CheckShapeInt4() const;
@@ -73,13 +75,20 @@ private:
     std::string GetX1ScaleName() const;
     std::string GetX2ScaleName() const;
     std::string GetX2OffsetName() const;
-    bool ReCalcGroupSize(int64_t inputSize, int64_t scaleSize, int64_t &groupSize, const char *dimensionName) const;
+    bool InferGroupSizeM(const aclTensor *x1, const aclTensor *x1Scale, const aclTensor *x2Scale,
+                         bool transX1, uint64_t &groupSizeM) const;
+    bool InferGroupSizeK(const aclTensor *x1, const aclTensor *x1Scale, const aclTensor *x2Scale,
+                         bool transX1, uint64_t &groupSizeK) const;
+    bool InferGroupSizeN(const aclTensor *x2, const aclTensor *x1Scale, const aclTensor *x2Scale,
+                         bool transX2, uint64_t groupSizeK, uint64_t &groupSizeN) const;
+    bool ReCalcGroupSize(int64_t inputSize, int64_t scaleSize, uint64_t &groupSize, const char *dimensionName) const;
 
 public:
     const TupleInput inputTensors_;
     const TupleQuant quantTensors_;
     const TupleAttr boolsTrans_;
     const aclTensor *out_ = nullptr;
+    const bool isWeightNz_;
 
 private:
     const aclTensor *x1_ = nullptr;

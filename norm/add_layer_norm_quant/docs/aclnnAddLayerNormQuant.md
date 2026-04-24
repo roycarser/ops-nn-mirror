@@ -13,7 +13,6 @@
 | <term>Atlas 推理系列产品</term>                             |    ×     |
 | <term>Atlas 训练系列产品</term>                              |    ×     |
 
-
 ## 功能说明
 
 - 接口功能 ：LayerNorm算子是大模型常用的归一化操作。AddLayerNormQuant算子将LayerNorm前的Add算子和LayerNorm归一化输出给1个或2个下游的量化算子融合起来，减少搬入搬出操作。LayerNorm下游的量化算子可以是Quantize、AscendQuantV2或DynamicQuant算子，具体的量化算子类型由attr入参divMode和quantMode决定。当下游有2个量化算子时，2个量化算子的算子类型、输入输出dtype组合和可选输入的组合需要完全一致。
@@ -70,7 +69,7 @@
         $$
   
         $$
-        y1Out = round(y / outScales1Out)
+        y1Out = round(tmp1 / outScales1Out)
         $$
   
     - 若scales1Optional和scales2Optional均存在，则y2Out和scale2Out输出有效。计算公式如下所示：
@@ -84,7 +83,7 @@
         $$
   
         $$
-        y1Out = round(y / outScales1Out),\quad y2Out = round(y / outScales2Out)
+        y1Out = round(tmp1 / outScales1Out),\quad y2Out = round(tmp2 / outScales2Out)
         $$
   
         其中row\_max代表对每行求最大值
@@ -127,7 +126,7 @@ aclnnStatus aclnnAddLayerNormQuant(
 
 ## aclnnAddLayerNormQuantGetWorkspaceSize
 
-- **参数说明：**
+- **参数说明**
 
   <table style="undefined;table-layout: fixed; width: 1550px"><colgroup>
   <col style="width: 170px">
@@ -354,7 +353,7 @@ aclnnStatus aclnnAddLayerNormQuant(
   </tbody>
   </table>
   
-- **返回值：**
+- **返回值**
 
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
   
@@ -394,7 +393,7 @@ aclnnStatus aclnnAddLayerNormQuant(
       <ol>
       <li>gamma的维度和x1的维度的后几维不一致。</li>
       <li>当量化模式为动态，即输入quantMode的值为"dynamic"时，x1的维度小于2，或gamma的维度不为1。</li>
-      <li>当量化模式为动态，即输入quantMode的值为"dynamic"时，outScales1Out的shape不为输入x1的shape剔除掉最后一维。</td>
+      <li>当量化模式为动态，即输入quantMode的值为"dynamic"时，outScales1Out的shape不为输入x1的shape剔除掉最后一维。</li></ol></td>
     </tr>
     <tr>
       <td>全部输入tensor的shape满足以下等量关系：
@@ -413,7 +412,7 @@ aclnnStatus aclnnAddLayerNormQuant(
 
 ## aclnnAddLayerNormQuant
 
-- **参数说明：**
+- **参数说明**
 
   <table style="undefined;table-layout: fixed; width: 953px"><colgroup>
   <col style="width: 173px">
@@ -450,7 +449,7 @@ aclnnStatus aclnnAddLayerNormQuant(
   </tbody>
   </table>
 
-- **返回值：**
+- **返回值**
 
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 
@@ -459,6 +458,7 @@ aclnnStatus aclnnAddLayerNormQuant(
 - 功能维度：
   
   * 可选输入（scales1Optional、scales2Optional、zeroPoints1Optional、zeroPoints2Optional）支持的可选输入组合如下所示：
+    
     | scales1Optional | scales2Optional | zeroPoints1Optional | zeroPoints2Optional | quantMode | 是否合法 |
     | --------------- | --------------- | ------------------- | ------------------- | ----------------- | :------ |
     | T               | T               | T                   | T                   | "static"          | T       |
@@ -483,6 +483,7 @@ aclnnStatus aclnnAddLayerNormQuant(
     - `X`代表任意情况均可。
 - 数据类型支持说明：
   - 当`quantMode`为"static"时：
+    
     | x1 数据类型 | x2 数据类型 | gamma 数据类型 | beta 数据类型 | bias 数据类型 | scale1 数据类型 | scale2 数据类型 | zeroPoints1 数据类型 | zeroPoints2 数据类型 | y1 数据类型 | y2 数据类型 | x 数据类型 | outScale1 数据类型 | outScale2 数据类型 |
     | ---------- | --------- | ------------- | ----------- | ------------ | -------------- | -------------- | ------------------ | ------------------- | --------- | ---------- | --------- | ----------------- | :--------------- |
     | FLOAT16    | FLOAT16   | FLOAT16       | FLOAT16     | FLOAT16      | FLOAT16        | FLOAT16        | FLOAT16            | FLOAT16             | INT8      | INT8       | FLOAT16   | FLOAT32           | FLOAT32          |
@@ -492,6 +493,7 @@ aclnnStatus aclnnAddLayerNormQuant(
     | BFLOAT16   | BFLOAT16  | BFLOAT16      | BFLOAT16    | BFLOAT16     | FLOAT32        | FLOAT32        | FLOAT32            | FLOAT32             | INT8      | INT8       | BFLOAT16  | FLOAT32           | FLOAT32          |
 
   - 当`quantMode`为"dynamic"时：
+    
     | x1 数据类型 | x2 数据类型 | gamma 数据类型 | beta 数据类型 | bias 数据类型 | scale1 数据类型 | scale2 数据类型 | zeroPoints1 数据类型 | zeroPoints2 数据类型 | y1 数据类型 | y2 数据类型 | x 数据类型 | outScale1 数据类型 | outScale2 数据类型 |
     | ---------- | --------- | ------------- | ----------- | ------------ | -------------- | -------------- | ------------------ | ------------------- | --------- | ---------- | --------- | ----------------- | :--------------- |
     | FLOAT16    | FLOAT16   | FLOAT16       | FLOAT16     | FLOAT16      | FLOAT16        | FLOAT16        | FLOAT16            | FLOAT16             | INT8      | INT8       | FLOAT16   | FLOAT32           | FLOAT32          |
@@ -499,7 +501,6 @@ aclnnStatus aclnnAddLayerNormQuant(
 
 - 确定性计算：
   - aclnnAddLayerNormQuant默认确定性实现。
-
 
 ## 调用示例
 
@@ -674,7 +675,7 @@ int main() {
   CHECK_RET(ret == ACL_SUCCESS, return ret);
 
   // aclnnAddLayerNormQuant接口调用示例，包含带bias和不带bias的各一次
-  // 3. 调用CANN算子库API，需要修改为具体的Api名称
+  // 3. 调用CANN算子库API，需要修改为具体的API名称
 
   // 3.1 不带bias可选输入的示例
   // 调用aclnnAddLayerNormQuant第一段接口
@@ -788,5 +789,4 @@ int main() {
   aclFinalize();
   return 0;
 }
-
 ```

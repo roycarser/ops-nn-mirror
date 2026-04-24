@@ -16,7 +16,7 @@
 #ifndef OPS_BUILT_IN_OP_TILING_RUNTIME_CONV3D_BASE_TILING_H
 #define OPS_BUILT_IN_OP_TILING_RUNTIME_CONV3D_BASE_TILING_H
 
-#include "tiling_base/tiling_base.h"
+#include "op_host/tiling_base.h"
 #include "conv3d_tuning_tiling.h"
 #include "tiling/platform/platform_ascendc.h"
 #include "../../op_kernel/conv3d_v2_tiling_data.h"
@@ -188,17 +188,17 @@ private:
       void GetDescInfo();
       void PrintTilingInfo();
       void GetConv3DParasHf32Mode(const uint32_t enableHf32Idx, uint32_t& hf32Mode);
-      bool Is3DFp32InputFp32Output();
+      bool Is3DFp32InputFp32Output() const;
 
       std::vector<int64_t> ExtractOriginFmapShape();
       std::vector<int64_t> ExtractOriginWeightShape();
       std::vector<int64_t> ExtractOriginOutputShape();
-      bool ExtractPadList(std::vector<int64_t> &padList);
+      bool ExtractPadList(std::vector<int64_t> &padList) const;
       bool ExtractStrideList(std::vector<int64_t> &strideList);
       bool ExtractDilationList(std::vector<int64_t> &dilationList);
-      bool ExtractBiasShape(std::vector<int64_t> &biasShape);
-      bool ExtractScaleShape(std::vector<int64_t> &scaleShape);
-      int64_t ExtractGroups();
+      bool ExtractBiasShape(std::vector<int64_t> &biasShape) const;
+      bool ExtractScaleShape(std::vector<int64_t> &scaleShape) const;
+      int64_t ExtractGroups() const;
       void ExtractAndSetDataTypes();
       void ExtractAndSetFormats();
       void SetHF32Mode();

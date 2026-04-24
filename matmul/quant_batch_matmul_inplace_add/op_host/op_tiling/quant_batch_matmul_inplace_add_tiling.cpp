@@ -9,7 +9,7 @@
  */
 
 #include <climits>
-#include "common/inc/error_util.h"
+#include "error_util.h"
 #include "common/op_host/op_tiling/tiling_type.h"
 #include "error_util.h"
 #include "log/log.h"
@@ -17,7 +17,7 @@
 #include "platform/platform_infos_def.h"
 #include "quant_batch_matmul_inplace_add_tiling.h"
 #include "register/op_impl_registry.h"
-#include "tiling_base/tiling_templates_registry.h"
+#include "op_host/tiling_templates_registry.h"
 #include "../../../quant_batch_matmul_v3/op_host/op_tiling/platform_util.h"
 #include "../../../quant_batch_matmul_v3/op_host/op_tiling/quant_batch_matmul_v3_compile_info.h"
 
@@ -152,15 +152,9 @@ bool QuantBatchMatmulInplaceAddTiling::CheckShapeVaild(const gert::Shape &x1Shap
                     context_->GetNodeName(), "The dim num of x1 and x2 should be 2, but acutlly is %zu, %zu.",
                     x1ShapeLength, x2ShapeLength),
                 return false);
-    auto x2NDimValue =
-        static_cast<uint64_t>(inputParams_.transB ? x2Shape.GetDim(0) :
-                                                    x2Shape.GetDim(1)); // 1 is index for the second dim
     auto x2KDimValue =
         static_cast<uint64_t>(inputParams_.transB ? x2Shape.GetDim(1) : // 1 is index for the second dim
                                                     x2Shape.GetDim(0));
-    auto x1MDimValue =
-        static_cast<uint64_t>(inputParams_.transA ? x1Shape.GetDim(1) :
-                                                    x1Shape.GetDim(0));
     auto x1KDimValue =
         static_cast<uint64_t>(inputParams_.transA ? x1Shape.GetDim(0) :
                                                     x1Shape.GetDim(1));
@@ -232,7 +226,7 @@ bool QuantBatchMatmulInplaceAddTiling::AnalyzeInputs()
     if (x1ShapeLen < X1_MINIMUM_DIMENSION_LENGTH || x2ShapeLen < X2_MINIMUM_DIMENSION_LENGTH) {
         OP_LOGE(
             context_->GetNodeName(),
-            "X1 Shape Length and x2 shape Length should be greater than 2, but actually is %u and %u.", x1ShapeLen,
+            "X1 Shape Length and x2 shape Length should be greater than 2, but actually is %lu and %lu.", x1ShapeLen,
             x2ShapeLen);
         return false;
     }

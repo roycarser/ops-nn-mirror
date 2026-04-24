@@ -8,9 +8,8 @@
 | <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>     |    √    |
 | <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>     |    √     |
 | <term>Atlas 200I/500 A2 推理产品</term>                      |    ×     |
-| <term>Atlas 推理系列产品 </term>                             |    ×     |
+| <term>Atlas 推理系列产品</term>                             |    ×     |
 | <term>Atlas 训练系列产品</term>                              |    ×   |
-
 
 ## 功能说明
 
@@ -93,6 +92,7 @@
                                       2.self、out的shape不一致。
                                       3.src、index shape不合法。
   ```
+
 ## aclnnScatterAdd
 
 - **参数说明：**
@@ -105,7 +105,6 @@
 
   - stream（aclrtStream，入参）：指定执行任务的Stream。
 
-
 - **返回值：**
 
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
@@ -117,6 +116,7 @@
 ## 调用示例
 
 示例代码如下，仅供参考，具体编译和执行过程请参考[编译与运行样例](../../../docs/zh/context/编译与运行样例.md)。
+
 ```Cpp
 #include <iostream>
 #include <vector>
@@ -265,4 +265,3 @@ int main() {
   return 0;
 }
 ```
-

@@ -24,9 +24,18 @@ namespace batch_matmul_v3_advanced {
 using namespace strategy;
 MM_REGISTER_TILING_TEMPLATE(BatchMatMulV3, BatchMatMulV3AswBL1FullLoadBasicTiling, DAV_3510, BL1_FULL_LOAD_BASIC);
 
+//supportMmadS8S4平台
+MM_REGISTER_TILING_TEMPLATE(BatchMatMulV3, BatchMatMulV3AswBL1FullLoadBasicTiling, DAV_RESV, BL1_FULL_LOAD_BASIC);
 
 bool BatchMatMulV3AswBL1FullLoadBasicTiling::IsCapable()
 {
+    bool isSupportType = (args_.aType == ge::DT_FLOAT16 || args_.aType == ge::DT_BF16) &&
+                         (args_.bType == ge::DT_FLOAT16 || args_.bType == ge::DT_BF16) &&
+                         (args_.cType == ge::DT_FLOAT16 || args_.cType == ge::DT_BF16);
+    if ((!isSupportType) && args_.bFormat == ge::FORMAT_FRACTAL_NZ) {
+        OP_LOGE(args_.opName, "NZ format is not supported when the data type is FP32");
+        return false;
+    }
     if (batchInfo_->batchB > 1UL) { // matrix B should not have batch when BL1FullLoad
         return false;
     }

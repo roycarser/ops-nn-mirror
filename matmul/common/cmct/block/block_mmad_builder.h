@@ -76,6 +76,7 @@ class BlockMmadBuilder<
             MatmulMultiBlockWithOutQue<AscendC::Shape<_0, _0, _0, _0>, B_FULL_LOAD_MODE, OP_TYPE_RELU>,
             BlockMatmulPolicy_> ||
         AscendC::Std::is_base_of_v<MatmulIterBatch<>, BlockMatmulPolicy_> ||
+        AscendC::Std::is_base_of_v<MatmulMergeBatch<>, BlockMatmulPolicy_> ||
         AscendC::Std::is_base_of_v<MatmulIterBatch<MatMulL0C2Out::ND_FIXPIPE_1_2>, BlockMatmulPolicy_> ||
         AscendC::Std::is_base_of_v<MatmulMergeBatch<>, BlockMatmulPolicy_> ||
         AscendC::Std::is_base_of_v<MatmulMultiBlock<>, BlockMatmulPolicy_> ||
@@ -85,7 +86,8 @@ class BlockMmadBuilder<
             MatmulMultiBlockWithStreamK<MatMulL0C2Out::ON_THE_FLY, OP_TYPE_RELU>, BlockMatmulPolicy_> ||
         AscendC::Std::is_base_of_v<
             MatmulMultiBlockWithStreamK<MatMulL0C2Out::ND_FIXPIPE_1_2, OP_TYPE_RELU>, BlockMatmulPolicy_> ||
-        AscendC::Std::is_base_of_v<BatchMatmulToMul<>, BlockMatmulPolicy_>>> {
+        AscendC::Std::is_base_of_v<BatchMatmulToMul<>, BlockMatmulPolicy_> || 
+        AscendC::Std::is_base_of_v<MatmulToMul<>, BlockMatmulPolicy_>>> {
 public:
     using AType = AType_;
     using BType = BType_;

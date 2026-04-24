@@ -14,11 +14,12 @@
  */
 
 #include "transpose_quant_batch_mat_mul_tiling.h"
-#include "tiling_base/tiling_templates_registry.h"
+#include "op_host/tiling_templates_registry.h"
 #include "register/op_def_registry.h"
 #include "./arch35/transpose_quant_batch_mat_mul_tiling_advanced.h"
 #include "matmul/mat_mul_v3/op_host/op_tiling/matmul_v3_compile_info.h"
 #include "matmul/mat_mul_v3/op_host/op_tiling/matmul_v3_platform_common.h"
+#include "transpose_quant_batch_mat_mul_simplifiedkey.h"
 #include "op_cache_tiling.h"
 #include "error_util.h"
 
@@ -51,6 +52,7 @@ static ge::graphStatus TilingPrepareForTransposeQuantBatchMatMul(gert::TilingPar
     compileInfoPtr->supportL0c2out = !val.empty();
     compileInfoPtr->supportL12BtBf16 = (dataMoveL12Bt.find("bf16") != std::string::npos);
     compileInfoPtr->aicNum = ascendcPlatform.GetCoreNumAic();
+    compileInfoPtr->aivNum = ascendcPlatform.GetCoreNumAiv();
     compileInfoPtr->socVersion = ascendcPlatform.GetSocVersion();
     compileInfoPtr->npuArch = ascendcPlatform.GetCurNpuArch();
     compileInfoPtr->btSize = compileInfoPtr->supportL0c2out ? 1024UL : 0UL;                      // 1024 is btSize
@@ -70,5 +72,6 @@ static ge::graphStatus TilingPrepareForTransposeQuantBatchMatMul(gert::TilingPar
 
 IMPL_OP_OPTILING(TransposeQuantBatchMatMul)
     .Tiling(TransposeQuantBatchMatMulTilingFunc)
-    .TilingParse<MatmulV3CompileInfo>(TilingPrepareForTransposeQuantBatchMatMul);
+    .TilingParse<MatmulV3CompileInfo>(TilingPrepareForTransposeQuantBatchMatMul)
+    .GenSimplifiedKey(transpose_quant_batch_matmul::GenSimplifiedKey);
 } // namespace optiling

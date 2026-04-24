@@ -13,7 +13,6 @@
 |  <term>Atlas 推理系列产品</term>    |     ×    |
 |  <term>Atlas 训练系列产品</term>    |     ×    |
 
-
 ## 功能说明
 
 - 接口功能：RmsNorm算子是大模型常用的归一化操作，AddRmsNormCast算子将AddRmsNorm后的Cast算子融合起来，减少搬入搬出操作。
@@ -59,7 +58,7 @@ aclnnStatus aclnnAddRmsNormCast(
 
 ## aclnnAddRmsNormCastGetWorkspaceSize
 
-- **参数说明：**
+- **参数说明**
 
   <table style="undefined;table-layout: fixed; width: 1550px"><colgroup>
   <col style="width: 170px">
@@ -147,7 +146,7 @@ aclnnStatus aclnnAddRmsNormCast(
       <td>rstdOut（aclTensor*）</td>
       <td>输出</td>
       <td>表示归一化后的标准差的倒数。对应公式中`Rms(x)`的倒数。</td>
-      <td><ul><li>支持空Tensor。</li><li>需要与入参`x1`的数据格式保持一致。</li><li>shape与入参`x1`的shape前几维保持一致，前几维指`x1`的维度减去`gamma`的维度，表示不需要norm的维度。</li></ul></td>
+      <td><ul><li>支持空Tensor。</li><li>需要与入参`x1`的数据格式保持一致。</li><li>shape与入参`x1`的shape前几维保持一致，前几维指`x1`的维度减去`gamma`的维度，表示不需要norm的维度。</li><li>当输入`x1`时空tensor时，`rstdOut`也必须为空tensor。</li></ul></td>
       <td>FLOAT32</td>
       <td>ND</td>
       <td>1-8</td>
@@ -186,7 +185,7 @@ aclnnStatus aclnnAddRmsNormCast(
   </tbody>
   </table>
 
-- **返回值：**
+- **返回值**
 
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
   
@@ -224,7 +223,7 @@ aclnnStatus aclnnAddRmsNormCast(
 
 ## aclnnAddRmsNormCast
 
-- **参数说明：**
+- **参数说明**
 
   <table style="undefined;table-layout: fixed; width: 953px"><colgroup>
   <col style="width: 173px">
@@ -261,7 +260,7 @@ aclnnStatus aclnnAddRmsNormCast(
   </tbody>
   </table>
 
-- **返回值：**
+- **返回值**
 
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 

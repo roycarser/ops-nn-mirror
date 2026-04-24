@@ -8,7 +8,7 @@
 | <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>     |    √     |
 | <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term> |    √     |
 | <term>Atlas 200I/500 A2 推理产品</term>                      |    ×    |
-| <term>Atlas 推理系列产品 </term>                             |    ×    |
+| <term>Atlas 推理系列产品</term>                             |    ×    |
 | <term>Atlas 训练系列产品</term>                              |    ×    |
 
 ## 功能说明
@@ -49,6 +49,7 @@
       $$
 
 ## 函数原型
+
 每个算子分为[两段式接口](../../../docs/zh/context/两段式接口.md)，必须先调用“aclnnFusedQuantMatmulWeightNzGetWorkspaceSize”接口获取计算所需workspace大小以及包含了算子计算流程的执行器，再调用“aclnnFusedQuantMatmulWeightNz”接口执行计算。
 
 ```c++
@@ -64,13 +65,12 @@ aclnnStatus aclnnFusedQuantMatmulWeightNzGetWorkspaceSize(
   const aclTensor *biasOptional,
   const aclTensor *x3Optional,
   const char      *fusedOpType,
-  bool             transposeX1,
-  bool             transposeX2,
   int64_t          groupSizeOptional,
   aclTensor       *out,
   uint64_t        *workspaceSize,
   aclOpExecutor   **executor)
 ```
+
 ```c++
 aclnnStatus aclnnFusedQuantMatmulWeightNz(
   void          *workspace,
@@ -117,7 +117,7 @@ aclnnStatus aclnnFusedQuantMatmulWeightNz(
         <td>INT4、INT8、INT32</td>
         <td>ND</td>
         <td>2-6</td>
-        <td>×</td>
+        <td>√</td>
       </tr>
       <tr>
         <td>x2</td>
@@ -132,7 +132,7 @@ aclnnStatus aclnnFusedQuantMatmulWeightNz(
         <td>INT4、INT8、INT32</td>
         <td>NZ</td>
         <td>2-6</td>
-        <td>x</td>
+        <td>√</td>
       </tr>
       <tr>
         <td>x1Scale</td>
@@ -225,26 +225,6 @@ aclnnStatus aclnnFusedQuantMatmulWeightNz(
         <td>-</td>
       </tr>
       <tr>
-        <td>transposeX1</td>
-        <td>输入</td>
-        <td>表示x1的输入shape是否包含transpose。</td>
-        <td>-</td>
-        <td>BOOL</td>
-        <td>-</td>
-        <td>-</td>
-        <td>-</td>
-      </tr>
-      <tr>
-        <td>transposeX2</td>
-        <td>输入</td>
-        <td>表示x2的输入shape是否包含transpose。</td>
-        <td>-</td>
-        <td>BOOL</td>
-        <td>-</td>
-        <td>-</td>
-        <td>-</td>
-      </tr>
-      <tr>
         <td>groupSizeOptional</td>
         <td>输入</td>
         <td>用于输入m、n、k方向上的量化分组大小。</td>
@@ -328,7 +308,6 @@ aclnnStatus aclnnFusedQuantMatmulWeightNz(
   </tbody>
   </table>
 
-
 ## aclnnFusedQuantMatmulWeightNz
 
 - **参数说明：**
@@ -377,6 +356,7 @@ aclnnStatus aclnnFusedQuantMatmulWeightNz(
   - <term>Atlas 训练系列产品</term>、<term>Atlas 推理系列产品</term>：aclnnFusedQuantMatmulWeightNz默认确定性实现。
   
 - 输入和输出支持以下数据类型组合：
+
   | x1                        | x2                        | x1Scale     | x2Scale         | x2OffsetOptional    | yScaleOptional   | biasOptional         | yOffsetOptional    | out                                    |
   | ------------------------- | ------------------------- | ----------- | -----------     | ----------- | -------  | ------------ | -----------| -------------------------------------- |
   | INT8                      | INT8                      | FLOAT32| FLOAT32/BFLOAT16| null        | null     | null/INT32/BFLOAT16/FLOAT32   | null       | BFLOAT16              |
@@ -384,26 +364,20 @@ aclnnStatus aclnnFusedQuantMatmulWeightNz(
   | INT4/INT32                | INT4/INT32                | FLOAT32     | FLOAT32/BFLOAT16| null        | null     | null/INT32/BFLOAT16/FLOAT32   | null       | BFLOAT16              |
   | INT4/INT32                | INT4/INT32                | FLOAT32     | FLOAT32         | null        | null     | null/INT32/FLOAT16/FLOAT32    | null       | FLOAT16               |
   
-
 - 当前接口支持x1 pertoken量化和x2 perchannel/pertensor量化，不同的[量化模式](../../../docs/zh/context/量化介绍.md)支持的x1、 x2、x1Scale和x2Scale的输入dtype组合约束为：
   - x1数据类型支持INT8、INT32、INT4。
     - 当数据类型为INT32、INT4时，为INT4量化场景：
       - 当前仅支持ND输入。
-      - 只支持transposeX1为false情况。
+      - 当前只支持不转置输入。
       - 要求x1内轴为偶数。
     - 当数据类型为INT32时，每个INT32数据存放8个INT4数据，对应维度表示：（batch，m，k // 8），要求k为8的倍数。
-    - 在transposeX1为false情况下，形状为（batch, m, k），batch轴支持0~4维。
   - x2数据类型支持INT8、INT32、INT4。
     - 该接口仅支持x2为NZ格式，此时x2是NZ格式时，k、n不能为1。
-    - 数据类型为INT32时，每个INT32数据存放8个INT4数据：
-      - transposeX2为true时维度为：（n，k // 8），要求k为8的倍数。
-      - transposeX2为false时维度为：（k，n // 8），要求n为8的倍数。
-    - transposeX2为false情况下各个维度表示：（batch，k，n），batch轴支持0~4维，其中k与x1的shape中的k一致。
-    - transposeX2为true情况下各个维度表示：（batch，n，k），batch轴支持0~4维，其中k与x1的shape中的k一致。
+    - 数据类型为INT32时，每个INT32数据存放8个INT4数据。
     - 可使用aclnnConvertWeightToINT4Pack接口完成x2从INT32（1个int32在0~3bit位存储1个int4）到INT32（1个int32存储8个int4）或INT4（1个int4表示1个int4）的数据格式转换，具体参见[aclnnConvertWeightToINT4Pack接口](../../convert_weight_to_int4_pack/docs/aclnnConvertWeightToINT4Pack.md)。
     - AI处理器亲和数据排布格式下，shape支持4~8维。
-      - transposeX2为true时维度为：（batch，k1，n1，n0，k0），batch可不存在，其中k0 = 32， n0 = 16， x1 shape中的k和x2 shape中的k1需要满足以下关系：ceil（k / 32） = k1。
-      - transposeX2为false时维度为：（batch，n1，k1，k0，n0），batch可不存在，其中k0 = 16，n0 = 32，x1 shape中的k和x2 shape中的k1需要满足以下关系：ceil（k / 16） = k1。
+      - 转置时维度为：（batch，k1，n1，n0，k0），batch可不存在，其中k0 = 32， n0 = 16， x1 shape中的k和x2 shape中的k1需要满足以下关系：ceil（k / 32） = k1。
+      - 不转置时维度为：（batch，n1，k1，k0，n0），batch可不存在，其中k0 = 16，n0 = 32，x1 shape中的k和x2 shape中的k1需要满足以下关系：ceil（k / 16） = k1。
       - 可使用aclnnCalculateMatmulWeightSizeV2接口以及aclnnTransMatmulWeight接口完成输入Format从ND到AI处理器亲和数据排布格式的转换。
   - x1Scale约束如下：
     - shape支持1维，形状为（m,），数据类型支持FLOAT32。
@@ -412,11 +386,6 @@ aclnnStatus aclnnFusedQuantMatmulWeightNz(
   - biasOptional的约束如下：
     - shape支持1、3维，INT4量化场景下只支持biasOptional为1维，shape为(n)，3维时biasOptional shape为(batch, 1, n)。
     - 数据类型支持int32、float32、bfloat16或float16。
-  - transposeX1：x1和x2为INT32、INT4时，transposeX1仅支持false，各个维度表示：（m, k）。
-  - transposeX2的约束如下：
-    - AI处理器亲和数据排布格式下：
-      - 为true时维度为：（batch，k1，n1，n0，k0），batch可不存在，其中k0 = 32，n0 = 16，x1 shape中的k和x2 shape中的k1需要满足以下关系：ceil（k / 32） = k1。
-      - 为false时维度为：（batch，n1，k1，k0，n0），batch可不存在，其中k0 = 16，n0 = 32，x1 shape中的k和x2 shape中的k1需要满足以下关系：ceil（k / 16） = k1。
   - out的约束如下：
     - shape支持2~6维，（batch，m，n）。数据类型支持FLOAT16、BFLOAT16。
 
@@ -597,8 +566,6 @@ x1为INT8，x2为INT8，x1Scale为FLOAT32，x2Scale为FLOAT32。
       std::unique_ptr<aclTensor, aclnnStatus (*)(const aclTensor*)> outTensorPtr(out, aclDestroyTensor);
       std::unique_ptr<void, aclError (*)(void*)> outDeviceAddrPtr(outDeviceAddr, aclrtFree);
       CHECK_RET(ret == ACL_SUCCESS, return ret);
-      bool transposeX1 = false;
-      bool transposeX2 = false;
       int64_t groupSize = 0;
       const char fusedOpType[] = "gelu_tanh";
 
@@ -625,7 +592,7 @@ x1为INT8，x2为INT8，x1Scale为FLOAT32，x2Scale为FLOAT32。
       // 调用aclnnFusedQuantMatmulWeightNz第一段接口
       workspaceSize = 0;
       ret = aclnnFusedQuantMatmulWeightNzGetWorkspaceSize(
-          x1, x2, x1Scale, x2Scale, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, fusedOpType, transposeX1, transposeX2, groupSize, out,
+          x1, x2, x1Scale, x2Scale, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, fusedOpType, groupSize, out,
           &workspaceSize, &executor);
 
       CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("aclnnFusedQuantMatmulWeightNzGetWorkspaceSize failed. ERROR: %d\n", ret);
@@ -673,3 +640,4 @@ x1为INT8，x2为INT8，x1Scale为FLOAT32，x2Scale为FLOAT32。
       return 0;
   }
   ```
+  

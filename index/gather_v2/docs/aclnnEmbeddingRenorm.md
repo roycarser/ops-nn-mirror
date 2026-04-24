@@ -10,7 +10,7 @@
 | <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>     |    √     |
 | <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>     |    √     |
 | <term>Atlas 200I/500 A2 推理产品</term>                      |    √    |
-| <term>Atlas 推理系列产品 </term>                             |    √     |
+| <term>Atlas 推理系列产品</term>                             |    √     |
 | <term>Atlas 训练系列产品</term>                              |    √   |
 
 ## 功能说明
@@ -36,6 +36,7 @@
 ## 函数原型
 
 每个算子分为[两段式接口](../../../docs/zh/context/两段式接口.md)，必须先调用“aclnnEmbeddingRenormGetWorkspaceSize”接口获取计算所需workspace大小以及包含了算子计算流程的执行器，再调用“aclnnEmbeddingRenorm”接口执行计算。
+
 ```Cpp
 aclnnStatus aclnnEmbeddingRenormGetWorkspaceSize(
   aclTensor       *selfRef,
@@ -45,6 +46,7 @@ aclnnStatus aclnnEmbeddingRenormGetWorkspaceSize(
   uint64_t        *workspaceSize,
   aclOpExecutor  **executor)
 ```
+
 ```Cpp
 aclnnStatus aclnnEmbeddingRenorm(
   void              *workspace,

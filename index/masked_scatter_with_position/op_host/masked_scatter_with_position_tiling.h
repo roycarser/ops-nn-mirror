@@ -16,7 +16,7 @@
 #define AIR_CXX_RUNTIME_V2_OP_IMPL_MASKED_SCATTER_WITH_POSITION_H_
 
 #include "register/op_def_registry.h"
-#include "tiling_base/tiling_base.h"
+#include "op_host/tiling_base.h"
 #include "register/tilingdata_base.h"
 #include "register/op_impl_registry.h"
 #include "../op_kernel/masked_scatter_with_position_tiling_struct.h"
@@ -41,7 +41,7 @@ protected:
     void DumpTilingInfo() override;
 
 private:
-    ge::graphStatus CheckOutputShape();
+    ge::graphStatus CheckInputShape();
     ge::graphStatus CheckDataType();
     bool CanBroadcastBAOrAB(const gert::Shape xShape, const gert::Shape maskShape);
     void CanBroadcastBAOrABEqual(const std::vector<int64_t>& xShapeVec, const std::vector<int64_t>& maskShapeVec, const size_t len, bool& BA, bool& AB);

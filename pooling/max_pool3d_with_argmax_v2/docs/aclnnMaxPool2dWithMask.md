@@ -16,7 +16,7 @@
 ## 功能说明
 
 - 接口功能：
-对于输入信号的输入通道，提供2维最大池化（max pooling）操作，输出池化后的值out和索引indices（采用mask语义计算得出）。
+对于输入信号的输入通道，提供2维最大池化（max pooling）操作，输出池化后的值out和索引indices（采用mask语义计算得出，指在池化过程中记录最大值所在位置的掩码信息）。
 
 - 计算公式：
 
@@ -39,6 +39,7 @@
     $$
 
 ## 函数原型
+
 每个算子分为[两段式接口](../../../docs/zh/context/两段式接口.md)，必须先调用“aclnnMaxPool2dWithMaskGetWorkspaceSize”接口获取计算所需workspace大小以及包含了算子计算流程的执行器，再调用“aclnnMaxPool2dWithMask”接口执行计算。
 
 ```Cpp
@@ -54,6 +55,7 @@ aclnnStatus aclnnMaxPool2dWithMaskGetWorkspaceSize(
   uint64_t          *workspaceSize,
   aclOpExecutor     **executor)
 ```
+
 ```Cpp
 aclnnStatus aclnnMaxPool2dWithMask(
   void          *workspace,
@@ -61,6 +63,7 @@ aclnnStatus aclnnMaxPool2dWithMask(
   aclOpExecutor *executor,
   aclrtStream    stream)
 ```
+
 ## aclnnMaxPool2dWithMaskGetWorkspaceSize
 
 - **参数说明：**
@@ -160,7 +163,7 @@ aclnnStatus aclnnMaxPool2dWithMask(
       <td>indices</td>
       <td>输出</td>
       <td>最大值的索引位置组成的Tensor（采用mask语义）。</td>
-      <td>shape与out一致，为自定义mask值。</td>
+      <td>shape由上述公式推导出，为自定义mask值。</td>
       <td>INT8。</td>
       <td>NCHW、ND</td>
       <td>3-4</td>
@@ -187,9 +190,9 @@ aclnnStatus aclnnMaxPool2dWithMask(
       <td>-</td>
     </tr>
   </tbody></table>
- - <term>Atlas 推理系列产品</term>：数据类型支持FLOAT。
+  - <term>Atlas 推理系列产品</term>：数据类型支持FLOAT。
 
- - <term>Atlas 训练系列产品</term>：不支持BFLOAT16数据类型。
+  - <term>Atlas 训练系列产品</term>：不支持BFLOAT16数据类型。
 
 - **返回值：**
 
@@ -246,7 +249,7 @@ aclnnStatus aclnnMaxPool2dWithMask(
       <td>kernelSize中的数值中存在小于等于0的数值。</td>
     </tr>
     <tr>
-      <td>stride的长度不等于0，1或2。</td>
+      <td>stride的长度不等于0、1或2。</td>
     </tr>
     <tr>
       <td>stride的数值中存在小于等于0的值。</td>
@@ -303,11 +306,13 @@ aclnnStatus aclnnMaxPool2dWithMask(
     </tr>
   </tbody>
   </table>
--  **返回值：**
+
+- **返回值：**
 
     aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 
 ## 约束说明
+
 - 确定性计算：
   - aclnnMaxPool2dWithMask默认确定性实现。
 
@@ -321,10 +326,12 @@ $$s_h >= (H_{in} + padding\_size) / (H_{out} - 1)$$
 
 $$s_w >= (W_{in} + padding\_size) / (W_{out} - 1)$$
 
-
 ## 调用示例
+
 示例代码如下，仅供参考，具体编译和执行过程请参考[编译与运行样例](../../../docs/zh/context/编译与运行样例.md)。
+
 ```Cpp
+#include <cstdio>
 #include <iostream>
 #include <vector>
 #include "acl/acl.h"

@@ -13,7 +13,6 @@
 | <term>Atlas 推理系列产品</term>                             |    ×     |
 | <term>Atlas 训练系列产品</term>                              |    √     |
 
-
 ## 功能说明
 
 - 接口功能：计算输入张量的向量范数。
@@ -31,13 +30,14 @@ $$
 aclnnStatus aclnnLinalgVectorNormGetWorkspaceSize(
   const aclTensor    *self,
   const aclScalar    *ord,
-  const aclIntArry   *dims,
+  const aclIntArray   *dims,
   bool                keepDims,
   const aclDataType   dtype,
   aclTensor          *out,
   uint64_t           *workspaceSize,
   aclOpExecutor     **executor)
 ```
+
 ```Cpp
 aclnnStatus aclnnLinalgVectorNorm(
   void           *workspace,
@@ -48,7 +48,7 @@ aclnnStatus aclnnLinalgVectorNorm(
 
 ## aclnnLinalgVectorNormGetWorkspaceSize
 
-- **参数说明：**
+- **参数说明**
 
   <table style="undefined;table-layout: fixed; width: 1550px"><colgroup>
   <col style="width: 170px">
@@ -86,7 +86,7 @@ aclnnStatus aclnnLinalgVectorNorm(
       <td>ord（aclTensor*）</td>
       <td>输入</td>
       <td>表示范数的类型。对应公式中的ord。</td>
-      <td>数值支持0.0、1.0、2.0、3.0。</td>
+      <td>-</td>
       <td>FLOAT32</td>
       <td>-</td>
       <td>-</td>
@@ -100,7 +100,7 @@ aclnnStatus aclnnLinalgVectorNorm(
       <td>INT64</td>
       <td>-</td>
       <td>-</td>
-      <td>-</td> 
+      <td>-</td>
     </tr>
     <tr>
       <td>keepDims（bool）</td>
@@ -116,7 +116,7 @@ aclnnStatus aclnnLinalgVectorNorm(
       <td>dtype（aclDataType）</td>
       <td>输入</td>
       <td>指定self计算时的数据类型。需要与out的dtype一致。</td>
-      <td><ul>在计算前将self转换成dtype指定类型进行计算。dtype需要与self数据类型满足转换关系：<li>当self数据类型为FLOAT32时，dtype只能为FLOAT32。</li><li>self数据类型为FLOAT16时，dtype可以为FLOAT或FLOAT16。</li><li>self数据类型为BFLOAT16时，dtype可以为FLOAT或BFLOAT16。</li></ul></td>
+      <td>在计算前将self转换成dtype指定类型进行计算。</td>
       <td>FLOAT32、FLOAT16、BFLOAT16</td>
       <td>-</td>
       <td>-</td>
@@ -127,7 +127,7 @@ aclnnStatus aclnnLinalgVectorNorm(
       <td>输出</td>
       <td>计算输出张量。对应公式中的out。</td>
       <td>若keepDims为true，除dim指定维度上的size为1以外，其余维度的shape需要与self保持一致；若keepDims为false，reduce轴的维度不保留，其余维度shape需要与self一致。</td>
-      <td>FLOAT32、FLOAT16、BFLOAT16</li></ul></td>
+      <td>FLOAT32、FLOAT16、BFLOAT16</td>
       <td>ND</td>
       <td>0-8</td>
       <td>√</td>
@@ -155,11 +155,7 @@ aclnnStatus aclnnLinalgVectorNorm(
   </tbody>
   </table>
 
-  - ord：
-    - <term>Ascend 950PR/Ascend 950DT</term>：数值额外支持2147483647.0、-2147483648.0、Inf、-Inf。
-  - <term>Atlas 推理系列产品</term>、<term>Atlas 训练系列产品</term>、<term>Atlas 200I/500 A2 推理产品</term>：数据类型不支持BFLOAT16。
-
-- **返回值**：
+- **返回值**
 
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
   
@@ -186,7 +182,6 @@ aclnnStatus aclnnLinalgVectorNorm(
     <tr>
       <td rowspan="8">ACLNN_ERR_PARAM_INVALID</td>
       <td rowspan="8">161002</td>
-      <td>self或out的数据类型不在支持的范围之内。</td>
     </tr>
     <tr>
       <td>dims超过[-N, N-1] (N表示self的维度)。</td>
@@ -206,14 +201,11 @@ aclnnStatus aclnnLinalgVectorNorm(
     <tr>
       <td>out的shape不等于由self，dim，keepDim推导得到的shape。</td>
     </tr>
-    <tr>
-      <td>dtype不满足与self数据类型的转换关系。</td>
-    </tr>
   </tbody></table>
 
 ## aclnnLinalgVectorNorm
 
-- **参数说明：**
+- **参数说明**
 
   <table style="undefined;table-layout: fixed; width: 953px"><colgroup>
   <col style="width: 173px">
@@ -250,7 +242,7 @@ aclnnStatus aclnnLinalgVectorNorm(
   </tbody>
   </table>
 
-- **返回值：**
+- **返回值**
 
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 

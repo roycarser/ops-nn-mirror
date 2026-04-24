@@ -26,7 +26,6 @@
     softMaxOutOptional = exp(vocab\_parallel\_logits -logits\_max.unsqueeze(dim = -1)) \ sum\_exp\_logits.unsqueeze(dim = -1)
     $$
 
-
 ## 函数原型
 
 每个算子分为[两段式接口](../../../docs/zh/context/两段式接口.md)，必须先调用“aclnnFusedCrossEntropyLossWithMaxSumGetWorkspaceSize”接口获取计算所需workspace大小以及包含了算子计算流程的执行器，再调用“aclnnFusedCrossEntropyLossWithMaxSum”接口执行计算。
@@ -56,18 +55,17 @@ aclnnStatus aclnnFusedCrossEntropyLossWithMaxSum(
 
 ## aclnnFusedCrossEntropyLossWithMaxSumGetWorkspaceSize
 
-- **参数说明：**
+- **参数说明**
 
-  </style>
-  <table class="tg" style="undefined;table-layout: fixed; width: 1268px"><colgroup>
+  <table class="tg" style="undefined;table-layout: fixed; width: 1447px"><colgroup>
   <col style="width: 267px">
-  <col style="width: 87px">
-  <col style="width: 274px">
-  <col style="width: 193px">
-  <col style="width: 118px">
-  <col style="width: 113px">
-  <col style="width: 108px">
-  <col style="width: 108px">
+  <col style="width: 120px">
+  <col style="width: 300px">
+  <col style="width: 250px">
+  <col style="width: 125px">
+  <col style="width: 115px">
+  <col style="width: 125px">
+  <col style="width: 145px">
   </colgroup>
   <thead>
     <tr>
@@ -85,7 +83,7 @@ aclnnStatus aclnnFusedCrossEntropyLossWithMaxSum(
       <td class="tg-0pky">logitsMax（aclTensor*）</td>
       <td class="tg-0pky">输入</td>
       <td class="tg-0pky">matmul计算后各行的最大值，公式中的logitsMax。</td>
-      <td class="tg-0pky">数据维度支持1维。</td>
+      <td class="tg-0pky">-</td>
       <td class="tg-0pky">FLOAT</td>
       <td class="tg-0pky">ND</td>
       <td class="tg-0pky">1</td>
@@ -95,7 +93,7 @@ aclnnStatus aclnnFusedCrossEntropyLossWithMaxSum(
       <td class="tg-0pky">sumExpLogits（aclTensor*）</td>
       <td class="tg-0pky">输入</td>
       <td class="tg-0pky">matmul计算结果与其各行的最大值作差后exp的结果，公式中的sumExpLogits。</td>
-      <td class="tg-0pky">数据维度支持1维，shape与logitsMax一致。</td>
+      <td class="tg-0pky">shape与logitsMax一致。</td>
       <td class="tg-0pky">FLOAT</td>
       <td class="tg-0pky">ND</td>
       <td class="tg-0pky">1</td>
@@ -105,7 +103,7 @@ aclnnStatus aclnnFusedCrossEntropyLossWithMaxSum(
       <td class="tg-0pky">predictedLogits（aclTensor*）</td>
       <td class="tg-0pky">输入</td>
       <td class="tg-0pky">表示matmul计算结果与其各行的最大值作差后maskedTargetOut筛选后的结果，公式中的predictedLogits。</td>
-      <td class="tg-0pky">数据维度支持1维，shape与logitsMax一致。</td>
+      <td class="tg-0pky">shape与logitsMax一致。</td>
       <td class="tg-0pky">FLOAT</td>
       <td class="tg-0pky">ND</td>
       <td class="tg-0pky">1</td>
@@ -116,7 +114,7 @@ aclnnStatus aclnnFusedCrossEntropyLossWithMaxSum(
       <td class="tg-0pky">输入</td>
       <td class="tg-0pky">标签平滑系数，用于缓解过拟合。</td>
       <td class="tg-0pky">当前只支持0。</td>
-      <td class="tg-0pky">-</td>
+      <td class="tg-0pky">FLOAT</td>
       <td class="tg-0pky">-</td>
       <td class="tg-0pky">-</td>
       <td class="tg-0pky">-</td>
@@ -145,7 +143,7 @@ aclnnStatus aclnnFusedCrossEntropyLossWithMaxSum(
       <td class="tg-0pky">vocabParallelLogitsOptional（aclTensor*）</td>
       <td class="tg-0pky">输出</td>
       <td class="tg-0pky">matmul计算结果，公式中的vocabParallelLogits。</td>
-      <td class="tg-0pky">数据维度支持2维，shape第1维需要与logitsMax第1维一致。</td>
+      <td class="tg-0pky">shape第1维需要与logitsMax第1维一致。</td>
       <td class="tg-0pky">FLOAT、FLOAT16、BFLOAT16</td>
       <td class="tg-0pky">ND</td>
       <td class="tg-0pky">2</td>
@@ -193,13 +191,12 @@ aclnnStatus aclnnFusedCrossEntropyLossWithMaxSum(
     </tr>
   </tbody></table>
 
-- **返回值：**
+- **返回值**
 
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 
   第一段接口完成入参校验，出现以下场景时报错：
   
-  </style>
   <table class="tg" style="undefined;table-layout: fixed; width: 970px"><colgroup>
   <col style="width: 263px">
   <col style="width: 88px">
@@ -258,7 +255,7 @@ aclnnStatus aclnnFusedCrossEntropyLossWithMaxSum(
         <tr>
           <td>workspaceSize</td>
           <td>输入</td>
-          <td>在Device侧申请的workspace大小，由第一段接口aclnnBinaryCrossEntropyBackwardGetWorkspaceSize获取。</td>
+          <td>在Device侧申请的workspace大小，由第一段接口aclnnFusedCrossEntropyLossWithMaxSumGetWorkspaceSize获取。</td>
         </tr>
         <tr>
           <td>executor</td>
@@ -272,9 +269,9 @@ aclnnStatus aclnnFusedCrossEntropyLossWithMaxSum(
         </tr>
       </tbody>
     </table>
-
-- **返回值：**
-
+ 
+- **返回值**
+  
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 
 ## 约束说明
@@ -484,4 +481,3 @@ int main() {
   return 0;
 }
 ```
-

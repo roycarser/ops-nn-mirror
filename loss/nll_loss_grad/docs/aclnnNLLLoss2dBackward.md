@@ -15,7 +15,7 @@
 
 ## 功能说明
 
-接口功能：负对数似然损失反向。
+负对数似然损失反向。
 
 ## 函数原型
 
@@ -47,15 +47,15 @@ aclnnStatus aclnnNLLLoss2dBackward(
 
 - **参数说明**
 
-  <table style="undefined;table-layout: fixed; width: 1262px"><colgroup>
-      <col style="width: 158px">
+  <table style="undefined;table-layout: fixed; width: 1500px"><colgroup>
+      <col style="width: 180px">
       <col style="width: 120px">
-      <col style="width: 203px">
-      <col style="width: 283px">
-      <col style="width: 218px">
-      <col style="width: 110px">
-      <col style="width: 102px">
-      <col style="width: 108px">
+      <col style="width: 250px">
+      <col style="width: 350px">
+      <col style="width: 220px">
+      <col style="width: 115px">
+      <col style="width: 120px">
+      <col style="width: 145px">
       </colgroup>
       <thead>
         <tr>
@@ -113,7 +113,7 @@ aclnnStatus aclnnNLLLoss2dBackward(
         <td>reduction（int64_t）</td>
         <td>输入</td>
         <td>指定要应用到输出的缩减。</td>
-        <td><ul>支持0('none')|1('mean')|2('sum')。<li>'none'表示不应用缩减</li><li>'mean'表示输出的总和将除以输出中的元素数</li><li>'sum'表示输出将被求和</li><li>当reduction为0时，要求target的shape与gradOutput的shape一致，否则返回false。</li></ul></td>
+        <td><ul>支持0(none)|1(mean)|2(sum)。<li>'none'表示不应用缩减</li><li>'mean'表示输出的总和将除以输出中的元素数</li><li>'sum'表示输出将被求和</li><li>当reduction为0时，要求target的shape与gradOutput的shape一致，否则返回false。</li></ul></td>
         <td>INT64</td>
         <td>-</td>
         <td>-</td>
@@ -133,7 +133,7 @@ aclnnStatus aclnnNLLLoss2dBackward(
           <tr>
         <td>totalWeight（aclTensor*）</td>
         <td>输入</td>
-        <td>公式中的totalWeight。</td>
+        <td>-</td>
         <td>仅当reduction为mean时，totalWeight是通过target取相应位置的weight，然后去除掉ignoreIndex对应的weight，将剩下的weight求和；当reduction为其他值时，该参数默认不处理。</td>
         <td>数据类型与weight相同。</td>
         <td>ND</td>
@@ -143,7 +143,7 @@ aclnnStatus aclnnNLLLoss2dBackward(
       <tr>
         <td>out（aclTensor*）</td>
         <td>输出</td>
-        <td>公式中的out。</td>
+        <td>-</td>
         <td>shape与self相同。</td>
         <td>数据类型和self一致。</td>
         <td>ND</td>
@@ -228,7 +228,6 @@ aclnnStatus aclnnNLLLoss2dBackward(
       </tbody>
       </table>
 
-
 ## aclnnNLLLoss2dBackward
 
 - **参数说明**
@@ -268,7 +267,6 @@ aclnnStatus aclnnNLLLoss2dBackward(
     </tbody>
      </table>
 
-
 - **返回值**
 
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
@@ -281,6 +279,7 @@ aclnnStatus aclnnNLLLoss2dBackward(
 ## 调用示例
 
 示例代码如下，仅供参考，具体编译和执行过程请参考[编译与运行样例](../../../docs/zh/context/编译与运行样例.md)。
+
 ```Cpp
 #include <iostream>
 #include <vector>
@@ -456,4 +455,3 @@ int main() {
   return 0;
 }
 ```
-

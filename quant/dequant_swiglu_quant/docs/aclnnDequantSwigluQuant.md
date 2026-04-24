@@ -106,7 +106,8 @@ aclnnStatus aclnnDequantSwigluQuant(
       <td>ND</td>
       <td>1或2</td>
       <td>x</td>
-    </tr>
+     </tr>
+    <tr>
       <td>activationScaleOptional（aclTensor*）</td>
       <td>输入</td>
       <td>激活函数的反量化scale，公式中的activationScaleOptional。</td>
@@ -316,7 +317,6 @@ aclnnStatus aclnnDequantSwigluQuant(
   - x的最后一维需要是2的倍数，且x的维数必须大于1维。
   - 当quantModeOptional为static时，quantScaleOptional和quantOffsetOptional为1维，值为1；quantModeOptional为dynamic时，quantScaleOptional和quantOffsetOptional的维数为1维，值为x的最后一维除以2。
 - <term>Ascend 950PR/Ascend 950DT</term>：
-- <term>昇腾950 AI处理器</term>：
   - 输入x对应activateDim的维度需要是2的倍数，且x的维数必须大于1维。
   - 当输入x的数据类型为INT32时，weightScaleOptional不能为空；当输入x的数据类型不为INT32时，weightScaleOptional不允许输入，传入空指针。
   - 当输入x的数据类型不为INT32时，activationScaleOptional不允许输入，传入空指针。

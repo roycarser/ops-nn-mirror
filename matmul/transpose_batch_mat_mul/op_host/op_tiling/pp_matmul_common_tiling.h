@@ -40,6 +40,7 @@ constexpr uint64_t L0AB_PINGPONG_BUFFER_SIZE_INT8 = 262144; // 131072 * 2 = 256 
 constexpr uint64_t L0AB_PINGPONG_BUFFER_SIZE_FP16 = 131072; // 128 KB
 constexpr uint64_t L1AB_PINGPONG_BUFFER_SIZE_INT8_SPARSE = 163840; // 160 * 1024
 constexpr uint64_t UB_LIMIT_SIZE_910A = 131072; // 128 * 1024
+constexpr uint64_t UB_LIMIT_SIZE_PERTOKEN_ARCH20 = 131072; // 128 * 1024
 
 template <uint64_t DIV>
 inline uint64_t CeilDiv(uint64_t num)
@@ -121,10 +122,12 @@ inline uint64_t GetN0TilingInit(const OpShareType &opShape, bool compressFlag,
 template <bool PRI_FLAG>
 inline bool IsExceedTilingLimit(uint64_t axes0, uint64_t priAxes0,
                                 uint64_t n0TilingLimit, platform_ascendc::SocVersion platformType,
-                                uint64_t basicBlockSize)
+                                uint64_t basicBlockSize, const bool isPertokenArch20)
 {
     return (PRI_FLAG && axes0 > n0TilingLimit) || (!PRI_FLAG && priAxes0 > n0TilingLimit) ||
-           (platformType == platform_ascendc::SocVersion::ASCEND910 && basicBlockSize > UB_LIMIT_SIZE_910A);
+           (platformType == platform_ascendc::SocVersion::ASCEND910 && basicBlockSize > UB_LIMIT_SIZE_910A ||
+            platformType == platform_ascendc::SocVersion::ASCEND310P && isPertokenArch20 == true && 
+            basicBlockSize > UB_LIMIT_SIZE_PERTOKEN_ARCH20);
 }
 
 template <bool PRI_FLAG, typename OpShareType>
@@ -149,10 +152,10 @@ inline float CostFunc(const HardwareType &hwInfor, OpShapeType &shape, const Mat
     uint64_t blockDim = std::min(coreNeed, hwInfor.coreNum);
     uint64_t mOnce = blockDim < nLoop ? shape.m0 : blockDim / nLoop * shape.m0;
     uint64_t nOnce = blockDim < nLoop ? hwInfor.coreNum * shape.n0 : shape.n;
-    if (mOnce * shape.k * mmInfo.inDtype > hwInfor.l2Size) {
+    if (mOnce * shape.k * mmInfo.sizeInDtype > hwInfor.l2Size) {
         aCoef = bwCoef;
     }
-    if (nOnce * shape.k * mmInfo.inDtype > hwInfor.l2Size) {
+    if (nOnce * shape.k * mmInfo.sizeInDtype > hwInfor.l2Size) {
         bCoef = bwCoef;
     }
     return 1 / (aCoef * static_cast<float>(shape.n0)) + 1 / (bCoef * static_cast<float>(shape.m0));
@@ -170,7 +173,7 @@ void TilingFunc(OpShareType &opShape, TilingType &tilingParam, const HardwareTyp
         static_cast<uint64_t>(pow(2, ceil(log(CeilDiv(PRI_FLAG ? opShape.n : opShape.m, CONST_16)))) * CONST_16);
     uint64_t priAxes = RoundUp(PRI_FLAG ? opShape.m : opShape.n, CONST_16);
     uint64_t axes = RoundUp(PRI_FLAG ? opShape.n : opShape.m, roundBase);
-    float axes0Max = static_cast<float>(AXES_ALIGN_SIZE) / mmInfo.inDtype;
+    float axes0Max = static_cast<float>(AXES_ALIGN_SIZE) / mmInfo.sizeInDtype;
     auto platformType = hwInfor.socVersion;
     if (mmInfo.isInt8 && (platformType == platform_ascendc::SocVersion::ASCEND310P || platformType == platform_ascendc::SocVersion::ASCEND910)) {
         axes0Max /= CONST_2;
@@ -187,7 +190,7 @@ void TilingFunc(OpShareType &opShape, TilingType &tilingParam, const HardwareTyp
                 continue;
             }
             if (mmInfo.isInt8 &&
-                IsExceedTilingLimit<PRI_FLAG>(axes0, priAxes0, n0TilingLimit, platformType, basicBlockSize)) {
+                IsExceedTilingLimit<PRI_FLAG>(axes0, priAxes0, n0TilingLimit, platformType, basicBlockSize, mmInfo.isPertokenArch20)) {
                 continue;
             }
             SetOpShapeAxesInfo<PRI_FLAG>(opShape, priAxes0, axes0);
@@ -202,10 +205,10 @@ void TilingFunc(OpShareType &opShape, TilingType &tilingParam, const HardwareTyp
 }
 
 template <typename PpTilingDataType>
-uint64_t Swizzl(PpTilingDataType &tilingData)
+uint64_t Swizzle(PpTilingDataType &tilingData)
 {
-    uint64_t swizzlDirect = 0UL;
-    uint64_t swizzlCount = 1UL;
+    uint64_t swizzleDirect = 0UL;
+    uint64_t swizzleCount = 1UL;
     float m0 = tilingData.opShape.m0;
     float n0 = tilingData.opShape.n0;
     float m = tilingData.opShape.m;
@@ -218,24 +221,24 @@ uint64_t Swizzl(PpTilingDataType &tilingData)
         float cost;
         // B0 + A < A0 + B
         if (i * n0 + m < m0 * c + n) {
-            swizzlDirect = 1UL; // Nz
+            swizzleDirect = 1UL; // Nz
             cost = n0 * i + m0 * c;
             if (cost <= mincost) {
                 mincost = cost;
-                swizzlCount = i;
+                swizzleCount = i;
             }
         } else {
-            swizzlDirect = 0UL; // Zn
+            swizzleDirect = 0UL; // Zn
             cost = m0 * i + n0 * c;
             if (cost < mincost) {
                 mincost = cost;
-                swizzlCount = i;
+                swizzleCount = i;
             }
         }
     }
-    tilingData.swizzlDirect = swizzlDirect;
-    tilingData.swizzlCount = swizzlCount;
-    return swizzlDirect;
+    tilingData.swizzleDirect = swizzleDirect;
+    tilingData.swizzleCount = swizzleCount;
+    return swizzleDirect;
 }
 } // namespace pp_matmul
 } // namespace optiling

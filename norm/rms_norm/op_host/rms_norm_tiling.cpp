@@ -13,7 +13,7 @@
  * \brief RmsNorm tiling file
  */
 #include <iostream>
-#include "tiling_base/tiling_util.h"
+#include "op_host/tiling_util.h"
 #include "rms_norm_tiling.h"
 
 namespace optiling {
@@ -413,7 +413,7 @@ static ge::graphStatus Tiling4RmsNorm(gert::TilingContext* context)
             modeKey = MODE_SPLIT_D;
         }
 
-        if ((numColAlign <= SMALL_REDUCE_NUM && curSocVersion == platform_ascendc::SocVersion::ASCEND910B) || (xDtypeKey == DTYPE_KEY_FP16 && numCol == 128 && curSocVersion == platform_ascendc::SocVersion::ASCEND310P)) {
+        if ((numColAlign <= SMALL_REDUCE_NUM && curSocVersion == platform_ascendc::SocVersion::ASCEND910B) || (xDtypeKey == DTYPE_KEY_FP16 && numCol == 128 && curSocVersion == platform_ascendc::SocVersion::ASCEND310P && numRow % BYTE_SIZE_2_BLOCK_ALIGN_NUM == 0)) {
             modeKey = MODE_MERGE_N;
         }
 

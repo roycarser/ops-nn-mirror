@@ -16,7 +16,7 @@
 #include "transpose_batch_mat_mul_tiling.h"
 #include "util/math_util.h"
 #include "log/log.h"
-#include "tiling_base/tiling_key.h"
+#include "op_host/tiling_key.h"
 #include "error_util.h"
 #include "op_cache_tiling.h"
 #include "runtime_kb_api.h"
@@ -30,13 +30,19 @@
 
 using namespace optiling::transpose_batch_mat_mul;
 
+namespace {
+constexpr uint64_t NO_BATCH_DIM_SUM = 2;
+}  // namespace
+
 namespace optiling {
 namespace transpose_batch_mat_mul {
 
 void TransposeBatchMatMulEinsumTiling::DoTiling()
 {
     auto inputDType = context_->GetInputDesc(0)->GetDataType();
-    matMulInfo_.inDtype = ge::GetSizeByDataType(inputDType);
+    matMulInfo_.sizeInDtype = ge::GetSizeByDataType(inputDType);
+    matMulInfo_.isInt8 = isQuantBatchMatmulV3_;
+    matMulInfo_.isQuantBatchMatmulV3 = isQuantBatchMatmulV3_;
     GetHardwareInfo();
     (void)GetMatMulInfo();
     (void)GetTilingKey();
@@ -46,21 +52,40 @@ void TransposeBatchMatMulEinsumTiling::DoTiling()
 
 bool TransposeBatchMatMulEinsumTiling::GetMatMulInfo()
 {
-    OP_TILING_CHECK(
-        hardwareInfo_.socVersion != platform_ascendc::SocVersion::ASCEND910B,
-        CUBE_INNER_ERR_REPORT(context_->GetNodeName(), "unsupported platform."), return false);
+    if (!isQuantBatchMatmulV3_) {
+        OP_TILING_CHECK(hardwareInfo_.socVersion != platform_ascendc::SocVersion::ASCEND910B,
+                        CUBE_INNER_ERR_REPORT(context_->GetNodeName(), "unsupported platform."), return false);
+    }
     size_t indexA = 0;
     size_t indexB = indexA + static_cast<size_t>(1);
     size_t idxC = 0;
     size_t idx = 0;
-    auto inputAStorageShape = context_->GetInputShape(indexA)->GetStorageShape();
-    auto outputCStorageShape = context_->GetOutputShape(idxC)->GetStorageShape();
-    matMulInfo_.m = static_cast<uint32_t>(inputAStorageShape[idx]);
-    idx++;
-    matMulInfo_.batchSize = static_cast<uint32_t>(inputAStorageShape[idx]);
-    idx++;
-    matMulInfo_.k = static_cast<uint32_t>(inputAStorageShape[idx]);
-    matMulInfo_.n = static_cast<uint32_t>(outputCStorageShape[idx]);
+    auto inputAStorageShape = isQuantBatchMatmulV3_ ? context_->GetInputShape(indexA)->GetOriginShape() :
+                                                 context_->GetInputShape(indexA)->GetStorageShape();
+    auto outputCStorageShape = isQuantBatchMatmulV3_ ? context_->GetOutputShape(idxC)->GetOriginShape() :
+                                                       context_->GetOutputShape(idxC)->GetStorageShape();
+
+    if (isQuantBatchMatmulV3_) {
+        if (inputAStorageShape.GetDimNum() == NO_BATCH_DIM_SUM) {
+            matMulInfo_.batchSize = 1;
+            matMulInfo_.m = static_cast<uint32_t>(inputAStorageShape[0]);
+            matMulInfo_.k = static_cast<uint32_t>(inputAStorageShape[1]);
+            matMulInfo_.n = static_cast<uint32_t>(outputCStorageShape[1]);
+        } else {
+            matMulInfo_.batchSize = static_cast<uint32_t>(inputAStorageShape[0]);
+            ;
+            matMulInfo_.m = static_cast<uint32_t>(inputAStorageShape[1]);
+            matMulInfo_.k = static_cast<uint32_t>(inputAStorageShape[NO_BATCH_DIM_SUM]);
+            matMulInfo_.n = static_cast<uint32_t>(outputCStorageShape[1]);
+        }
+    } else {
+        matMulInfo_.m = static_cast<uint32_t>(inputAStorageShape[idx]);
+        idx++;
+        matMulInfo_.batchSize = static_cast<uint32_t>(inputAStorageShape[idx]);
+        idx++;
+        matMulInfo_.k = static_cast<uint32_t>(inputAStorageShape[idx]);
+        matMulInfo_.n = static_cast<uint32_t>(outputCStorageShape[idx]);
+    }
     OP_TILING_CHECK(
         (matMulInfo_.formatA != ge::Format::FORMAT_ND ||
         matMulInfo_.formatB != ge::Format::FORMAT_ND ||
@@ -88,7 +113,7 @@ bool TransposeBatchMatMulEinsumTiling::GetTilingKey()
     uint64_t tilingKey = GET_TPL_TILING_KEY(
         batchSplitMode,
         ppMatmulMode,
-        matMulInfo_.transA, 
+        matMulInfo_.transA,
         matMulInfo_.transB
     );
     ppMatmulDefaultTilingData_.tilingKey = tilingKey;
@@ -111,10 +136,10 @@ ge::graphStatus TransposeBatchMatMulEinsumTiling::PostTiling()
     tilingData.kLoop = ppMatmulDefaultTilingData_.kLoop;
     tilingData.nLoop = ppMatmulDefaultTilingData_.nLoop;
     tilingData.coreLoop = ppMatmulDefaultTilingData_.coreLoop;
-    tilingData.swizzlCount = ppMatmulDefaultTilingData_.swizzlCount;
+    tilingData.swizzleCount = ppMatmulDefaultTilingData_.swizzleCount;
     tilingData.tilingKey = ppMatmulDefaultTilingData_.tilingKey;
     tilingData.blockDim = ppMatmulDefaultTilingData_.blockDim;
-    tilingData.swizzlDirect = ppMatmulDefaultTilingData_.swizzlDirect;
+    tilingData.swizzleDirect = ppMatmulDefaultTilingData_.swizzleDirect;
     tilingData.splitk = ppMatmulDefaultTilingData_.splitk;
     tilingData.enShuffleK = ppMatmulDefaultTilingData_.enShuffleK;
     OPS_CHECK_NULL_WITH_CONTEXT(context_, context_->GetRawTilingData());

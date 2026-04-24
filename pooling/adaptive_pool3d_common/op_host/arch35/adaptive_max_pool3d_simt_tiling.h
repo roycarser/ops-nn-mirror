@@ -20,11 +20,6 @@
 #include "../op_host/arch35/adaptive_pool3d_tiling.h"
 namespace optiling
 {
-constexpr int64_t MAX_INT32 = 2147483647;
-constexpr uint64_t MAX_UINT32 = 4294967295;
-constexpr int64_t MAX_THREAD_NUM = 1024;
-constexpr uint64_t DCACHE_SIZE = 128 * 1024UL;
-constexpr uint64_t OUTPUTSIZE_DIM_MAX = 3;
 class AdaptiveMaxPool3DTilingSimt : public AdaptivePool3dBaseTiling
 {
 public:

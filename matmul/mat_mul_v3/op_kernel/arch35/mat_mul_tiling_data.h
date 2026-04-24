@@ -113,6 +113,7 @@ struct MatMulV3BasicTilingData {
     L2CacheMode l2CacheDisable = L2CacheMode::L2_CACHE_DEFAULT; // L2Cache默认使能
     uint32_t sliceM;  // 非连续场景m轴
     uint32_t srcNdStride; // 非连续场景m轴stride
+    uint32_t innerBatch = 1; // 非连续transpose场景内轴batch值
 };
 #pragma pack(pop)
 
@@ -158,10 +159,43 @@ struct BatchMatMulToMulBasicTilingData{
 };
 #pragma pack(pop)
 
+#pragma pack(push, 8) 
+struct BatchMatMulV3MergeBatchBasicTilingData { 
+    uint32_t m = 1; 
+    uint32_t n = 1; 
+    uint32_t k = 1; 
+    uint32_t b = 1; 
+    uint32_t batchAL1 = 1; 
+    uint32_t batchBL1 = 1; 
+    uint32_t batchL0 = 1; 
+    uint32_t kL1 = 1; 
+    uint32_t baseK = 16; 
+    uint32_t isHf32 = 0;
+    L2CacheMode l2CacheDisable = L2CacheMode::L2_CACHE_DEFAULT;
+}; 
+#pragma pack(pop)
+
 #pragma pack(push, 8)
 struct MatMulV3KEqZeroBasicTilingData {
     uint64_t totalDataAmount = 1;
     uint64_t aivNum = 1;
 };
 #pragma pack(pop)
+
+#pragma pack(push, 8)
+struct MatMulToMulBasicTilingData{
+    uint32_t usedCoreNum = 1;
+    uint32_t tileNum = 1;
+    uint32_t m = 1;
+    uint32_t n = 1;
+    uint32_t k = 1;
+    uint32_t baseMN = 0;
+    uint32_t tailMN = 0;
+    uint32_t baseK = 0;
+    uint32_t tailK = 0;
+    uint32_t loopK = 1;
+    bool dataCopyMode = false;
+};
+#pragma pack(pop)
+
 #endif // __OP_KERNEL_MATMUL_TILING_DATA_H__

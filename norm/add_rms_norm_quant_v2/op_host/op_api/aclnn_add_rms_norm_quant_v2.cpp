@@ -25,8 +25,8 @@
 #include "aclnn_kernels/contiguous.h"
 #include "aclnn_kernels/reshape.h"
 
-#include "norm/add_rms_norm_quant/op_host/op_api/add_rms_norm_quant.h"
 #include "aclnn_add_rms_norm_quant_v2.h"
+#include "norm/add_rms_norm_quant/op_host/op_api/add_rms_norm_quant.h"
 
 using namespace op;
 #ifdef __cplusplus
@@ -67,10 +67,6 @@ struct ParamStruct {
     bool divMode;
 };
 
-static const std::initializer_list<op::DataType> EXTEND_ATB_DTYPE_SUPPORT_LIST_X = {
-    op::DataType::DT_FLOAT16, op::DataType::DT_BF16
-};
-
 static const std::initializer_list<op::DataType> ASCEND950_DTYPE_SUPPORT_LIST_ZEROPOINT = {
     op::DataType::DT_INT32, op::DataType::DT_FLOAT, op::DataType::DT_FLOAT16, op::DataType::DT_BF16};
 
@@ -96,11 +92,15 @@ static bool CheckInputNotNull(
     return true;
 }
 
-static bool CheckOutputNotNull(aclTensor* y1Out, aclTensor* y2Out, const aclTensor* xOut)
+static bool CheckOutputNotNull(aclTensor* y1Out, aclTensor* y2Out, const aclTensor* xOut, const aclTensor* resOut)
 {
     OP_CHECK_NULL(y1Out, return false);
     OP_CHECK_NULL(y2Out, return false);
     OP_CHECK_NULL(xOut, return false);
+    if (nullptr != resOut) {
+        OP_LOGE(ACLNN_ERR_PARAM_INVALID, "The rmsNormOut tensor's should be nullptr in computeV1.");
+        return false;
+    }
     return true;
 }
 
@@ -330,7 +330,7 @@ static aclnnStatus CheckParams(
     CHECK_RET(CheckInputNotNull(inputTensor.x1, inputTensor.x2, inputTensor.gamma, inputTensor.scales1),
     ACLNN_ERR_PARAM_NULLPTR);
 
-    CHECK_RET(CheckOutputNotNull(outputTensor.y1Out, outputTensor.y2Out, outputTensor.xOut),
+    CHECK_RET(CheckOutputNotNull(outputTensor.y1Out, outputTensor.y2Out, outputTensor.xOut, outputTensor.resOut),
     ACLNN_ERR_PARAM_NULLPTR);
 
     // 3. 检查输入/输出的shape大小
@@ -379,93 +379,6 @@ static bool SimpleCheckNotNull(
     return true;
 }
 
-static bool SimpleCheckDtypeValid(
-    AddRmsNormQuantV2InputTensor& inputTensor, AddRmsNormQuantV2OutputTensor& outputTensor)
-{
-    OP_CHECK_DTYPE_NOT_SUPPORT(inputTensor.x1, ASCEND950_DTYPE_SUPPORT_LIST_X_SCALE, return false);
-    OP_CHECK_DTYPE_NOT_SUPPORT(inputTensor.x2, ASCEND950_DTYPE_SUPPORT_LIST_X_SCALE, return false);
-    OP_CHECK_DTYPE_NOT_SUPPORT(inputTensor.gamma, ASCEND950_DTYPE_SUPPORT_LIST_X_SCALE, return false);
-    OP_CHECK_DTYPE_NOT_SUPPORT(inputTensor.scales1, ASCEND950_DTYPE_SUPPORT_LIST_X_SCALE, return false);
-    OP_CHECK_DTYPE_NOT_SAME(inputTensor.x1, inputTensor.x2, return false);
-    OP_CHECK_DTYPE_NOT_SAME(inputTensor.x1, inputTensor.gamma, return false);
-    if (nullptr != inputTensor.betaOptional) {
-        OP_CHECK_DTYPE_NOT_SUPPORT(inputTensor.betaOptional, ASCEND950_DTYPE_SUPPORT_LIST_ZEROPOINT, return false);
-    }
-    if (nullptr != inputTensor.scales2Optional) {
-        OP_CHECK_DTYPE_NOT_SUPPORT(inputTensor.scales2Optional, ASCEND950_DTYPE_SUPPORT_LIST_X_SCALE, return false);
-    }
-    if (nullptr != inputTensor.zeroPoints1Optional) {
-        OP_CHECK_DTYPE_NOT_SUPPORT(inputTensor.zeroPoints1Optional, ASCEND950_DTYPE_SUPPORT_LIST_ZEROPOINT, return false);
-    }
-    if (nullptr != inputTensor.zeroPoints2Optional) {
-        OP_CHECK_DTYPE_NOT_SUPPORT(inputTensor.zeroPoints2Optional, ASCEND950_DTYPE_SUPPORT_LIST_ZEROPOINT, return false);
-    }
-
-    OP_CHECK_DTYPE_NOT_MATCH(outputTensor.y1Out, op::DataType::DT_INT8, return false);
-    OP_CHECK_DTYPE_NOT_MATCH(outputTensor.y2Out, op::DataType::DT_INT8, return false);  // Mandatory output
-    if (nullptr != outputTensor.xOut) {
-        OP_CHECK_DTYPE_NOT_SUPPORT(outputTensor.xOut, ASCEND950_DTYPE_SUPPORT_LIST_X_SCALE, return false);
-    }
-    if (nullptr != outputTensor.resOut) {
-        OP_CHECK_DTYPE_NOT_SUPPORT(outputTensor.resOut, ASCEND950_DTYPE_SUPPORT_LIST_X_SCALE, return false);
-    }
-    return true;
-}
-
-static bool SimpleCheckShapeDim(
-    AddRmsNormQuantV2InputTensor& inputTensor, AddRmsNormQuantV2OutputTensor& outputTensor)
-{
-    OP_CHECK_MAX_DIM(inputTensor.x1, MAX_SUPPORT_DIMS_NUMS, return false);
-    OP_CHECK_MAX_DIM(inputTensor.x2, MAX_SUPPORT_DIMS_NUMS, return false);
-    OP_CHECK_MAX_DIM(inputTensor.gamma, MAX_SUPPORT_DIMS_NUMS, return false);
-    OP_CHECK_MAX_DIM(inputTensor.scales1, MAX_SUPPORT_DIMS_NUMS, return false);
-    OP_CHECK_SHAPE_NOT_EQUAL(inputTensor.x1, inputTensor.x2, return false);
-    if (nullptr != inputTensor.betaOptional) {
-        OP_CHECK_MAX_DIM(inputTensor.betaOptional, MAX_SUPPORT_DIMS_NUMS, return false);
-    }
-    if (nullptr != inputTensor.scales2Optional) {
-        OP_CHECK_MAX_DIM(inputTensor.scales2Optional, MAX_SUPPORT_DIMS_NUMS, return false);
-    }
-    if (nullptr != inputTensor.zeroPoints1Optional) {
-        OP_CHECK_MAX_DIM(inputTensor.zeroPoints1Optional, MAX_SUPPORT_DIMS_NUMS, return false);
-        OP_CHECK_SHAPE_NOT_EQUAL(inputTensor.zeroPoints1Optional, inputTensor.scales1, return false);
-    }
-    if (nullptr != inputTensor.zeroPoints2Optional) {
-        OP_CHECK_MAX_DIM(inputTensor.zeroPoints2Optional, MAX_SUPPORT_DIMS_NUMS, return false);
-    }
-    OP_CHECK_MAX_DIM(outputTensor.y1Out, MAX_SUPPORT_DIMS_NUMS, return false);
-    OP_CHECK_SHAPE_NOT_EQUAL(inputTensor.x1, outputTensor.y1Out, return false);
-    OP_CHECK_MAX_DIM(outputTensor.y2Out, MAX_SUPPORT_DIMS_NUMS, return false);
-    OP_CHECK_SHAPE_NOT_EQUAL(inputTensor.x1, outputTensor.y2Out, return false);
-    if (nullptr != outputTensor.resOut) {
-        OP_CHECK_MAX_DIM(outputTensor.resOut, MAX_SUPPORT_DIMS_NUMS, return false);
-        OP_CHECK_SHAPE_NOT_EQUAL(inputTensor.x1, outputTensor.resOut, return false);
-    }
-    if (nullptr != outputTensor.xOut) {
-        OP_CHECK_MAX_DIM(outputTensor.xOut, MAX_SUPPORT_DIMS_NUMS, return false);
-        OP_CHECK_SHAPE_NOT_EQUAL(inputTensor.x1, outputTensor.xOut, return false);
-    }
-    return true;
-}
-
-static aclnnStatus SimpleCheckParams(
-    AddRmsNormQuantV2InputTensor& inputTensor, AddRmsNormQuantV2OutputTensor& outputTensor)
-{
-    // 1. 检查必选输入/输出是否为空指针
-    CHECK_RET(SimpleCheckNotNull(inputTensor, outputTensor),
-    ACLNN_ERR_PARAM_NULLPTR);
-
-    // 2. 检查输入/输出的数据类型是否合法
-    CHECK_RET(SimpleCheckDtypeValid(inputTensor, outputTensor),
-    ACLNN_ERR_PARAM_INVALID);
-
-    // 3. 检查输入/输出的shape大小
-    CHECK_RET(SimpleCheckShapeDim(inputTensor, outputTensor),
-    ACLNN_ERR_PARAM_INVALID);
-
-    return ACLNN_SUCCESS;
-}
-
 aclnnStatus ComputeAddRmsNormQuantV1(AddRmsNormQuantV2InputTensor& inputTensor, AddRmsNormQuantV2OutputTensor& outputTensor,
                 ParamStruct& paramStruct, aclOpExecutor* executor)
 {
@@ -506,24 +419,27 @@ aclnnStatus ComputeAddRmsNormQuantV1(AddRmsNormQuantV2InputTensor& inputTensor, 
 
 static bool CheckDtypeValidV2(AddRmsNormQuantV2InputTensor& inputTensor, AddRmsNormQuantV2OutputTensor& outputTensor)
 {
-    OP_CHECK_DTYPE_NOT_SUPPORT(inputTensor.x1, ASCEND950_DTYPE_SUPPORT_LIST_X_SCALE, return false);
-    OP_CHECK_DTYPE_NOT_SUPPORT(inputTensor.x2, ASCEND950_DTYPE_SUPPORT_LIST_X_SCALE, return false);
-    OP_CHECK_DTYPE_NOT_SUPPORT(inputTensor.gamma, ASCEND950_DTYPE_SUPPORT_LIST_X_SCALE, return false);
-    OP_CHECK_DTYPE_NOT_SUPPORT(inputTensor.scales1, ASCEND950_DTYPE_SUPPORT_LIST_X_SCALE, return false);
+    OP_CHECK_DTYPE_NOT_SUPPORT(inputTensor.x1, ASCEND910BC_AND_310P_DTYPE_SUPPORT_LIST_X, return false);
+    OP_CHECK_DTYPE_NOT_SUPPORT(inputTensor.x2, ASCEND910BC_AND_310P_DTYPE_SUPPORT_LIST_X, return false);
+    OP_CHECK_DTYPE_NOT_SUPPORT(inputTensor.gamma, ASCEND910BC_AND_310P_DTYPE_SUPPORT_LIST_X, return false);
+    OP_CHECK_DTYPE_NOT_SUPPORT(inputTensor.scales1, ASCEND910BC_AND_310P_DTYPE_SUPPORT_LIST_SCALE, return false);
     if (nullptr != inputTensor.betaOptional) {
-        OP_CHECK_DTYPE_NOT_SUPPORT(inputTensor.betaOptional, ASCEND950_DTYPE_SUPPORT_LIST_ZEROPOINT, return false);
+        OP_CHECK_DTYPE_NOT_SUPPORT(inputTensor.betaOptional, ASCEND910BC_AND_310P_DTYPE_SUPPORT_LIST_X, return false);
     }
     if (nullptr != inputTensor.zeroPoints1Optional) {
-        OP_CHECK_DTYPE_NOT_SUPPORT(inputTensor.zeroPoints1Optional, ASCEND950_DTYPE_SUPPORT_LIST_ZEROPOINT, return false);
+        OP_CHECK_DTYPE_NOT_SUPPORT(inputTensor.zeroPoints1Optional, ASCEND910BC_AND_310P_DTYPE_SUPPORT_LIST_ZEROPOINT, return false);
     }
+
+    OP_CHECK_DTYPE_NOT_SAME(inputTensor.x1, inputTensor.x2, return false);
+    OP_CHECK_DTYPE_NOT_SAME(inputTensor.x1, inputTensor.gamma, return false);
 
     OP_CHECK_DTYPE_NOT_MATCH(outputTensor.y1Out, op::DataType::DT_INT8, return false);
     OP_CHECK_DTYPE_NOT_MATCH(outputTensor.y2Out, op::DataType::DT_INT8, return false);  // Mandatory output
     if (nullptr != outputTensor.resOut) {
-        OP_CHECK_DTYPE_NOT_SUPPORT(outputTensor.resOut, ASCEND950_DTYPE_SUPPORT_LIST_X_SCALE, return false);
+        OP_CHECK_DTYPE_NOT_SUPPORT(outputTensor.resOut, ASCEND910BC_AND_310P_DTYPE_SUPPORT_LIST_X, return false);
     }
     if (nullptr != outputTensor.xOut) {
-        OP_CHECK_DTYPE_NOT_SUPPORT(outputTensor.xOut, ASCEND950_DTYPE_SUPPORT_LIST_X_SCALE, return false);
+        OP_CHECK_DTYPE_NOT_SUPPORT(outputTensor.xOut, ASCEND910BC_AND_310P_DTYPE_SUPPORT_LIST_X, return false);
     }
     return true;
 }
@@ -531,6 +447,7 @@ static bool CheckDtypeValidV2(AddRmsNormQuantV2InputTensor& inputTensor, AddRmsN
 static bool CheckShapeDimV2(AddRmsNormQuantV2InputTensor& inputTensor, AddRmsNormQuantV2OutputTensor& outputTensor)
 {
     OP_CHECK_MAX_DIM(inputTensor.x1, MAX_SUPPORT_DIMS_NUMS, return false);
+    OP_CHECK_MAX_DIM(inputTensor.x2, MAX_SUPPORT_DIMS_NUMS, return false);
     OP_CHECK_MAX_DIM(inputTensor.gamma, MAX_SUPPORT_DIMS_NUMS, return false);
     OP_CHECK_MAX_DIM(inputTensor.scales1, MAX_SUPPORT_DIMS_NUMS, return false);
     if (nullptr != inputTensor.betaOptional) {
@@ -540,6 +457,7 @@ static bool CheckShapeDimV2(AddRmsNormQuantV2InputTensor& inputTensor, AddRmsNor
         OP_CHECK_MAX_DIM(inputTensor.zeroPoints1Optional, MAX_SUPPORT_DIMS_NUMS, return false);
     }
     OP_CHECK_MAX_DIM(outputTensor.y1Out, MAX_SUPPORT_DIMS_NUMS, return false);
+    OP_CHECK_SHAPE_NOT_EQUAL(inputTensor.x1, outputTensor.y1Out, return false);
     if (nullptr != outputTensor.resOut) {
         OP_CHECK_MAX_DIM(outputTensor.resOut, MAX_SUPPORT_DIMS_NUMS, return false);
     }
@@ -558,6 +476,10 @@ static aclnnStatus CheckParamsV2(AddRmsNormQuantV2InputTensor& inputTensor, AddR
     } else {
         CHECK_RET(false, ACLNN_ERR_PARAM_NULLPTR);
     }
+
+    // 1. 检查必选输入/输出是否为空指针
+    CHECK_RET(SimpleCheckNotNull(inputTensor, outputTensor),
+    ACLNN_ERR_PARAM_NULLPTR);
 
     // 1. 检查输入/输出的数据类型是否合法
     CHECK_RET(CheckDtypeValidV2(inputTensor, outputTensor),
@@ -630,7 +552,7 @@ const aclTensor* GetTensorContiguousV2(const aclTensor* opt, aclOpExecutor* exec
     return l0op::Contiguous(opt, executor);
 }
 
-bool CheckSupportV2(AddRmsNormQuantV2InputTensor& inputTensor, AddRmsNormQuantV2OutputTensor& outputTensor)
+bool CheckSupportV2(const AddRmsNormQuantV2InputTensor& inputTensor, const AddRmsNormQuantV2OutputTensor& outputTensor, const ParamStruct& paramStruct)
 {
     if ((GetCurrentPlatformInfo().GetSocVersion() != SocVersion::ASCEND910B) &&
         (GetCurrentPlatformInfo().GetSocVersion() != SocVersion::ASCEND910_93) &&
@@ -638,14 +560,38 @@ bool CheckSupportV2(AddRmsNormQuantV2InputTensor& inputTensor, AddRmsNormQuantV2
         return false;
     }
 
-    if (inputTensor.gamma->GetViewShape().GetDimNum() == 1 && inputTensor.gamma->GetViewShape().GetDim(0) == 1 && inputTensor.betaOptional == nullptr &&
-            outputTensor.resOut == nullptr) {
+    // V2不支持传入s2和z2，不支持divMode为false
+    if (inputTensor.zeroPoints2Optional != nullptr || inputTensor.scales2Optional != nullptr || paramStruct.divMode == false) {
+        OP_LOGD("Go addRmsNormQuantV1 because z2/s2/divMode are not supported.");
         return false;
     }
-    if (inputTensor.zeroPoints1Optional != nullptr && inputTensor.zeroPoints1Optional->GetViewShape().GetDimNum() == 1 && inputTensor.zeroPoints1Optional->GetViewShape().GetDim(0) == 1 &&
-            inputTensor.scales1->GetViewShape().GetDimNum() == 1 && inputTensor.scales1->GetViewShape().GetDim(0) == 1 && ((inputTensor.gamma->GetViewShape().GetDimNum() == DIM_TWO &&
-            inputTensor.gamma->GetViewShape().GetDim(0) == 1 && inputTensor.gamma->GetViewShape().GetDim(1) == inputTensor.x1->GetViewShape().GetDim(inputTensor.x1->GetViewShape().GetDimNum() - 1)) ||
-            (inputTensor.gamma->GetViewShape().GetDimNum() == 1 && inputTensor.gamma->GetViewShape().GetDim(0) == inputTensor.x1->GetViewShape().GetDim(inputTensor.x1->GetViewShape().GetDimNum() - 1)))) {
+
+    if (inputTensor.gamma->GetViewShape().GetDimNum() == 1 && inputTensor.gamma->GetViewShape().GetDim(0) == 1 && inputTensor.betaOptional == nullptr &&
+            outputTensor.resOut == nullptr) {
+        OP_LOGD("Go addRmsNormQuantV1 because gamma/beta/rmsNormOut are not supported.");
+        return false;
+    }
+    bool isGammaOk = ((
+        inputTensor.gamma->GetViewShape().GetDimNum() == DIM_TWO && 
+        inputTensor.gamma->GetViewShape().GetDim(0) == 1 && 
+        inputTensor.gamma->GetViewShape().GetDim(1) == inputTensor.x1->GetViewShape().GetDim(inputTensor.x1->GetViewShape().GetDimNum() - 1)
+    ) || (
+        inputTensor.gamma->GetViewShape().GetDimNum() == 1 && 
+        inputTensor.gamma->GetViewShape().GetDim(0) == inputTensor.x1->GetViewShape().GetDim(inputTensor.x1->GetViewShape().GetDimNum() - 1)
+    ));
+    bool isScales1OK = inputTensor.scales1->GetViewShape().GetDimNum() == 1 && 
+                       inputTensor.scales1->GetViewShape().GetDim(0) == 1;
+    bool iszeroPoints1OK = inputTensor.zeroPoints1Optional != nullptr && 
+                           inputTensor.zeroPoints1Optional->GetViewShape().GetDimNum() == 1 && 
+                           inputTensor.zeroPoints1Optional->GetViewShape().GetDim(0) == 1;
+    bool isBetaOk = (inputTensor.betaOptional == nullptr && 
+                     outputTensor.resOut != nullptr && 
+                     outputTensor.xOut == nullptr) || 
+                    (inputTensor.betaOptional != nullptr && 
+                     outputTensor.resOut == nullptr && 
+                     outputTensor.xOut != nullptr
+                    );
+    if (isGammaOk && isScales1OK && iszeroPoints1OK && isBetaOk) {
         return true;
     }
     return false;
@@ -685,9 +631,7 @@ aclnnStatus aclnnAddRmsNormQuantV2GetWorkspaceSize(
     AddRmsNormQuantV2ACLNN::AddRmsNormQuantV2InputTensor inputTensorOri = {x1, x2, gamma, betaOptional, scales1, scales2Optional, zeroPoints1Optional, zeroPoints2Optional};
     AddRmsNormQuantV2ACLNN::SpecialTransform(inputTensorOri, uniqueExecutorForV2.get());
     AddRmsNormQuantV2ACLNN::AddRmsNormQuantV2OutputTensor outputTensor = {y1Out, y2Out, rmsNormOut, xOut};
-    auto ret = AddRmsNormQuantV2ACLNN::SimpleCheckParams(inputTensorOri, outputTensor);
-    CHECK_RET(ret == ACLNN_SUCCESS, ret);
-
+   
     // 支持空tensor
     bool anyEmptyTensor = x1->IsEmpty() || gamma->IsEmpty() || y2Out->IsEmpty();
     if (anyEmptyTensor) {
@@ -714,17 +658,17 @@ aclnnStatus aclnnAddRmsNormQuantV2GetWorkspaceSize(
 
     AddRmsNormQuantV2ACLNN::AddRmsNormQuantV2InputTensor inputTensor = {x1Cont, x2Cont, gammaCont, biasCont, s1Cont, s2Cont, z1Cont, z2Cont};
     AddRmsNormQuantV2ACLNN::ParamStruct paramStruct = {axis, epsilon, divMode};
-
-    if (AddRmsNormQuantV2ACLNN::CheckSupportV2(inputTensor, outputTensor)) {
-        ret = AddRmsNormQuantV2ACLNN::ComputeAddRmsNormQuantV2(inputTensor, outputTensor, paramStruct, uniqueExecutorForV2.get());
+    if (AddRmsNormQuantV2ACLNN::CheckSupportV2(inputTensor, outputTensor, paramStruct)) {
+        OP_LOGD("Enter ComputeAddRmsNormQuantV2 ...");
+        auto ret = AddRmsNormQuantV2ACLNN::ComputeAddRmsNormQuantV2(inputTensor, outputTensor, paramStruct, uniqueExecutorForV2.get());
         CHECK_RET(ret == ACLNN_SUCCESS, ret);
     } else if (outputTensor.xOut != nullptr) {
-        ret = AddRmsNormQuantV2ACLNN::ComputeAddRmsNormQuantV1(inputTensor, outputTensor, paramStruct, uniqueExecutorForV2.get());
+        OP_LOGD("Enter ComputeAddRmsNormQuantV1 ...");
+        auto ret = AddRmsNormQuantV2ACLNN::ComputeAddRmsNormQuantV1(inputTensor, outputTensor, paramStruct, uniqueExecutorForV2.get());
         CHECK_RET(ret == ACLNN_SUCCESS, ret);
     } else {
         CHECK_RET(outputTensor.xOut != nullptr, ACLNN_ERR_PARAM_NULLPTR);
     }
-    CHECK_RET(ret == ACLNN_SUCCESS, ret);
 
     // 获取计算过程中需要使用的workspace大小
     *workspaceSize = uniqueExecutorForV2->GetWorkspaceSize();

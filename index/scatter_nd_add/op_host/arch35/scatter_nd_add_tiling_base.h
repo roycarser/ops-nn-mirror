@@ -20,7 +20,7 @@
 #include "register/op_impl_registry.h"
 #include "log/log.h"
 #include "tiling/tiling_api.h"
-#include "tiling_base/tiling_templates_registry.h"
+#include "op_host/tiling_templates_registry.h"
 
 namespace optiling {
 
@@ -91,7 +91,7 @@ protected:
     {
         return true;
     }
-    ge::graphStatus GetPlatformInfo();
+    ge::graphStatus GetPlatformInfo() override;
     ge::graphStatus GetShapeAttrsInfo() override;
     uint32_t GetSortTmpSize(ge::DataType dataType, uint32_t lastAxisNum, bool isDescend);
     int64_t GetRestAvailableSize(int64_t sampleNum, int64_t valueTypeBytes,

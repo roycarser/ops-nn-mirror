@@ -13,7 +13,6 @@
 |  <term>Atlas 推理系列产品</term>    |     √    |
 |  <term>Atlas 训练系列产品</term>    |     ×    |
 
-
 ## 功能说明
 
 - 接口功能：RmsNorm算子是大模型常用的归一化操作，相比LayerNorm算子，其去掉了减去均值的部分。AddRmsNorm算子将RmsNorm前的Add算子融合起来，减少搬入搬出操作。
@@ -54,7 +53,7 @@ aclnnStatus aclnnAddRmsNorm(
 
 ## aclnnAddRmsNormGetWorkspaceSize
 
-- **参数说明：**
+- **参数说明**
 
   <table style="undefined;table-layout: fixed; width: 1550px"><colgroup>
   <col style="width: 170px">
@@ -82,7 +81,7 @@ aclnnStatus aclnnAddRmsNorm(
       <td>x1（aclTensor*）</td>
       <td>输入</td>
       <td>表示用于Add计算的第一个输入。对应公式中的`x1`。</td>
-      <td>不支持空Tensor。</td>
+      <td>支持空Tensor。</td>
       <td>FLOAT32、FLOAT16、BFLOAT16</td>
       <td>ND</td>
       <td>1-8</td>
@@ -92,7 +91,7 @@ aclnnStatus aclnnAddRmsNorm(
       <td>x2（aclTensor*）</td>
       <td>输入</td>
       <td>表示用于Add计算的第二个输入。对应公式中的`x2`。</td>
-      <td><ul><li>不支持空Tensor。</li><li>shape和数据类型需要与`x1`的shape和数据类型保持一致。</li></ul></td>
+      <td><ul><li>支持空Tensor。</li><li>shape和数据类型需要与`x1`的shape和数据类型保持一致。</li></ul></td>
       <td>FLOAT32、FLOAT16、BFLOAT16</td>
       <td>ND</td>
       <td>1-8</td>
@@ -102,7 +101,7 @@ aclnnStatus aclnnAddRmsNorm(
       <td>gamma（aclTensor*）</td>
       <td>输入</td>
       <td>表示RmsNorm的缩放因子（权重）。对应公式中的`gamma`。</td>
-      <td><ul><li>不支持空Tensor。</li><li>数据类型与`x1`的数据类型保持一致。</li></ul></td>
+      <td><ul><li>支持空Tensor。</li><li>数据类型与`x1`的数据类型保持一致。</li></ul></td>
       <td>FLOAT32、FLOAT16、BFLOAT16</td>
       <td>ND</td>
       <td>1-8</td>
@@ -112,7 +111,7 @@ aclnnStatus aclnnAddRmsNorm(
       <td>epsilon（double）</td>
       <td>输入</td>
       <td>表示添加到分母中的值，以确保数值稳定。对应公式中的`epsilon`。</td>
-      <td><ul><li>epsilon的值需要大于等于零。</li><li>建议值为1e-6。
+      <td><ul><li>epsilon的值需要大于等于零。</li><li>建议值为1e-6。</li></ul></td>
       <td>-</td>
       <td>-</td>
       <td>-</td>
@@ -122,7 +121,7 @@ aclnnStatus aclnnAddRmsNorm(
       <td>yOut（aclTensor*）</td>
       <td>输出</td>
       <td>表示最后的输出。对应公式中的`RmsNorm(x)`。</td>
-      <td><ul><li>不支持空Tensor。</li><li>shape、数据类型与输入`x1`的shape、数据类型保持一致。</li></ul></td>
+      <td><ul><li>支持空Tensor。</li><li>shape、数据类型与输入`x1`的shape、数据类型保持一致。</li></ul></td>
       <td>FLOAT32、FLOAT16、BFLOAT16</td>
       <td>ND</td>
       <td>1-8</td>
@@ -132,7 +131,7 @@ aclnnStatus aclnnAddRmsNorm(
       <td>rstdOut（aclTensor*）</td>
       <td>输出</td>
       <td>表示归一化后的标准差的倒数。对应公式中`Rms(x)`的倒数。</td>
-      <td><ul><li>支持空Tensor。</li><li>shape与`x1`前几维保持一致，前几维表示不需要norm的维度。rstdOut shape与x1 shape，gamma shape关系举例：若x1 shape:(2，3，4，8)，gamma shape:(8)，rstdOut shape(2，3，4，1)；若x1 shape:(2，3，4，8)，gamma shape:(4，8)，rstdOut shape(2，3，1，1)。</li><li>当传入的预置值为nullptr时，该参数的最终输出为空Tensor。</li></ul></td>
+      <td><ul><li>支持空Tensor。</li><li>shape与`x1`前几维保持一致，前几维表示不需要norm的维度。rstdOut shape与x1 shape，gamma shape关系举例：若x1 shape:(2，3，4，8)，gamma shape:(8)，rstdOut shape(2，3，4，1)；若x1 shape:(2，3，4，8)，gamma shape:(4，8)，rstdOut shape(2，3，1，1)。</li><li>当传入nullptr时，该参数的最终输出无效。</li></ul></td>
       <td>FLOAT32</td>
       <td>ND</td>
       <td>1-8</td>
@@ -142,7 +141,7 @@ aclnnStatus aclnnAddRmsNorm(
       <td>xOut（aclTensor*）</td>
       <td>输出</td>
       <td>表示Add计算的结果。对应公式中的`x`。</td>
-      <td><ul><li>支持空Tensor。</li><li>shape、数据类型与输入`x1`的shape、数据类型保持一致。</li><li>当`rstdOut`传入的预置值为nullptr时，且`xOut`传入的预置值为nullptr时，该参数的最终输出为空Tensor。</li><li>当`rstdOut`传入的预置值不为nullptr时，`xOut`传入的预置值不支持nullptr。</li></ul></td>
+      <td><ul><li>支持空Tensor。</li><li>shape、数据类型与输入`x1`的shape、数据类型保持一致。</li><li>当`xOut`传入nullptr时，该参数的最终输出无效。</li></ul></td>
       <td>FLOAT32、FLOAT16、BFLOAT16</td>
       <td>ND</td>
       <td>1-8</td>
@@ -174,8 +173,11 @@ aclnnStatus aclnnAddRmsNorm(
   - <term>Atlas 推理系列产品</term>：
     - 参数`x1`、`x2`、`gamma`、`yOut`、`xOut`的数据类型不支持BFLOAT16。
     - 参数`rstdOut`在当前产品使用场景下无效。
+  - <term>Ascend 950PR/Ascend 950DT</term>：
 
-- **返回值：**
+    参数`gamma`的shape需要与`x1`后几维保持一致，后几维为`x1`需要norm的维度。
+
+- **返回值**
 
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
   
@@ -197,7 +199,7 @@ aclnnStatus aclnnAddRmsNorm(
     <tr>
       <td rowspan="2">ACLNN_ERR_PARAM_NULLPTR</td>
       <td rowspan="2">161001</td>
-      <td>传入的x1、x2、gamma、yout是空指针。</td>
+      <td>传入的x1、x2、gamma、yOut是空指针。</td>
     </tr>
     <tr>
       <td>当rstdOut传入的预置值不为nullptr时，xOut传入的预置值为nullptr。</td>
@@ -214,7 +216,7 @@ aclnnStatus aclnnAddRmsNorm(
 
 ## aclnnAddRmsNorm
 
-- **参数说明：**
+- **参数说明**
 
   <table style="undefined;table-layout: fixed; width: 953px"><colgroup>
   <col style="width: 173px">
@@ -251,7 +253,7 @@ aclnnStatus aclnnAddRmsNorm(
   </tbody>
   </table>
 
-- **返回值：**
+- **返回值**
 
   aclnnStatus：返回状态码。（具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)）
 
@@ -273,7 +275,7 @@ aclnnStatus aclnnAddRmsNorm(
     | FLOAT16 | FLOAT16 | shape为[1, x1的最后一维]；FLOAT16 | FLOAT16 | 空指针 | 空指针，FLOAT16 |
     | BFLOAT16 | BFLOAT16 | shape为[1, x1的最后一维]；BFLOAT16 | BFLOAT16 | 空指针 | 空指针，BFLOAT16 |
     | FLOAT16 | FLOAT16 | shape为[1, x1的最后一维]；FLOAT16 | FLOAT16 | 空指针 | 必选，FLOAT16 |
-    | BFLOAT16 | BFLOAT16 | shape为[1, x1的最后一维；BFLOAT16] | BFLOAT16 | 空指针 | 必选，BFLOAT16 |
+    | BFLOAT16 | BFLOAT16 | shape为[1, x1的最后一维]；BFLOAT16 | BFLOAT16 | 空指针 | 必选，BFLOAT16 |
 
   - <term>Atlas 推理系列产品</term>：
 

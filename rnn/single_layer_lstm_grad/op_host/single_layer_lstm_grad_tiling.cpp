@@ -16,8 +16,8 @@
 #include "single_layer_lstm_grad_tiling.h"
 #include "register/op_impl_registry.h"
 #include "register/tilingdata_base.h"
-#include "tiling_base/tiling_base.h"
-#include "tiling_base/tiling_templates_registry.h"
+#include "op_host/tiling_base.h"
+#include "op_host/tiling_templates_registry.h"
 #include "util/math_util.h"
 #include "tiling/tiling_api.h"
 #include "error_util.h"
@@ -50,7 +50,7 @@ const int64_t DEFAULT_COPY_FACTOR_FP16 = 6;
 const int64_t HIDDEN_UB_NUM_WITH_SEQ = 20;
 const int64_t HIDDEN_UB_NUM_WITHOUT_SEQ = 19;
 const int64_t MM_GATE_KEY_FACTOR = 1000;
-const int64_t MM_WEIGHT_KEY_FACTOR = 100;
+const int64_t MM_WEIGHT_KEY_FACTOR = 10;
 const int64_t SMALL_FLAG_MULTIPLIER = 1000;
 const int64_t SMALL_FLAG_MULTIPLIER_CONCAT = 100;
 const int64_t INPUT_X_INDEX = 0;
@@ -726,7 +726,7 @@ static ge::graphStatus TilingFunc4SingleLayerLstmGrad(gert::TilingContext* conte
     return ge::GRAPH_SUCCESS;
 }
 
-ge::graphStatus TilingPrepareForSingleLayerLstmGrad(gert::TilingParseContext *context)
+ge::graphStatus TilingPrepareForSingleLayerLstmGrad([[maybe_unused]] gert::TilingParseContext *context)
 {
   return ge::GRAPH_SUCCESS;
 }

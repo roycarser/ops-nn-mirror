@@ -48,6 +48,50 @@ __aicore__ inline void CalcMDirectionVar(Intf *self)
 }
 
 template <class Intf>
+__aicore__ inline void CalcGroupOptParamForMMode(Intf *self)
+{
+    if (((self->ctx.groupOptIter + 1 == self->ctx.singleGroupOpt - 1 && self->ctx.groupOptIter != 0) ||
+        self->ctx.singleGroupOpt == 1) && self->ctx.updateEnlarge != self->ctx.convTiling->enlarge) {
+        self->ctx.singleGroups = self->ctx.updateEnlarge;
+        self->ctx.singleGroups = self->ctx.singleGroups == 0 ? self->ctx.convTiling->enlarge : self->ctx.singleGroups;
+    }
+
+    uint64_t enlargeTail = self->ctx.singleGroups % self->ctx.convTiling->enlarge;
+    enlargeTail = enlargeTail == 0 ? self->ctx.convTiling->enlarge : enlargeTail;
+    if (enlargeTail != self->ctx.convTiling->enlarge) {
+        self->ctx.singleCoreCi = enlargeTail * (self->ctx.convTiling->orgCi / self->ctx.convTiling->groups);
+        if (self->ctx.groupOptIter == self->ctx.singleGroupOpt - 1) {
+            self->ctx.singleCoreCo = self->ctx.updateSingleCoOpt;
+
+            uint64_t totalKAlignK0 = AlignB(self->ctx.singleCoreCi, Intf::k0) * self->ctx.convTiling->kernelHxkernelW;
+            self->ctx.ddr2l0LoopK = CeilDiv(totalKAlignK0, self->ctx.convTiling->kL0);
+            self->ctx.maxKL0Iter = self->ctx.ddr2l0LoopK - 1;
+            self->ctx.kL0Tail = totalKAlignK0 % self->ctx.convTiling->kL0;
+            if constexpr (Intf::k0 != Intf::k0FmapTail) {
+                self->ctx.kAL0Tail = AlignB(self->ctx.singleCoreCi, Intf::k0FmapTail) *
+                    self->ctx.convTiling->kernelHxkernelW % self->ctx.convTiling->kL0;
+                self->ctx.kAL0Tail = self->ctx.kAL0Tail == 0 ? self->ctx.convTiling->kL0 : self->ctx.kAL0Tail;
+            }
+            self->ctx.kL0Tail = self->ctx.kL0Tail == 0 ? self->ctx.convTiling->kL0 : self->ctx.kL0Tail;
+            
+            InitCoDirectionValue<Intf>(self);
+        }
+    }
+    if ASCEND_IS_AIC_CONV {
+        CalcMDirectionVar<Intf>(self);
+        CalcCoDirectionVar<Intf>(self);
+        if constexpr (Intf::groupOptPreloadFlag) {
+            OptGroupCalcBL1LoadTimes<Intf>(self);
+        }
+    }
+    if ASCEND_IS_AIV_CONV {
+        if constexpr (Intf::groupOptNDFlag) {
+            OptGroupInitKValue<Intf>(self);
+        }
+    }
+}
+
+template <class Intf>
 __aicore__ inline void FirstIterateImplMMode(Intf *self)
 {
     self->ctx.mL0Iter = 0;
@@ -58,25 +102,40 @@ __aicore__ inline void FirstIterateImplMMode(Intf *self)
         self->ctx.dOutIter = 0;
     }
     self->ctx.batchIter = 0;
-    self->ctx.loadAL1Flag = true;
-    self->ctx.loadBL1Flag = true;
     self->ctx.loadAL0Flag = true;
     self->ctx.loadBL0Flag = true;
+    self->ctx.loadAL1Flag = true;
+    self->ctx.loadBL1Flag = true;
     self->ctx.isFirstIterate = false;
 
     FirstIterateImplVec<Intf>(self);
 
     CalcMDirectionVar<Intf>(self);
     CalcCoDirectionVar<Intf>(self);
+
+    if (Intf::groupOptPreloadFlag) {
+        if (self->ctx.singleGroupOpt == 1 && self->ctx.updateEnlarge != self->ctx.convTiling->enlarge) {
+            self->ctx.singleGroups = self->ctx.updateEnlarge;
+            self->ctx.singleGroups = self->ctx.singleGroups == 0 ?
+                self->ctx.convTiling->enlarge : self->ctx.singleGroups;
+            CalcGroupOptParamForMMode<Intf>(self);
+        }
+        LoadAL1BaseModule<Intf>(self);
+        self->ctx.loadAL1Flag = true;
+        if (self->ctx.singleGroupOpt == 2 && self->ctx.updateEnlarge != self->ctx.convTiling->enlarge) {
+            self->ctx.singleGroups = self->ctx.updateEnlarge;
+            self->ctx.singleGroups = self->ctx.singleGroups == 0 ?
+                self->ctx.convTiling->enlarge : self->ctx.singleGroups;
+            CalcGroupOptParamForMMode<Intf>(self);
+        }
+    }
 }
 
 template <class Intf>
 __aicore__ inline bool IterateL0MFirstMMode(Intf *self)
 {
     self->ctx.mL0Iter++;
-    if (self->ctx.mL0Iter == self->ctx.l12l0LoopM) {
-        self->ctx.mL0Iter = 0;
-    } else {
+    if (self->ctx.mL0Iter != self->ctx.l12l0LoopM) {
         self->ctx.loadBL0Flag = false;
         if ASCEND_IS_AIC_CONV {
             if constexpr (Intf::kl0FullLoadFlag) {
@@ -85,6 +144,8 @@ __aicore__ inline bool IterateL0MFirstMMode(Intf *self)
             }
         }
         return true;
+    } else {
+        self->ctx.mL0Iter = 0;
     }
 
     if ASCEND_IS_AIC_CONV {
@@ -94,12 +155,12 @@ __aicore__ inline bool IterateL0MFirstMMode(Intf *self)
     }
 
     if constexpr (Intf::hasNL0IterFlag) {
-        self->ctx.nL0Iter++;
         self->ctx.loadBL0Flag = true;
-        if (self->ctx.nL0Iter == self->ctx.l12l0LoopN) {
-            self->ctx.nL0Iter = 0;
-        } else {
+        self->ctx.nL0Iter++;
+        if (self->ctx.nL0Iter != self->ctx.l12l0LoopN) {
             return true;
+        } else {
+            self->ctx.nL0Iter = 0;
         }
     }
 
@@ -114,42 +175,46 @@ __aicore__ inline bool IterateMFirstMMode(Intf *self)
     }
 
     if ASCEND_IS_AIC_CONV {
-        if (self->ctx.kAL1fullload) {
-            self->ctx.queueAL1.FreeTensor(self->ctx.al1);
+        if constexpr (!Intf::groupOptPreloadFlag) {
+            if (self->ctx.kAL1fullload) {
+                self->ctx.queueAL1.FreeTensor(self->ctx.al1);
+            }
         }
     }
 
     self->ctx.mAL1Iter++;
     self->ctx.loadAL1Flag = true;
-    if (self->ctx.mAL1Iter == self->ctx.ddr2l1LoopM) {
-        self->ctx.mAL1Iter = 0;
-        CalcMDirectionVar<Intf>(self);
-    } else {
+    if (self->ctx.mAL1Iter != self->ctx.ddr2l1LoopM) {
         CalcMDirectionVar<Intf>(self);
         return true;
+    } else {
+        self->ctx.mAL1Iter = 0;
+        CalcMDirectionVar<Intf>(self);
     }
 
     if constexpr (Intf::isConv3D) {
         self->ctx.dOutIter++;
-        if (self->ctx.dOutIter == self->ctx.ddr2l1LoopD) {
-            self->ctx.dOutIter = 0;
-        } else {
+        if (self->ctx.dOutIter != self->ctx.ddr2l1LoopD) {
             return true;
+        } else {
+            self->ctx.dOutIter = 0;
         }
     }
 
     self->ctx.batchIter++;
-    if (self->ctx.batchIter == self->ctx.ddr2l1LoopBatch) {
-        self->ctx.batchIter = 0;
-    } else {
+    if (self->ctx.batchIter != self->ctx.ddr2l1LoopBatch) {
         self->ctx.loadAL1Flag = true;
         self->ctx.loadBL1Flag = false;
         return true;
+    } else {
+        self->ctx.batchIter = 0;
     }
 
     if ASCEND_IS_AIC_CONV {
-        if (self->ctx.kBL1fullload) {
-            self->ctx.queueBL1.FreeTensor(self->ctx.bl1);
+        if constexpr (!Intf::groupOptPreloadFlag) {
+            if (self->ctx.kBL1fullload) {
+                self->ctx.queueBL1.FreeTensor(self->ctx.bl1);
+            }
         }
     }
 
@@ -162,6 +227,23 @@ __aicore__ inline bool IterateMFirstMMode(Intf *self)
         }
     }
 
+    if constexpr (Intf::groupOptPreloadFlag) {
+        self->ctx.groupOptIter++;
+        self->ctx.vecId = (self->ctx.groupOptIter % VEC_NUM) * VEC_ID_MAX;
+        self->ctx.nBL1Iter = 0;
+        CalcGroupOptParamForMMode<Intf>(self);
+        if (self->ctx.groupOptIter < self->ctx.singleGroupOpt - 1) {
+            return true;
+        } else if (self->ctx.groupOptIter == self->ctx.singleGroupOpt - 1) {
+            if (self->ctx.updateSingleCoOpt == 0 && self->ctx.updateEnlarge != self->ctx.convTiling->enlarge) {
+                return false;
+            }
+            return true;
+        } else {
+            self->ctx.loadAL1Flag = false;
+        }
+    }
+
     return false;
 }
 
@@ -170,9 +252,7 @@ __aicore__ inline bool IterateL0NFirstMMode(Intf *self)
 {
     if constexpr (Intf::hasNL0IterFlag) {
         self->ctx.nL0Iter++;
-        if (self->ctx.nL0Iter == self->ctx.l12l0LoopN) {
-            self->ctx.nL0Iter = 0;
-        } else {
+        if (self->ctx.nL0Iter != self->ctx.l12l0LoopN) {
             self->ctx.loadAL0Flag = false;
             if ASCEND_IS_AIC_CONV {
                 if constexpr (Intf::kl0FullLoadFlag) {
@@ -181,6 +261,8 @@ __aicore__ inline bool IterateL0NFirstMMode(Intf *self)
                 }
             }
             return true;
+        } else {
+            self->ctx.nL0Iter = 0;
         }
     }
 
@@ -190,73 +272,12 @@ __aicore__ inline bool IterateL0NFirstMMode(Intf *self)
         }
     }
 
-    self->ctx.mL0Iter++;
     self->ctx.loadAL0Flag = true;
-    if (self->ctx.mL0Iter == self->ctx.l12l0LoopM) {
+    self->ctx.mL0Iter++;
+    if (self->ctx.mL0Iter != self->ctx.l12l0LoopM) {
+        return true;
+    } else {
         self->ctx.mL0Iter = 0;
-    } else {
-        return true;
-    }
-
-    return false;
-}
-
-template <class Intf>
-__aicore__ inline bool IterateNFirstMMode(Intf *self)
-{
-    if (IterateL0NFirstMMode<Intf>(self)) {
-        return true;
-    }
-
-    if ASCEND_IS_AIC_CONV {
-        if (self->ctx.kBL1fullload) {
-            self->ctx.queueBL1.FreeTensor(self->ctx.bl1);
-        }
-    }
-
-    if constexpr (Intf::hasNL1IterFlag) {
-        self->ctx.nBL1Iter++;
-        self->ctx.loadBL1Flag = true;
-        if (self->ctx.nBL1Iter == self->ctx.ddr2l1LoopN) {
-            self->ctx.nBL1Iter = 0;
-            CalcCoDirectionVar<Intf>(self);
-            
-        } else {
-            CalcCoDirectionVar<Intf>(self);
-            return true;
-        }
-    }
-
-    if ASCEND_IS_AIC_CONV {
-        if (self->ctx.kAL1fullload) {
-            self->ctx.queueAL1.FreeTensor(self->ctx.al1);
-        }
-    }
-
-    self->ctx.mAL1Iter++;
-    self->ctx.loadAL1Flag = true;
-    if (self->ctx.mAL1Iter == self->ctx.ddr2l1LoopM) {
-        self->ctx.mAL1Iter = 0;
-        CalcMDirectionVar<Intf>(self);
-    } else {
-        CalcMDirectionVar<Intf>(self);
-        return true;
-    }
-
-    if constexpr (Intf::isConv3D) {
-        self->ctx.dOutIter++;
-        if (self->ctx.dOutIter == self->ctx.ddr2l1LoopD) {
-            self->ctx.dOutIter = 0;
-        } else {
-            return true;
-        }
-    }
-
-    self->ctx.batchIter++;
-    if (likely(self->ctx.batchIter != self->ctx.ddr2l1LoopBatch)) {
-        self->ctx.loadAL1Flag = true;
-        self->ctx.loadBL1Flag = true;
-        return true;
     }
 
     return false;
@@ -310,6 +331,66 @@ __aicore__ inline bool UpdateCommonItersMModeNFirst(Intf *self, TempIters& tempI
     }
     tempIters.endTag = true;
     return true;
+}
+
+template <class Intf>
+__aicore__ inline bool IterateNFirstMMode(Intf *self)
+{
+    if (IterateL0NFirstMMode<Intf>(self)) {
+        return true;
+    }
+
+    if ASCEND_IS_AIC_CONV {
+        if (self->ctx.kBL1fullload) {
+            self->ctx.queueBL1.FreeTensor(self->ctx.bl1);
+        }
+    }
+
+    if constexpr (Intf::hasNL1IterFlag) {
+        self->ctx.loadBL1Flag = true;
+        self->ctx.nBL1Iter++;
+        if (self->ctx.nBL1Iter != self->ctx.ddr2l1LoopN) {
+            CalcCoDirectionVar<Intf>(self);
+            return true;
+        } else {
+            self->ctx.nBL1Iter = 0;
+            CalcCoDirectionVar<Intf>(self);
+        }
+    }
+
+    if ASCEND_IS_AIC_CONV {
+        if (self->ctx.kAL1fullload) {
+            self->ctx.queueAL1.FreeTensor(self->ctx.al1);
+        }
+    }
+
+    self->ctx.mAL1Iter++;
+    self->ctx.loadAL1Flag = true;
+    if (self->ctx.mAL1Iter == self->ctx.ddr2l1LoopM) {
+        self->ctx.mAL1Iter = 0;
+        CalcMDirectionVar<Intf>(self);
+    } else {
+        CalcMDirectionVar<Intf>(self);
+        return true;
+    }
+
+    if constexpr (Intf::isConv3D) {
+        self->ctx.dOutIter++;
+        if (self->ctx.dOutIter == self->ctx.ddr2l1LoopD) {
+            self->ctx.dOutIter = 0;
+        } else {
+            return true;
+        }
+    }
+
+    self->ctx.batchIter++;
+    if (likely(self->ctx.batchIter != self->ctx.ddr2l1LoopBatch)) {
+        self->ctx.loadAL1Flag = true;
+        self->ctx.loadBL1Flag = true;
+        return true;
+    }
+
+    return false;
 }
 
 };

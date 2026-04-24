@@ -109,7 +109,7 @@ aclnnStatus aclnnDynamicBlockQuant(
       <td>roundModeOptional（char*）</td>
       <td>输入</td>
       <td>可选参数，指定cast到输出的转换方式，支持取值rint、round。</td>
-      <td>默认值为rint。</td>
+      <td>-</td>
       <td>-</td>
       <td>-</td>
       <td>-</td>
@@ -192,16 +192,17 @@ aclnnStatus aclnnDynamicBlockQuant(
     - 参数`roundModeOptional`只支持rint。
     - 参数`dstType`仅支持取值2，代表ACL_INT8。
     - 参数`rowBlockSize`仅支持取值1。
+    - 参数`colBlockSize`仅支持取值128。
     - 参数`yOut`的数据类型仅支持INT8。
   - <term>Ascend 950PR/Ascend 950DT</term>：
-    - 参数`x`、`yOut`、`scaleOut`的shape仅支持2维。
+    - 参数`x`、`yOut`、`scaleOut`的shape仅支持2维或3维。
     - 参数`roundModeOptional`的取值与参数`yOut`的数据类型存在对应关系：
       - 当输出`yOut`的数据类型是HIFLOAT8时，参数`roundModeOptional`支持设置为round。
       - 当输出`yOut`的数据类型是FLOAT8_E4M3FN、FLOAT8_E5M2时，参数`roundModeOptional`支持设置为rint。
     - 参数`dstType`支持取值34、35、36，分别代表HIFLOAT8、FLOAT8_E5M2、FLOAT8_E4M3FN。
     - 参数`yOut`的数据类型不支持INT8。
   
-- **返回值：**
+- **返回值**
 
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
   
@@ -229,9 +230,6 @@ aclnnStatus aclnnDynamicBlockQuant(
       <td rowspan="5">ACLNN_ERR_PARAM_INVALID</td>
       <td rowspan="5">161002</td>
       <td>输入或输出数据格式或数据类型不在支持的范围之内。</td>
-    </tr>
-    <tr>
-      <td>输入或输出数据的shape不在支持的范围之内。</td>
     </tr>
   </tbody></table>
 
@@ -274,7 +272,7 @@ aclnnStatus aclnnDynamicBlockQuant(
   </tbody>
   </table>
 
-- **返回值：**
+- **返回值**
 
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 
@@ -392,7 +390,7 @@ aclnnStatus aclnnDynamicBlockQuant(
     ret = CreateAclTensor(scaleHostData, scaleShape, &scaleDeviceAddr, aclDataType::ACL_FLOAT, &scale);
     CHECK_RET(ret == ACL_SUCCESS, return ret);
   
-    // 3. 调用CANN算子库API，需要修改为具体的Api名称
+    // 3. 调用CANN算子库API，需要修改为具体的API名称
     uint64_t workspaceSize = 0;
     aclOpExecutor* executor;
   
@@ -546,7 +544,7 @@ aclnnStatus aclnnDynamicBlockQuant(
     ret = CreateAclTensor(scaleHostData, scaleShape, &scaleDeviceAddr, aclDataType::ACL_FLOAT, &scale);
     CHECK_RET(ret == ACL_SUCCESS, return ret);
   
-    // 3. 调用CANN算子库API，需要修改为具体的Api名称
+    // 3. 调用CANN算子库API，需要修改为具体的API名称
     uint64_t workspaceSize = 0;
     aclOpExecutor* executor;
   
@@ -593,3 +591,4 @@ aclnnStatus aclnnDynamicBlockQuant(
     return 0;
   }
   ```
+  

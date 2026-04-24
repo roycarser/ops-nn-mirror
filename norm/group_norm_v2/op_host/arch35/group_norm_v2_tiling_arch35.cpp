@@ -13,7 +13,7 @@
  * \brief
  */
 #include "group_norm_v2_tiling_arch35.h"
-#include "common/runtime2_util.h"
+#include "op_api/runtime2_util.h"
 #include "error_util.h"
 #include <nlohmann/json.hpp>
 
@@ -35,7 +35,7 @@ static const uint64_t INPUT_IDX_BETA = 2;
 static const uint64_t PROCESSSIZE = 8192;
 static const uint64_t BLOCK_SIZE = 32U;
 static const uint64_t VECTOR_LENGTH = 256U;
-static const uint64_t RESERVED_WORKSPACE_SIZE_910D = 16UL * 1024UL * 1024UL;
+static const uint64_t RESERVED_WORKSPACE_SIZE_950 = 16UL * 1024UL * 1024UL;
 static const uint64_t FOUR_BUFFER = 4;
 static const uint64_t BUFFER_NUM = 2;
 static const uint64_t DOUBLE_BUFFER = 2;
@@ -312,7 +312,7 @@ static void SetUbTiling(GroupNormV2TilingData &tilingData)
 }
 
 /*
-  910D tilingKey划分逻辑如下:
+  950 tilingKey划分逻辑如下:
   1. R轴等于1,走TILINGKEY_REDUCE_ONE特化模板
   2. UB内默认存放2048根A轴，gamma和beta在UB内全载，在开启DB条件下，计算出能够全载的最大R轴
     2.1 R轴小于可全载的最大R轴,则走TILINGKEY_TWOPASS_PERF性能模板
@@ -326,7 +326,7 @@ static void SetUbTiling(GroupNormV2TilingData &tilingData)
   在非全载模板下，二分累加的UB额外空间不会影响normalize+swish阶段一次可载入的R轴大小
   当Gamma或者Beta非空，并且和输入数据类型不一致时，认为是mix type场景
 */
-static void SetTilingKey4Ascend910D(const gert::TilingContext *context, uint64_t &maxReduceCount, uint64_t &ubRemain,
+static void SetTilingKey4Ascend950(const gert::TilingContext *context, uint64_t &maxReduceCount, uint64_t &ubRemain,
     bool &isReduceFullLoad, GroupNormV2TilingData &tilingData)
 {
     auto compileInfo = reinterpret_cast<const GroupNormV2CompileInfo *>(context->GetCompileInfo());
@@ -579,7 +579,7 @@ static void SetUbTiling4Welford(const gert::TilingContext *context, GroupNormV2T
     return SetUbTiling4WelfordGeneralized(context, tilingData, ubRemain, xDtypeSize);
 }
 
-static void SetUbTiling4Ascend910D(const gert::TilingContext *context, uint64_t maxReduceCount, uint64_t ubRemain,
+static void SetUbTiling4Ascend950(const gert::TilingContext *context, uint64_t maxReduceCount, uint64_t ubRemain,
     bool isReduceFullLoad, GroupNormV2TilingData &tilingData)
 {
     auto compileInfo = reinterpret_cast<const GroupNormV2CompileInfo *>(context->GetCompileInfo());
@@ -593,13 +593,13 @@ static void SetUbTiling4Ascend910D(const gert::TilingContext *context, uint64_t 
     }
 }
 
-static void SetTilingForAscend910D(const gert::TilingContext *context, GroupNormV2TilingData &tilingData)
+static void SetTilingForAscend950(const gert::TilingContext *context, GroupNormV2TilingData &tilingData)
 {
     uint64_t maxReduceCount = 0;
     uint64_t ubRemain = 0;
     bool reduceFullLoad = false;
-    SetTilingKey4Ascend910D(context, maxReduceCount, ubRemain, reduceFullLoad, tilingData);
-    SetUbTiling4Ascend910D(context, maxReduceCount, ubRemain, reduceFullLoad, tilingData);
+    SetTilingKey4Ascend950(context, maxReduceCount, ubRemain, reduceFullLoad, tilingData);
+    SetUbTiling4Ascend950(context, maxReduceCount, ubRemain, reduceFullLoad, tilingData);
 }
 
 ge::graphStatus SetTilingData(gert::TilingContext *context)
@@ -618,14 +618,14 @@ ge::graphStatus SetTilingData(gert::TilingContext *context)
     OP_CHECK_IF((SetBlockTiling(context, tilingData) != ge::GRAPH_SUCCESS),
         OP_LOGE(context->GetNodeName(), "Set blockTiling failed."), return ge::GRAPH_FAILED);
     SetUbTiling(tilingData);
-    SetTilingForAscend910D(context, tilingData);
+    SetTilingForAscend950(context, tilingData);
     OP_CHECK_IF(GroupNormV2SetTilingData(context, tilingData) != ge::GRAPH_SUCCESS,
         OP_LOGE(context->GetNodeType(), "GroupNormV2SetTilingData set tiling data fail."),
         return ge::GRAPH_FAILED);
     context->SetBlockDim(tilingData.get_realCoreNum());
     context->SetTilingKey(tilingData.get_tilingKey());
     size_t *workspaces = context->GetWorkspaceSizes(1);
-    workspaces[0] = RESERVED_WORKSPACE_SIZE_910D;
+    workspaces[0] = RESERVED_WORKSPACE_SIZE_950;
     return ge::GRAPH_SUCCESS;
 }
 

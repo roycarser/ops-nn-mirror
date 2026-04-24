@@ -21,9 +21,9 @@
 #include "util/math_util.h"
 #include "tiling/platform/platform_ascendc.h"
 #include "platform/platform_infos_def.h"
-#include "tiling_base/tiling_base.h"
+#include "op_host/tiling_base.h"
 #include "op_common/op_host/util/platform_util.h"
-#include "tiling_base/tiling_templates_registry.h"
+#include "op_host/tiling_templates_registry.h"
 
 
 namespace optiling {
@@ -43,18 +43,18 @@ TILING_DATA_FIELD_DEF(uint32_t, hasZeroPoints2);
 END_TILING_DATA_DEF;
 
 BEGIN_TILING_DATA_DEF(AddRmsNormQuantRegbaseTilingData)
-TILING_DATA_FIELD_DEF(uint64_t, numM);
-TILING_DATA_FIELD_DEF(uint64_t, numN);
-TILING_DATA_FIELD_DEF(uint64_t, baseM);
-TILING_DATA_FIELD_DEF(uint64_t, baseN);
-TILING_DATA_FIELD_DEF(uint64_t, baseNDtypeAlign);
+TILING_DATA_FIELD_DEF(uint64_t, numM);  //A
+TILING_DATA_FIELD_DEF(uint64_t, numN);  //R
+TILING_DATA_FIELD_DEF(uint64_t, baseM);  //ubfactor ub处理a的大小
+TILING_DATA_FIELD_DEF(uint64_t, baseN);  //全载时=R
 TILING_DATA_FIELD_DEF(uint64_t, baseNReduceAlign);
-TILING_DATA_FIELD_DEF(uint64_t, powerSplit);
+TILING_DATA_FIELD_DEF(uint64_t, baseNDtypeAlign);  //R对32B对齐的个数
 TILING_DATA_FIELD_DEF(uint64_t, powerLoop);
-TILING_DATA_FIELD_DEF(uint64_t, mPerCore);
-TILING_DATA_FIELD_DEF(uint64_t, mLastCore);
-TILING_DATA_FIELD_DEF(float, epsilon);
+TILING_DATA_FIELD_DEF(uint64_t, powerSplit);  //binaryAdd 二分折叠点
+TILING_DATA_FIELD_DEF(uint64_t, mPerCore); //blockFactor 单核处理a的大小
+TILING_DATA_FIELD_DEF(uint64_t, mLastCore); //blockTail 尾核处理a的大小
 TILING_DATA_FIELD_DEF(float, avgFactor);
+TILING_DATA_FIELD_DEF(float, epsilon);
 END_TILING_DATA_DEF;
 
 REGISTER_TILING_DATA_CLASS(AddRmsNormQuant, AddRMSNormQuantTilingData)
@@ -91,9 +91,25 @@ REGISTER_TILING_DATA_CLASS(AddRmsNormQuant_1141, AddRmsNormQuantRegbaseTilingDat
 REGISTER_TILING_DATA_CLASS(AddRmsNormQuant_1151, AddRmsNormQuantRegbaseTilingData)
 REGISTER_TILING_DATA_CLASS(AddRmsNormQuant_1161, AddRmsNormQuantRegbaseTilingData)
 REGISTER_TILING_DATA_CLASS(AddRmsNormQuant_1171, AddRmsNormQuantRegbaseTilingData)
-
+REGISTER_TILING_DATA_CLASS(AddRmsNormQuant_1002, AddRmsNormQuantRegbaseTilingData)
+REGISTER_TILING_DATA_CLASS(AddRmsNormQuant_1012, AddRmsNormQuantRegbaseTilingData)
+REGISTER_TILING_DATA_CLASS(AddRmsNormQuant_1022, AddRmsNormQuantRegbaseTilingData)
+REGISTER_TILING_DATA_CLASS(AddRmsNormQuant_1032, AddRmsNormQuantRegbaseTilingData)
+REGISTER_TILING_DATA_CLASS(AddRmsNormQuant_1042, AddRmsNormQuantRegbaseTilingData)
+REGISTER_TILING_DATA_CLASS(AddRmsNormQuant_1052, AddRmsNormQuantRegbaseTilingData)
+REGISTER_TILING_DATA_CLASS(AddRmsNormQuant_1062, AddRmsNormQuantRegbaseTilingData)
+REGISTER_TILING_DATA_CLASS(AddRmsNormQuant_1072, AddRmsNormQuantRegbaseTilingData)
+REGISTER_TILING_DATA_CLASS(AddRmsNormQuant_1102, AddRmsNormQuantRegbaseTilingData)
+REGISTER_TILING_DATA_CLASS(AddRmsNormQuant_1112, AddRmsNormQuantRegbaseTilingData)
+REGISTER_TILING_DATA_CLASS(AddRmsNormQuant_1122, AddRmsNormQuantRegbaseTilingData)
+REGISTER_TILING_DATA_CLASS(AddRmsNormQuant_1132, AddRmsNormQuantRegbaseTilingData)
+REGISTER_TILING_DATA_CLASS(AddRmsNormQuant_1142, AddRmsNormQuantRegbaseTilingData)
+REGISTER_TILING_DATA_CLASS(AddRmsNormQuant_1152, AddRmsNormQuantRegbaseTilingData)
+REGISTER_TILING_DATA_CLASS(AddRmsNormQuant_1162, AddRmsNormQuantRegbaseTilingData)
+REGISTER_TILING_DATA_CLASS(AddRmsNormQuant_1172, AddRmsNormQuantRegbaseTilingData)
 constexpr uint32_t TILING_TYPE_NORMAL = 0;
 constexpr uint32_t TILING_TYPE_SPILT = 1;
+constexpr uint32_t TILING_TYPE_PERF = 2;
 constexpr uint32_t TILING_OFFSET_HAS_QUANT = 10;
 constexpr uint32_t TILING_OFFSET_DIV_MODE = 100;
 constexpr uint32_t TILING_OFFSET_REGBASE = 1000;
@@ -127,9 +143,11 @@ struct AddRmsNormQuantRegbaseTilingParams {
     uint64_t numN{0};
     uint64_t xDtypeSize{0};
     uint64_t quantDtypeSize{0};
+    uint64_t zeroPointDtypeSize{0};
     uint64_t xDtypeAlignNum{0};
     uint64_t xReduceAlignNum{0};
     uint64_t quantDtypeAlignNum{0};
+    uint64_t zeroPointDtypeAlignNum{0};
     // Cal params
     uint64_t baseM{0};
     uint64_t baseN{0};
@@ -138,8 +156,8 @@ struct AddRmsNormQuantRegbaseTilingParams {
     uint64_t baseNQuantAlign{0};
     uint64_t baseNReduceAlign{0};
     uint64_t reduceBufLenAlign{0};
-    uint64_t powerSplit{0};
     uint64_t powerLoop{0};
+    uint64_t powerSplit{0};
     uint64_t mPerCore{0};
     uint64_t mLastCore{0};
     uint64_t usedCoreNum{0};
@@ -148,8 +166,8 @@ struct AddRmsNormQuantRegbaseTilingParams {
     // Tiling key parmas
     uint64_t tilingType{0};
 
-    float epsilon{0};
     float avgFactor{0};
+    float epsilon{0};
     uint32_t quantBufCnt{0};
     bool divMode{false};
     bool hasScales2{false};
@@ -182,6 +200,8 @@ public:
     bool CheckOutputDtype();
     ge::graphStatus SetInputParams();
     uint64_t CalUBTotalSize(uint64_t baseM, uint64_t baseN, const uint32_t tilingType);
+    int64_t CalFullLoadBaseM(uint64_t baseN, int64_t& tmpPower);
+    uint64_t CalUsedSize(uint64_t baseM, uint64_t baseNB8Align, uint64_t baseNB32Align, int64_t tmpPower, int64_t firstVcaddLength);
     ge::graphStatus SetTilingParams();
     void SetTilingData();
     void PrintTilingData();

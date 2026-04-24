@@ -8,7 +8,7 @@
 | <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>     |    √     |
 | <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term> |    √     |
 | <term>Atlas 200I/500 A2 推理产品</term>                      |    √     |
-| <term>Atlas 推理系列产品 </term>                             |    √     |
+| <term>Atlas 推理系列产品</term>                             |    √     |
 | <term>Atlas 训练系列产品</term>                              |    √     |
 
 ## 功能说明
@@ -77,14 +77,14 @@
       <tr>
         <td>batch_dims</td>
         <td>可选属性</td>
-        <td><ul><li>用于指定批处理的维度。</li><li>默认值为0.0。</ul></td>
+        <td><ul><li>用于指定批处理的维度。</li><li>默认值为0.0。</li></ul></td>
         <td>INT64</td>
         <td>ND</td>
       </tr>
       <tr>
         <td>negative_index_support</td>
         <td>可选属性</td>
-        <td><ul><li>用于指定是否支持负数索引，值为true表示支持索引为负数，值为false则不支持索引为负数。</li><li>默认值为false。</ul></td>
+        <td><ul><li>用于指定是否支持负数索引，值为true表示支持索引为负数，值为false则不支持索引为负数。</li><li>默认值为false。</li></ul></td>
         <td>BOOL</td>
         <td>ND</td>
       </tr>

@@ -15,6 +15,7 @@
 #include "aclnn_index_put_impl.h"
 #include "index/index_put/op_host/op_api/index_put.h"
 #include "index_put_v2.h"
+#include "acl/acl_rt.h"
 #include "index/linear_index_v2/op_host/op_api/linear_index_v2.h"
 #include "index/index_put_with_sort_v2/op_api/index_put_with_sort_v2.h"
 #include "index/index_put_with_sort/op_host/op_api/index_put_with_sort.h"
@@ -86,7 +87,7 @@ static const int64_t TAIL_SIZE = 1024;
 static const uint64_t INT32_INF = 2139095040;
 static const uint64_t INT32_MAX_LIMIT = 2147483647;
 static const uint64_t CAST_MAX_NUM = 16777216;
-static constexpr size_t DIM_BOUND_NON_CONTIGUOUS = 4;
+static const int64_t DIM_BOUND_NON_CONTIGUOUS = 4;
 
 static aclIntArray* GetPerm(int64_t masksNum, int64_t indicesNum, int64_t transposeDimNum, aclOpExecutor* executor) {
   FVector<int64_t, DIMLIMIT> transposeArray;
@@ -873,34 +874,6 @@ static bool IndicesBroadcastUndeter(FVector<const aclTensor*, DIMLIMIT>& allIndi
 }
 } // namespace
 
-
-static bool IndicesBroadcast(FVector<const aclTensor*, DIMLIMIT>& allIndices, aclOpExecutor* executor)
-{
-    for (int i = 0; i < static_cast<int>(allIndices.size()); i++) {
-        if (allIndices[i]->GetViewShape().GetDimNum() != 0 &&
-            allIndices[i]->GetViewShape().GetShapeSize() != 0) {  // Find first unscalar tensor
-            auto tensorShapeDim = allIndices[i]->GetViewShape().GetDimNum();
-            std::vector<int64_t> tensorShape(tensorShapeDim);
-            for (int j = 0; j < static_cast<int>(tensorShapeDim); j++) {
-                tensorShape[j] = allIndices[i]->GetViewShape().GetDim(j);
-            }
-            auto valueShapeBroad = executor->AllocIntArray(tensorShape.data(), tensorShapeDim);
-            auto dstDtype = allIndices[i]->GetDataType();  // sometimes indices dtypes are not same, need cast.
-            for (int j = 0; j < static_cast<int>(allIndices.size()); j++) {
-                if (allIndices[j]->GetDataType() != dstDtype) {
-                    allIndices[j] = l0op::Cast(allIndices[j], op::DataType::DT_INT32, executor);
-                    allIndices[j] = l0op::Cast(allIndices[j], dstDtype, executor);
-                }
-                if (!allIndices[j]->IsEmpty()) {  // scalar tensor need broadcast, empty tensor not
-                    allIndices[j] = l0op::BroadcastTo(allIndices[j], valueShapeBroad, executor);
-                }
-            }
-            break;
-        }
-    }
-    return true;
-}
-
 static const aclTensor* IndexPutV2Process(const aclTensor* selfCast, const aclTensor* valuesCast,
                                           const aclTensorList* indices, const bool accumulate,
                                           const FVector<int64_t, 8> masks, int64_t masksNum, const bool isNonContiguous, 
@@ -918,8 +891,14 @@ static const aclTensor* IndexPutV2Process(const aclTensor* selfCast, const aclTe
     const aclTensor* tmp = selfCast;
     if (isNonContiguous) {
         allIndicesTensorList = executor->AllocTensorList(allDefinedIndices.data(), allDefinedIndices.size());
-        valueBroadcast = executor->CreateView(valuesCast, valuesCast->GetViewShape(), valuesCast->GetStorageShape(), valuesCast->GetViewStrides(),
-                    valuesCast->GetViewOffset());
+        if (valuesCast->GetViewShape().IsScalar()) {
+          bool iscontiguousIdx = CheckIfContiguous(indices, definedIndices, allIndices, executor);
+          valueBroadcast = valuesToBroadcastArch3510(selfCast, definedIndices, valuesCast, masks,
+                                                        iscontiguousIdx, executor);     
+        } else {
+          valueBroadcast = executor->CreateView(valuesCast, valuesCast->GetViewShape(), valuesCast->GetStorageShape(), valuesCast->GetViewStrides(),
+            valuesCast->GetViewOffset());
+        }
         selfCast = executor->CreateView(tmp, tmp->GetViewShape(), tmp->GetStorageShape(), tmp->GetViewStrides(),
                     tmp->GetViewOffset());
     } else {
@@ -934,7 +913,7 @@ static const aclTensor* IndexPutV2Process(const aclTensor* selfCast, const aclTe
                                                       iscontiguousIdx, executor);
         CHECK_RET(valueBroadcast != nullptr, nullptr);
     }
-    
+
     // IndexPutV2
     const aclTensor* indexPutOpOut;
     aclTensor* out = const_cast<aclTensor*>(selfCast);
@@ -944,7 +923,7 @@ static const aclTensor* IndexPutV2Process(const aclTensor* selfCast, const aclTe
     return indexPutOpOut;
 }
 
-static const aclTensor* DeterministicProcess(const aclTensor* selfCast, const aclTensor* valuesCast,
+static const aclTensor* SortedIndexPutProcess(const aclTensor* selfCast, const aclTensor* valuesCast,
                                              const aclTensorList* indices,
                                              const bool accumulate, const FVector<int64_t, 8> masks, int64_t masksNum,
                                              aclOpExecutor* executor)
@@ -1003,17 +982,18 @@ static const aclTensor* IndexPutProcessArch3510(aclTensor* selfRef, const aclTen
                                               const aclTensorList* indices,
                                               const FVector<const aclTensor*, 8>& allDefinedIndices,
                                               const bool accumulate, FVector<int64_t, 8> masks, int64_t masksNum, const bool isSupportAiCpu,
-                                              const bool isNonContiguous, aclOpExecutor* executor)
+                                              const bool isNonContiguous, const bool useSortedV2Opt, aclOpExecutor* executor)
 {
     int64_t deterministicValue = 0;
     rtError_t retRts = rtCtxGetSysParamOpt(SYS_OPT_DETERMINISTIC, &deterministicValue);
     if (retRts != RT_ERROR_NONE) {
         deterministicValue = 0;
     }
+    const aclTensor* indexPutOpOut = nullptr;
     if (isSupportAiCpu) {
         OP_LOGD("Enter Aicpu Process");
-        return AicpuProcess(selfRef, selfCast, valuesCast, allDefinedIndices, accumulate, masks, masksNum,
-                            executor);
+        indexPutOpOut =
+            AicpuProcess(selfRef, selfCast, valuesCast, allDefinedIndices, accumulate, masks, masksNum, executor);
     } else {
         while (masks.size() < selfRef->GetViewShape().GetDimNum()) {
             masks.emplace_back(0);
@@ -1021,16 +1001,66 @@ static const aclTensor* IndexPutProcessArch3510(aclTensor* selfRef, const aclTen
         for (int i = 0; i < static_cast<int>(masks.size()); i++) {
             OP_LOGD("Process arch3510 masks %d is %ld.", i, masks[i]);
         }
-        if (deterministicValue == 0) {
+        if (deterministicValue == 0 && useSortedV2Opt) {
+            OP_LOGD("Enter IndexPutWithSortV2 Process");
+            indexPutOpOut = SortedIndexPutProcess(
+                selfCast, valuesCast, indices, accumulate, masks, selfRef->GetViewShape().GetDimNum(), executor);
+        } else if (deterministicValue == 0 && !useSortedV2Opt) {
             OP_LOGD("Enter IndexPutV2 Process");
-            return IndexPutV2Process(selfCast, valuesCast, indices, accumulate, masks, selfRef->GetViewShape().GetDimNum(), 
-                                      isNonContiguous, allDefinedIndices, executor);
-        } else {
+            indexPutOpOut = IndexPutV2Process(
+                selfCast, valuesCast, indices, accumulate, masks, selfRef->GetViewShape().GetDimNum(), isNonContiguous,
+                allDefinedIndices, executor);
+        } else if (deterministicValue == 1 && !useSortedV2Opt) {
             OP_LOGD("Enter Deterministic Process");
-            return DeterministicProcess(selfCast, valuesCast, indices, accumulate, masks,
-                                        selfRef->GetViewShape().GetDimNum(), executor);
+            indexPutOpOut = SortedIndexPutProcess(
+                selfCast, valuesCast, indices, accumulate, masks, selfRef->GetViewShape().GetDimNum(), executor);
         }
     }
+
+    CHECK_RET(indexPutOpOut != nullptr, nullptr);
+    return indexPutOpOut;
+}
+
+static bool IsStridesAllZero(const aclTensor* tensor)
+{
+    bool isAllZero = true;
+    const auto& viewStrides = tensor->GetViewStrides();
+    int32_t dimNum = tensor->GetViewShape().GetDimNum();
+    for (int32_t i = 0; i < dimNum; i++) {
+        if (viewStrides[i] != 0) {
+          isAllZero = false;
+        }
+    }
+    return isAllZero;
+}
+
+static bool IsTranspose(const aclTensor* tensor)
+{
+    bool isTranspose = false;
+    const auto& viewStrides = tensor->GetViewStrides();
+    int32_t dimNum = tensor->GetViewShape().GetDimNum();
+    for (int32_t j = 1; j < dimNum; j++) {
+        if (viewStrides[j - 1] < viewStrides[j] && viewStrides[j - 1] != 0) {
+          isTranspose = true;
+        }
+    }
+    return isTranspose;
+}
+
+static bool CheckIsContiguous(bool selfContiguous, bool valueContiguous, bool indicesContiguous, bool overLimit,
+                              bool isIndicesTranspose, bool isSelfTranspose, bool isValueTranspose, bool isIndicesStridesAllZero,
+                              bool isSelfStridesAllZero)
+{
+    if ((selfContiguous && valueContiguous && indicesContiguous)) {
+      return false;
+    }
+    if ((!selfContiguous || !valueContiguous || !indicesContiguous) && overLimit) {
+      return false;
+    }
+    if (isIndicesTranspose || isSelfTranspose || isValueTranspose || isIndicesStridesAllZero || isSelfStridesAllZero) {
+      return false;
+    }
+    return true;
 }
 
 static bool IsNonContiguousScene(const aclTensor* self, const aclTensorList* indices, const aclTensor *value, 
@@ -1038,13 +1068,18 @@ static bool IsNonContiguousScene(const aclTensor* self, const aclTensorList* ind
                                   int64_t& indicesNum, int64_t& masksNum, const aclTensor*& selfRefContiguous, const aclTensor*& valuesContiguous, 
                                   aclOpExecutor* executor)
 {
-    size_t xDim = self->GetViewShape().GetDimNum();
+    int64_t xDim = self->GetViewShape().GetDimNum();
     int64_t indicesSize = static_cast<int64_t>(indices->Size());
     bool overLimit = false;
+    bool isSelfTranspose = false;
+    bool isValueTranspose = false;
+    bool isIndicesTranspose = false;
+    bool isIndicesStridesAllZero = false;
+    bool isSelfStridesAllZero = false;
     if (xDim > DIM_BOUND_NON_CONTIGUOUS || indicesSize > DIM_BOUND_NON_CONTIGUOUS) {
         overLimit = true;
     }
-    bool indicesContiguous = false;
+    bool indicesContiguous = true;
     for (int32_t i = 0; i < indicesSize; i++) {
       if ((*indices)[i]) {
         const aclTensor* curIndice = (*indices)[i];
@@ -1056,8 +1091,14 @@ static bool IsNonContiguousScene(const aclTensor* self, const aclTensorList* ind
           masks.emplace_back(1);
           indicesNum += 1;
           masksNum += 1;
-          if (IsContiguous(curIndice)) {
-              indicesContiguous = true;
+          if (!IsContiguous(curIndice)) {
+              indicesContiguous = false;
+              if (!isIndicesTranspose) {
+                isIndicesTranspose = IsTranspose(curIndice);
+              }
+              if (!isIndicesStridesAllZero) {
+                isIndicesStridesAllZero = IsStridesAllZero(curIndice);
+              }
           }
         } else {
           masks.emplace_back(0);
@@ -1070,10 +1111,11 @@ static bool IsNonContiguousScene(const aclTensor* self, const aclTensorList* ind
     }
     bool selfContiguous = IsContiguous(self);
     bool valueContiguous = IsContiguous(value);
-    if ((selfContiguous && valueContiguous && indicesContiguous)) {
-      return false;
-    }
-    if ((!selfContiguous || !valueContiguous || !indicesContiguous) && overLimit) {
+    isSelfTranspose = IsTranspose(self);
+    isValueTranspose = IsTranspose(value);
+    isSelfStridesAllZero = IsStridesAllZero(self);
+    if (!CheckIsContiguous(selfContiguous, valueContiguous, indicesContiguous, overLimit, isIndicesTranspose,
+                           isSelfTranspose, isValueTranspose, isIndicesStridesAllZero, isSelfStridesAllZero)) {
       return false;
     }
 
@@ -1090,7 +1132,7 @@ static bool IsNonContiguousScene(const aclTensor* self, const aclTensorList* ind
     return true;
 }
 
-static bool IsIndexPutV2Scene(const aclTensor *selfRef, const bool accumulate) 
+static bool IsIndexPutV2Scene() 
 {
   if (Ops::NN::AclnnUtil::IsRegbase()) {
       int64_t deterministicValue = 0;
@@ -1135,15 +1177,18 @@ aclnnStatus aclnnIndexPutImplGetWorkspaceSize(aclTensor *selfRef,
   const aclTensor* valuesCast = values;
   const aclTensor* selfRefContiguous = selfRef;
   const aclTensor* valuesContiguous = values;
-  auto socVersion = GetCurrentPlatformInfo().GetSocVersion();
-  bool isIndexPutV2 = IsIndexPutV2Scene(selfRef, accumulate);
+  bool isIndexPutV2 = IsIndexPutV2Scene();
   bool nonContiguous = IsNonContiguousScene(selfRef, indices, values, allDefinedIndices, masks, indicesNum, masksNum, 
                         selfRefContiguous, valuesContiguous,  uniqueExecutor.get());    // 是否满足非连续场景条件
-  bool isSupportAiCpu = IsAiCPUSupportCheckIndicesArch3510(selfRef, allDefinedIndices, values);
+  bool isAiCpu = IsAiCPUSupportCheckIndicesArch3510(selfRef, allDefinedIndices, values);
   bool isHighPrecision = accumulate && (selfRef->GetDataType() == op::DataType::DT_FLOAT16 || 
                                         selfRef->GetDataType() == op::DataType::DT_BF16 ||selfRef->GetDataType() == op::DataType::DT_INT8 
                                         || selfRef->GetDataType() == op::DataType::DT_UINT8);
-  bool isNonContiguous = isIndexPutV2 && nonContiguous && !isSupportAiCpu && !isHighPrecision;         // 非连续+AiCore+IndexPutV2分支
+  bool isNonContiguous = isIndexPutV2 && nonContiguous && !isAiCpu && !isHighPrecision;    // 非连续+AiCore+IndexPutV2分支
+  OP_LOGI("isIndexPutV2 is %s", isIndexPutV2 ? "true" : "false");
+  OP_LOGI("nonContiguous is %s", nonContiguous ? "true" : "false");
+  OP_LOGI("isAiCpu is %s", isAiCpu ? "true" : "false");
+  OP_LOGI("isHighPrecision is %s", isHighPrecision ? "true" : "false");
   OP_LOGI("isNonContiguous is %s", isNonContiguous ? "true" : "false");
   int64_t indicesSize = static_cast<int64_t>(indices->Size());
   int64_t selfSize = selfCast->GetViewShape().GetDimNum();
@@ -1193,12 +1238,11 @@ aclnnStatus aclnnIndexPutImplGetWorkspaceSize(aclTensor *selfRef,
       if (retRts != RT_ERROR_NONE) {
           deterministicValue = 0;
       }
-      bool disDeterministicHighPrecision =
-          accumulate && deterministicValue == 0 &&
+      const bool useSortedV2Opt = l0op::IsUseSortedV2OptScene(isAiCpu, selfRef, indices, values, deterministicValue, accumulate, isNonContiguous);
+      const bool disDeterministicHighPrecision = accumulate && deterministicValue == 0 && !useSortedV2Opt &&
           (selfRef->GetDataType() == op::DataType::DT_FLOAT16 || selfRef->GetDataType() == op::DataType::DT_BF16 ||
            selfRef->GetDataType() == op::DataType::DT_INT8 || selfRef->GetDataType() == op::DataType::DT_UINT8);
-      bool DeterministicHighPrecision =
-          accumulate && deterministicValue == 1 &&
+      const bool DeterministicHighPrecision = accumulate && deterministicValue == 1 && !useSortedV2Opt &&
           (selfRef->GetDataType() == op::DataType::DT_FLOAT16 || selfRef->GetDataType() == op::DataType::DT_BF16);
       if (disDeterministicHighPrecision || DeterministicHighPrecision) {
           OP_LOGD("Begin cast fp16, bf16 to fp32");
@@ -1215,14 +1259,15 @@ aclnnStatus aclnnIndexPutImplGetWorkspaceSize(aclTensor *selfRef,
           CHECK_RET(valuesCast != nullptr, ACLNN_ERR_INNER_NULLPTR);
       }
     indexPutOpOut = IndexPutProcessArch3510(selfRef, selfCast, valuesCast, indices, allDefinedIndices, accumulate, masks, 
-                                          masksNum, isSupportAiCpu, isNonContiguous, uniqueExecutor.get());
+                                          masksNum, isAiCpu, isNonContiguous, useSortedV2Opt, uniqueExecutor.get());
     CHECK_RET(indexPutOpOut != nullptr, ACLNN_ERR_INNER_NULLPTR);
-    // 固定写法，将计算结果转换成输出out的数据类型
-    auto castOut = l0op::Cast(indexPutOpOut, selfRef->GetDataType(), uniqueExecutor.get());
-    CHECK_RET(castOut != nullptr, ACLNN_ERR_INNER_NULLPTR);
-
+    const aclTensor* arch3510Result = indexPutOpOut;
+    if (!useSortedV2Opt) {
+        arch3510Result = l0op::Cast(indexPutOpOut, selfRef->GetDataType(), uniqueExecutor.get());
+        CHECK_RET(arch3510Result != nullptr, ACLNN_ERR_INNER_NULLPTR);
+    }
     // 固定写法，将计算结果拷贝到输出out上，out可能是非连续的tensor
-    auto viewCopyResult = l0op::ViewCopy(castOut, selfRef, uniqueExecutor.get());
+    auto viewCopyResult = l0op::ViewCopy(arch3510Result, selfRef, uniqueExecutor.get());
     CHECK_RET(viewCopyResult != nullptr, ACLNN_ERR_INNER_NULLPTR);
 
     // 固定写法，获取计算过程中需要使用的workspace大小
@@ -1231,7 +1276,7 @@ aclnnStatus aclnnIndexPutImplGetWorkspaceSize(aclTensor *selfRef,
     return ACLNN_SUCCESS;
   }
   int64_t deterministicValue = 0;
-  rtError_t retRts = rtCtxGetSysParamOpt(SYS_OPT_DETERMINISTIC, &deterministicValue);
+  rtError_t retRts = aclrtGetSysParamOpt(ACL_OPT_DETERMINISTIC, &deterministicValue);
   if (retRts != RT_ERROR_NONE) {
       deterministicValue = 0;
   }

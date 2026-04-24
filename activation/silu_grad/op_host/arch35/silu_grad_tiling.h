@@ -20,7 +20,7 @@
 #include "register/op_impl_registry.h"
 #include "register/tilingdata_base.h"
 #include "atvoss/broadcast/broadcast_tiling.h"
-#include "tiling_base/tiling_base.h"
+#include "op_host/tiling_base.h"
 
 namespace optiling {
 
@@ -64,18 +64,18 @@ class SiluGradTiling : public Ops::NN::Optiling::TilingBaseClass {
     uint64_t GetTilingKey() const override;
     ge::graphStatus GetWorkspaceSize() override;
     ge::graphStatus PostTiling() override;
-    std::string ToString(SiluGradTilingData &tilingData);
+    std::string ToString(SiluGradTilingData &tilingDataParam) const;
 
    private:
-    uint64_t GetOpKey(ge::DataType dyDtype, ge::DataType xDtype, ge::DataType dxDtype);
-    uint64_t GenerateTilingKey(uint64_t innerKey);
-    std::map<uint64_t, Ops::Base::BroadcastComputeParams> GetComputeMap(uint64_t opKey);
+    uint64_t GetOpKey(ge::DataType dyDtype, ge::DataType xDtype, ge::DataType dxDtype) const;
+    uint64_t GenerateTilingKey(uint64_t innerKey) const;
+    std::map<uint64_t, Ops::Base::BroadcastComputeParams> GetComputeMap(uint64_t opKeyParam) const;
 
     SiluGradTilingData tilingData;
-    uint64_t opKey;
-    int64_t coreNum;
-    int64_t ubSize;
-    uint64_t blockNum;
+    uint64_t opKey = 0;
+    int64_t coreNum = 0;
+    int64_t ubSize = 0;
+    uint64_t blockNum = 0;
     int64_t input0Dims[SILU_GRAD_MAX_DIM_SIZE] = {0};
     int64_t input1Dims[SILU_GRAD_MAX_DIM_SIZE] = {0};
     int64_t outputDims[SILU_GRAD_MAX_DIM_SIZE] = {0};

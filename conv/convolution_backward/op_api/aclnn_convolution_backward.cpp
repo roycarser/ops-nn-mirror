@@ -41,6 +41,7 @@
 #include "runtime/context.h"
 #include "convolution_backward_checker.h"
 #include "convtbc_backward_checker.h"
+#include "acl/acl_rt.h"
 
 using namespace op;
 using namespace l0op;
@@ -358,6 +359,33 @@ static aclnnStatus InputPreProcess(const aclTensor *&inputTensor, const string &
            " return nullptr.", tensorName.c_str()), return ACLNN_ERR_INNER_NULLPTR);
   return ACLNN_SUCCESS;
 }
+
+static aclnnStatus BiasPreProcess(ConvolutionBackwardInputTensor &inputTensor, const string &tensorName,
+                                   ConvolutionBackwardParams &params, const op::DataType promoteDtype, aclOpExecutor *executor) {
+  if (params.cubeMathType == USE_FP16 && inputTensor.gradOutput->GetDataType() == op::DataType::DT_FLOAT && promoteDtype == op::DataType::DT_FLOAT) {
+    auto castedTensor = l0op::Cast(inputTensor.gradOutput, op::DataType::DT_FLOAT16, executor);
+    OP_CHECK(castedTensor != nullptr, OP_LOGE(ACLNN_ERR_INNER_NULLPTR, "The bias perprocess failed, %s with Cast DataType to DT_FLOAT16 return nullptr.",
+             tensorName.c_str()), return ACLNN_ERR_INNER_NULLPTR);
+    inputTensor.gradOutput = castedTensor;
+    castedTensor = l0op::Cast(inputTensor.gradOutput, op::DataType::DT_FLOAT, executor);
+    OP_CHECK(castedTensor != nullptr, OP_LOGE(ACLNN_ERR_INNER_NULLPTR, "The bias perprocess failed, %s with Cast DataType to DT_FLOAT return nullptr.",
+             tensorName.c_str()), return ACLNN_ERR_INNER_NULLPTR);
+    inputTensor.gradOutput = castedTensor;
+  }
+  return ACLNN_SUCCESS;
+}
+
+static aclnnStatus BiasReDtypeProcess(const aclTensor *&outputTensor, const string &tensorName,
+                                   ConvolutionBackwardParams &params, const op::DataType promoteDtype, aclOpExecutor *executor) {
+  if (params.cubeMathType == USE_FP16 && outputTensor->GetDataType() == op::DataType::DT_FLOAT && promoteDtype == op::DataType::DT_FLOAT) {
+    auto castedTensor  = l0op::Cast(outputTensor, op::DataType::DT_FLOAT16, executor);
+    OP_CHECK(castedTensor != nullptr, OP_LOGE(ACLNN_ERR_INNER_NULLPTR, "The bias perprocess failed, %s with Cast DataType to DT_FLOAT16 return nullptr.",
+             tensorName.c_str()), return ACLNN_ERR_INNER_NULLPTR);
+    outputTensor = castedTensor;
+  }
+  return ACLNN_SUCCESS;
+}
+
 static aclnnStatus OutputPostProcessTransposed(const aclTensor *&outputTensor, const aclTensor *&l0ResultTensor,
                                                const string &tensorName, aclOpExecutor *executor) {
   OP_LOGD("%s's l0func result before cast: %s", tensorName.c_str(), l0ResultTensor->ToString().GetString());
@@ -820,6 +848,7 @@ static aclnnStatus CalculateBiasGrad(ConvolutionBackwardInputTensor &inputTensor
                                      ConvolutionBackwardResult &outputTensor, ConvolutionBackwardParams &params,
                                      aclOpExecutor *executor) {
   auto curArch = GetCurrentPlatformInfo().GetCurNpuArch();
+  DataType promoteDtype = CalcPromoteType(inputTensor);
   // Index 为 2：进行bias grad运算
   if ((*params.outputMask)[2]) {
     OP_LOGD("Enter bias grad Calculate");
@@ -833,6 +862,8 @@ static aclnnStatus CalculateBiasGrad(ConvolutionBackwardInputTensor &inputTensor
               op::ToString(outputTensor.gradBias->GetDataType()).GetString()),
             return ACLNN_ERR_INNER_NULLPTR);
     }
+    CHECK_RET(BiasPreProcess(inputTensor, "bias", params, promoteDtype, executor) == ACLNN_SUCCESS, ACLNN_ERR_INNER_NULLPTR);
+
     auto gradContiguous = l0op::Contiguous(inputTensor.gradOutput, executor);
     op::Format gradOutputFormat = inputTensor.gradOutput->GetStorageFormat();
     int64_t reshapeListVal0 = inputTensor.gradOutput->GetViewShape().GetDim(1);
@@ -871,6 +902,7 @@ static aclnnStatus CalculateBiasGrad(ConvolutionBackwardInputTensor &inputTensor
     OP_CHECK(gradBiasResult != nullptr,
             OP_LOGE(ACLNN_ERR_INNER_NULLPTR, "The ReduceSumOp with gradOutput failed."),
             return ACLNN_ERR_INNER_NULLPTR);
+    BiasReDtypeProcess(gradBiasResult, "gradBias", params, promoteDtype, executor);
     OP_LOGD("gradBiasResult: %s", gradBiasResult->ToString().GetString());
     CHECK_RET(
         OutputPostProcess(outputTensor.gradBias, gradBiasResult, "gradBias", params.groups, executor) == ACLNN_SUCCESS,
@@ -1512,7 +1544,11 @@ static bool IsConvBpSupportMatmulMode(const aclTensor *inputTensor, const Convol
 
 static bool IsConv2DBp2MmMode(const ConvolutionBackwardInputTensor &inputTensor,
   const ConvolutionBackwardParams &params)
-{
+{ 
+  auto curArch = GetCurrentPlatformInfo().GetCurNpuArch();
+  if (curArch != NpuArch::DAV_2201) {
+    return false;
+  }
   // matmul暂时不支持8bit
   auto is8bit = [](const aclTensor *tensor) -> bool {
     auto dtype = tensor->GetDataType();
@@ -2688,12 +2724,29 @@ aclnnStatus aclnnConvolutionBackwardGetWorkspaceSize(
     auto ret = convolutionBackwardChecker.CheckParams();
     CHECK_RET(ret == ACLNN_SUCCESS, ret);
 
+    if (gradOutput != nullptr) {
+      auto gradOutputContiguous = l0op::Contiguous(gradOutput, uniqueExecutor.get());
+      CHECK_RET(gradOutputContiguous != nullptr, ACLNN_ERR_INNER_NULLPTR);
+      inputTensor.gradOutput = gradOutputContiguous;
+    }
+
+    if (input != nullptr) {
+      auto inputContiguous = l0op::Contiguous(input, uniqueExecutor.get());
+      CHECK_RET(inputContiguous != nullptr, ACLNN_ERR_INNER_NULLPTR);
+      inputTensor.input = inputContiguous;
+    }
+    if (weight != nullptr) {
+      auto weightContiguous = l0op::Contiguous(weight, uniqueExecutor.get());
+      CHECK_RET(weightContiguous != nullptr, ACLNN_ERR_INNER_NULLPTR);
+      inputTensor.weight = weightContiguous;
+    }
+
     // 检查conv3ddw确定性计算
     if ((*outputMask)[1] && (input->GetViewShape().GetDimNum() == CONV3DINPUTDIM ||
       (input->GetViewShape().GetDimNum() == CONV2DINPUTDIM && npuArch == NpuArch::DAV_3510))) {
       int64_t deterministicValue = 0;
-      rtError_t retRts = rtCtxGetSysParamOpt(SYS_OPT_DETERMINISTIC, &deterministicValue);
-      if (retRts != RT_ERROR_NONE) {
+      aclError aclRet = aclrtGetSysParamOpt(ACL_OPT_DETERMINISTIC, &deterministicValue);
+      if (aclRet != ACL_SUCCESS) {
         deterministicValue = 0;
       }
       if (npuArch != NpuArch::DAV_3510 && npuArch != NpuArch::DAV_2201) {
@@ -2852,6 +2905,27 @@ aclnnStatus aclnnConvTbcBackwardGetWorkspaceSize(const aclTensor *self, const ac
     Ops::NN::Conv::ConvTbcBackwardChecker convTbcBackwardChecker(inputTensor, outputTensor, tbcparams, npuArch);
     auto ret = convTbcBackwardChecker.CheckTbcParams();
     CHECK_RET(ret == ACLNN_SUCCESS, ret);
+
+    if (self != nullptr) {
+      auto selfContiguous = l0op::Contiguous(self, uniqueExecutor.get());
+      CHECK_RET(selfContiguous != nullptr, ACLNN_ERR_INNER_NULLPTR);
+      inputTensor.self = selfContiguous;
+    }
+    if (weight != nullptr) {
+      auto weightContiguous = l0op::Contiguous(weight, uniqueExecutor.get());
+      CHECK_RET(weightContiguous != nullptr, ACLNN_ERR_INNER_NULLPTR);
+      inputTensor.weight = weightContiguous;
+    }
+    if (input != nullptr) {
+      auto inputContiguous = l0op::Contiguous(input, uniqueExecutor.get());
+      CHECK_RET(inputContiguous != nullptr, ACLNN_ERR_INNER_NULLPTR);
+      inputTensor.input = inputContiguous;
+    }
+    if (bias != nullptr) {
+      auto biasContiguous = l0op::Contiguous(bias, uniqueExecutor.get());
+      CHECK_RET(biasContiguous != nullptr, ACLNN_ERR_INNER_NULLPTR);
+      inputTensor.bias = biasContiguous;
+    }
 
     // 设置param
     FVector<int64_t> newStride = {1};

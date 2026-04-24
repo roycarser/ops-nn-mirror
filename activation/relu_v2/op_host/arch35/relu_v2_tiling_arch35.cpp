@@ -21,7 +21,7 @@
 #include "register/tilingdata_base.h"
 #include "../op_kernel/arch35/relu_v2_dag.h"
 #include "../op_kernel/arch35/relu_v2_tiling_struct.h"
-#include "common/inc/tiling_base/tiling_util.h"
+#include "op_host/tiling_util.h"
 
 #include <iostream>
 
@@ -44,7 +44,7 @@ class ReluV2Tiling {
 public:
     explicit ReluV2Tiling(gert::TilingContext* context) : tilingContext(context) {};
     ge::graphStatus RunTiling();
-    ReluV2TilingData* tiling;
+    ReluV2TilingData* tiling = nullptr;
 
 protected:
     ge::graphStatus CalcOutputDtype();
@@ -54,8 +54,8 @@ protected:
 
 private:
     gert::TilingContext* tilingContext;
-    ge::DataType inputDtype;
-    ge::DataType outputDtype;
+    ge::DataType inputDtype = ge::DT_UNDEFINED;
+    ge::DataType outputDtype = ge::DT_UNDEFINED;
 };
 
 ge::graphStatus ReluV2Tiling::SetTilingData()

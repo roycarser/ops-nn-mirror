@@ -1,6 +1,6 @@
 # aclnnWeightQuantBatchMatmul
 
-**该接口后续版本会废弃，请使用[aclnnWeightQuantBatchMatmulV2](../../weight_quant_batch_matmul_v2/docs/aclnnWeightQuantBatchMatmulV2.md)、[aclnnWeightQuantBatchMatmulV3](../../weight_quant_batch_matmul_v2/docs/aclnnWeightQuantBatchMatmulV3.md)接口。**
+**须知：该接口后续版本会废弃，请使用最新aclnnWeightQuantBatchMatmulV3接口。**
 
 ## 产品支持情况
 
@@ -10,7 +10,7 @@
 | <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>     |    √       |
 | <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term> |    √     |
 | <term>Atlas 200I/500 A2 推理产品</term>                      |     ×     |
-| <term>Atlas 推理系列产品 </term>                             |   ×     |
+| <term>Atlas 推理系列产品</term>                             |   ×     |
 | <term>Atlas 训练系列产品</term>                              |   ×     |
 
 ## 功能说明
@@ -25,6 +25,7 @@
 ## 函数原型
 
 - [两段式接口](../../../docs/zh/context/两段式接口.md)，必须先调用 aclnnWeightQuantBatchMatmulGetWorkspaceSize 接口获取入参并根据计算流程计算所需workspace大小，再调用 aclnnWeightQuantBatchMatmul 接口执行计算。
+
 ```cpp
 aclnnStatus aclnnWeightQuantBatchMatmulGetWorkspaceSize(
   const aclTensor *x1, 
@@ -43,6 +44,7 @@ aclnnStatus aclnnWeightQuantBatchMatmulGetWorkspaceSize(
   uint64_t        *workspaceSize, 
   aclOpExecutor   **executor)
 ```
+
 ```cpp
 aclnnStatus aclnnWeightQuantBatchMatmul(
   void              *workspace, 
@@ -55,15 +57,15 @@ aclnnStatus aclnnWeightQuantBatchMatmul(
 
 - **参数说明**
 
-  <table style="undefined;table-layout: fixed; width: 1587px"><colgroup>
-  <col style="width: 159px">
-  <col style="width: 127px">
-  <col style="width: 230px">
-  <col style="width: 400px">
-  <col style="width: 249px">
-  <col style="width: 117px">
-  <col style="width: 117px">
-  <col style="width: 153px">
+  <table style="undefined;table-layout: fixed;width: 1555px"><colgroup>
+    <col style="width: 170px">
+    <col style="width: 120px">
+    <col style="width: 300px">
+    <col style="width: 350px">
+    <col style="width: 150px">
+    <col style="width: 120px">
+    <col style="width: 200px">
+    <col style="width: 145px">
   </colgroup>
   <thead>
     <tr>
@@ -235,10 +237,10 @@ aclnnStatus aclnnWeightQuantBatchMatmul(
 
   第一段接口完成入参校验，出现以下场景时报错：
 
-  <table style="undefined;table-layout: fixed; width: 887px"><colgroup>
-  <col style="width: 300px">
-  <col style="width: 200px">
-  <col style="width: 700px">
+  <table style="undefined;table-layout: fixed; width: 1149px"><colgroup>
+  <col style="width: 291px">
+  <col style="width: 135px">
+  <col style="width: 723px">
   </colgroup>
   <thead>
     <tr>
@@ -264,10 +266,10 @@ aclnnStatus aclnnWeightQuantBatchMatmul(
 
 - **参数说明**
 
-  <table style="undefined;table-layout: fixed; width: 1000px"><colgroup>
-  <col style="width: 230px">
-  <col style="width: 150px">
-  <col style="width: 750px">
+  <table style="undefined;table-layout: fixed; width: 1143px"><colgroup>
+  <col style="width: 184px">
+  <col style="width: 134px">
+  <col style="width: 825px">
   </colgroup>
   <thead>
     <tr>
@@ -302,7 +304,6 @@ aclnnStatus aclnnWeightQuantBatchMatmul(
 - **返回值：**
 
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
-
 
 ## 约束说明
 

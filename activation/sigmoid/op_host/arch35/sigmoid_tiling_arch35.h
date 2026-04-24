@@ -17,7 +17,7 @@
 #define AIR_CXX_RUNTIME_V2_OP_IMPL_SIGMOID_H_
 
 #include "register/op_def_registry.h"
-#include "tiling_base/tiling_base.h"
+#include "op_host/tiling_base.h"
 #include "op_common/atvoss/elewise/elewise_tiling.h"
 
 namespace optiling {
@@ -53,18 +53,18 @@ class SigmoidTiling : public Ops::NN::Optiling::TilingBaseClass {
     uint64_t GetTilingKey() const override;
     ge::graphStatus GetWorkspaceSize() override;
     ge::graphStatus PostTiling() override;
-    std::string ToString(SigmoidTilingData &tilingData_);
+    std::string ToString(SigmoidTilingData &tilingData_) const;
 
    private:
-    uint64_t GetOpKey(ge::DataType xDtype, ge::DataType yDtype);
-    uint64_t GenerateTilingKey(uint64_t innerKey);
-    std::map<uint64_t, Ops::Base::ComputeParams> GetComputeMap(uint64_t opKey_);
+    uint64_t GetOpKey(ge::DataType xDtype, ge::DataType yDtype) const;
+    uint64_t GenerateTilingKey(uint64_t innerKey) const;
+    std::map<uint64_t, Ops::Base::ComputeParams> GetComputeMap(uint64_t opKey_) const;
 
     SigmoidTilingData tilingData;
-    uint64_t opKey;
-    int64_t coreNum;
-    int64_t ubSize;
-    uint64_t blockNum;
+    uint64_t opKey = 0;
+    int64_t coreNum = 0;
+    int64_t ubSize = 0;
+    uint64_t blockNum = 0;
 };
 
 }  // namespace optiling

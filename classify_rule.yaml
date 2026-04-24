@@ -112,6 +112,9 @@ ops-nn:
       - activation/ge_glu_v2/op_kernel/ge_glu_v2.cpp
       - index/index/op_kernel
       - index/index/op_host
+      - index/embedding/op_host/**/arch35
+      - index/embedding/op_host/*.cpp
+      - index/embedding/op_kernel
       - index/embedding_bag/op_kernel/arch35/embedding_bag_regbase_common.h
       - index/embedding_bag/op_kernel/arch35/embedding_bag_regbase_1d_sum.h
       - index/embedding_bag/op_kernel/arch35/embedding_bag_regbase_1d_mean.h
@@ -190,6 +193,8 @@ ops-nn:
       - optim/apply_ftrl/tests/ut/op_host/test_apply_ftrl_infershape.cpp
       - optim/apply_ftrl/tests/ut/op_host/test_apple_ftrl_tiling.cpp
       - optim/apply_ftrl/tests/CMakeLists.txt
+      - quant/dynamic_quant_update_scatter/tests/ut/graph_plugin/CMakeLists.txt
+      - quant/dynamic_quant_update_scatter/tests/ut/graph_plugin/fusion_pass/CMakeLists.txt
       - matmul/fused_mat_mul/op_kernel/fused_mat_mul.cpp
       - matmul/weight_quant_batch_matmul_v2/op_host/op_tiling/arch35/weight_quant_batch_matmul_v2_basic_block_table.cpp
       - matmul/sparse4to2quant_matmul/op_kernel/*
@@ -294,6 +299,12 @@ ops-nn:
       - index/gather_v2/op_host/**/arch35
       - index/gather_v2/op_host/*.cpp
       - index/gather_v2/op_kernel
+      - index/concat_offset/op_host/**/arch35
+      - index/concat_offset/op_host/*.cpp
+      - index/concat_offset/op_kernel
+      - index/sparse_segment_mean/op_host/**/arch35
+      - index/sparse_segment_mean/op_host/*.cpp
+      - index/sparse_segment_mean/op_kernel
       - activation/sigmoid/op_host/**/arch35
       - activation/sigmoid/op_host/*.cpp
       - activation/sigmoid/op_kernel
@@ -392,6 +403,13 @@ HPTG1@ops-nn:
                 - ops/ops-nn/norm/group_norm_grad/op_host/group_norm_grad_empty_tiling_arch35.cpp
                 - ops/ops-nn/norm/group_norm_grad/op_kernel/arch35/
                 - ops/ops-nn/norm/group_norm_grad/op_kernel/group_norm_grad_apt.cpp
+                - ops/ops-nn/norm/group_norm_v2/op_host/arch35/group_norm_v2_tiling_arch35.cpp
+                - ops/ops-nn/norm/layer_norm_v3/op_host/arch35/layer_norm_v3_tiling_arch35.cpp
+                - ops/ops-nn/norm/layer_norm_v3/op_host/arch35/layer_norm_v3_tiling_base.cpp
+                - ops/ops-nn/norm/lp_norm_v2/op_host/arch35/lp_norm_v2_tiling_arch35.cpp
+                - ops/ops-nn/norm/lp_norm_v2/op_host/arch35/lp_norm_v2_tiling_arch35.h
+                - ops/ops-nn/norm/lp_norm_v2/op_kernel/arch35/lp_norm_v2_dag.h
+                - ops/ops-nn/norm/lp_norm_v2/op_kernel/arch35/lp_norm_v2_tiling_struct.h
                 - ops/ops-nn/norm/layer_norm_v4/op_host/config/ascend950/
                 - ops/ops-nn/norm/layer_norm_v4/op_host/layer_norm_v4_regbase_two_pass_perf_tiling.cpp
                 - ops/ops-nn/norm/layer_norm_v4/op_host/layer_norm_v4_welford_tiling.cpp
@@ -417,6 +435,24 @@ HPTG1@ops-nn:
                 - ops/ops-nn/norm/rms_norm/op_kernel/arch35/
                 - ops/ops-nn/norm/rms_norm_grad/op_host/rms_norm_grad_regbase_tiling.cpp
                 - ops/ops-nn/norm/rms_norm_grad/op_kernel/arch35/
+                - ops/ops-nn/norm/rms_norm_dynamic_mx_quant/op_host/rms_norm_dynamic_mx_quant_infershape.cpp
+                - ops/ops-nn/norm/rms_norm_dynamic_mx_quant/op_host/config/ascend950/rms_norm_dynamic_mx_quant_binary.json
+                - ops/ops-nn/norm/rms_norm_dynamic_mx_quant/op_host/config/ascend950/rms_norm_dynamic_mx_quant_simplified_key.ini
+                - ops/ops-nn/norm/rms_norm_dynamic_mx_quant/op_host/arch35/rms_norm_dynamic_mx_quant_tiling_arch35.h
+                - ops/ops-nn/norm/rms_norm_dynamic_mx_quant/op_host/arch35/rms_norm_dynamic_mx_quant_full_load_tiling.cpp
+                - ops/ops-nn/norm/rms_norm_dynamic_mx_quant/op_host/arch35/rms_norm_dynamic_mx_quant_base_tiling.cpp
+                - ops/ops-nn/norm/rms_norm_dynamic_mx_quant/op_host/rms_norm_dynamic_mx_quant_def.cpp
+                - ops/ops-nn/norm/rms_norm_dynamic_mx_quant/op_host/CMakeLists.txt
+                - ops/ops-nn/norm/rms_norm_dynamic_mx_quant/op_kernel/rms_norm_dynamic_mx_quant_apt.cpp
+                - ops/ops-nn/norm/rms_norm_dynamic_mx_quant/examples/test_aclnn_rms_norm_dynamic_mx_quant.cpp
+                - ops/ops-nn/norm/rms_norm_dynamic_mx_quant/docs/aclnnRmsNormDynamicMxQuant.md
+                - ops/ops-nn/norm/rms_norm_dynamic_mx_quant/op_graph/rms_norm_dynamic_mx_quant_proto.h
+                - ops/ops-nn/norm/rms_norm_dynamic_mx_quant/op_graph/CMakeLists.txt 
+                - ops/ops-nn/norm/rms_norm_dynamic_mx_quant/tests/CMakeLists.txt
+                - ops/ops-nn/norm/rms_norm_dynamic_mx_quant/tests/ut/CMakeLists.txt  
+                - ops/ops-nn/norm/rms_norm_dynamic_mx_quant/tests/ut/op_host/arch35/test_rms_norm_dynamic_mx_quant_tiling_arch35.cpp
+                - ops/ops-nn/norm/rms_norm_dynamic_mx_quant/tests/ut/op_host/test_rms_norm_dynamic_mx_quant_infershape.cpp
+                - ops/ops-nn/norm/rms_norm_dynamic_mx_quant/CMakeLists.txt
                 - ops/ops-nn/norm/add_rms_norm_quant/op_host/add_rms_norm_quant_tiling_arch35.cpp
                 - ops/ops-nn/norm/add_rms_norm_quant/op_kernel/arch35/
                 - ops/ops-nn/norm/add_rms_norm_cast/op_host/add_rms_norm_cast_tiling_arch35.cpp
@@ -428,6 +464,26 @@ HPTG1@ops-nn:
                 - ops/ops-nn/norm/add_layer_norm_quant/op_kernel/arch35/
                 - ops/ops-nn/norm/add_rms_norm/op_host/add_rms_norm_tiling_arch35.h
                 - ops/ops-nn/norm/add_rms_norm/op_kernel/arch35/
+                - ops/ops-nn/norm/group_norm_swish_grad/op_kernel/arch35/group_norm_swish_grad.h
+                - ops/ops-nn/norm/group_norm_swish_grad/op_host/config/ascend950/group_norm_swish_grad_simplified_key.ini
+                - ops/ops-nn/norm/group_norm_swish_grad/op_kernel/group_norm_swish_grad_apt.cpp
+                - ops/ops-nn/norm/group_norm_swish_grad/op_host/config/ascend950/group_norm_swish_grad_binary.json
+                - ops/ops-nn/norm/group_norm_swish_grad/op_host/group_norm_swish_grad_def.cpp
+                - ops/ops-nn/norm/group_norm_swish_grad/docs/aclnnGroupNormSwishGrad.md
+                - ops/ops-nn/norm/group_norm_swish/op_kernel/arch35/group_norm_swish_base.h
+                - ops/ops-nn/norm/group_norm_swish/op_kernel/arch35/group_norm_swish_hw1_b16.h
+                - ops/ops-nn/norm/group_norm_swish/op_kernel/arch35/group_norm_swish_hw1_b32.h
+                - ops/ops-nn/norm/group_norm_swish/op_kernel/arch35/group_norm_swish_large_b16.h
+                - ops/ops-nn/norm/group_norm_swish/op_kernel/arch35/group_norm_swish_large_b32.h
+                - ops/ops-nn/norm/group_norm_swish/op_kernel/arch35/group_norm_swish_norm_b16.h
+                - ops/ops-nn/norm/group_norm_swish/op_kernel/arch35/group_norm_swish_norm_b32.h
+                - ops/ops-nn/norm/group_norm_swish/op_kernel/arch35/group_norm_swish_small_b16.h
+                - ops/ops-nn/norm/group_norm_swish/op_kernel/arch35/group_norm_swish_small_b32.h
+                - ops/ops-nn/norm/group_norm_swish/op_kernel/group_norm_swish_apt.cpp
+                - ops/ops-nn/norm/group_norm_swish/op_host/config/ascend950/
+                - ops/ops-nn/norm/group_norm_swish/op_host/group_norm_swish_def.cpp
+                - ops/ops-nn/norm/group_norm_swish/docs/aclnnGroupNormSwish.md
+                - ops/ops-nn/norm/group_norm_swish/README.md
             opensource_style: null
             kernel_style: null
         unrelease:
@@ -439,15 +495,86 @@ conv_backward-c@ops-nn:
   src:
     release:
       style:
-        - ops/ops-nn/rnn/
-        - ops/ops-nn/pooling/
-        - ops/ops-nn/conv/conv3d_backprop_filter_v2/
-        - ops/ops-nn/conv/conv3d_backprop_input_v2/
-        - ops/ops-nn/conv/conv3d_transpose_v2/
-        - ops/ops-nn/conv/convolution_backward/
-        - ops/ops-nn/common/inc/
-        - ops/ops-nn/common/stub/
-        - ops/ops-nn/common/src/legacy_common_manager.cpp
+        - ops/ops-nn/rnn/dynamic_rnn/
+        - ops/ops-nn/rnn/dynamic_rnnv2/
+        - ops/ops-nn/rnn/single_layer_lstm_grad/
+        - ops/ops-nn/rnn/thnn_fused_lstm_cell/
+        - ops/ops-nn/rnn/thnn_fused_lstm_cell_grad/
+        - ops/ops-nn/pooling/adaptive_avg_pool3d/
+        - ops/ops-nn/pooling/adaptive_avg_pool3d_grad/
+        - ops/ops-nn/pooling/adaptive_max_pool2d/
+        - ops/ops-nn/pooling/adaptive_max_pool3d/
+        - ops/ops-nn/pooling/adaptive_max_pool3d_grad/
+        - ops/ops-nn/pooling/avg_pool3_d/
+        - ops/ops-nn/pooling/avg_pool3_d_grad/
+        - ops/ops-nn/pooling/max_pool3d_grad_with_argmax/docs/
+        - ops/ops-nn/pooling/max_pool3d_grad_with_argmax/op_api/
+        - ops/ops-nn/pooling/max_pool3d_grad_with_argmax/op_graph/
+        - ops/ops-nn/pooling/max_pool3d_grad_with_argmax/README.md
+        - ops/ops-nn/pooling/max_pool3d_grad_with_argmax/CMakeLists.txt
+        - ops/ops-nn/pooling/max_pool3d_with_argmax_v2/docs/
+        - ops/ops-nn/pooling/max_pool3d_with_argmax_v2/op_api/
+        - ops/ops-nn/pooling/max_pool3d_with_argmax_v2/op_graph/
+        - ops/ops-nn/pooling/max_pool3d_with_argmax_v2/README.md
+        - ops/ops-nn/pooling/max_pool3d_with_argmax_v2/CMakeLists.txt
+        - ops/ops-nn/pooling/max_pool_v3/docs/
+        - ops/ops-nn/pooling/max_pool_v3/op_api/
+        - ops/ops-nn/pooling/max_pool_v3/op_graph/
+        - ops/ops-nn/pooling/max_pool_v3/README.md
+        - ops/ops-nn/pooling/max_pool_v3/CMakeLists.txt
+        - ops/ops-nn/pooling/pool_3d_common/op_host/arch32/
+        - ops/ops-nn/pooling/pool_3d_common/op_kernel/arch32/
+        - ops/ops-nn/pooling/pool_3d_common/CMakeLists.txt
+        - ops/ops-nn/matmul/quant_batch_matmul_v3/
+        - ops/ops-nn/matmul/quant_batch_matmul_v4/
+        - ops/ops-nn/conv/conv3d_backprop_filter_v2/op_graph/
+        - ops/ops-nn/conv/conv3d_backprop_filter_v2/op_host/op_tiling/arch32/
+        - ops/ops-nn/conv/conv3d_backprop_filter_v2/op_host/op_tiling/common/
+        - ops/ops-nn/conv/conv3d_backprop_filter_v2/op_host/op_tiling/conv3d_backprop_filter_v2_tiling.cpp
+        - ops/ops-nn/conv/conv3d_backprop_filter_v2/op_host/conv3d_backprop_filter_v2_infershape.cpp
+        - ops/ops-nn/conv/conv3d_backprop_filter_v2/op_host/CMakeLists.txt
+        - ops/ops-nn/conv/conv3d_backprop_filter_v2/op_kernel/arch32/
+        - ops/ops-nn/conv/conv3d_backprop_filter_v2/op_kernel/arch35/conv3d_backprop/impl/dav_v310/conv_bp_sub_func_deterministic_common.h
+        - ops/ops-nn/conv/conv3d_backprop_filter_v2/op_kernel/conv3d_backprop_filter_v2.cpp
+        - ops/ops-nn/conv/conv3d_backprop_filter_v2/op_kernel/conv3d_backprop_filter_v2_tiling_key.h
+        - ops/ops-nn/conv/conv3d_backprop_filter_v2/README.md
+        - ops/ops-nn/conv/conv3d_backprop_filter_v2/CMakeLists.txt
+        - ops/ops-nn/conv/conv3d_backprop_input_v2/op_graph/
+        - ops/ops-nn/conv/conv3d_backprop_input_v2/op_host/op_tiling/arch32/
+        - ops/ops-nn/conv/conv3d_backprop_input_v2/op_host/op_tiling/common/
+        - ops/ops-nn/conv/conv3d_backprop_input_v2/op_host/op_tiling/conv3d_backprop_input_v2_tiling.cpp
+        - ops/ops-nn/conv/conv3d_backprop_input_v2/op_host/conv3d_backprop_input_v2_infershape.cpp
+        - ops/ops-nn/conv/conv3d_backprop_input_v2/op_host/CMakeLists.txt
+        - ops/ops-nn/conv/conv3d_backprop_input_v2/op_kernel/arch32/
+        - ops/ops-nn/conv/conv3d_backprop_input_v2/op_kernel/conv3d_backprop_input_v2.cpp
+        - ops/ops-nn/conv/conv3d_backprop_input_v2/op_kernel/conv3d_backprop_input_v2_tiling_key.h
+        - ops/ops-nn/conv/conv3d_backprop_input_v2/op_kernel/arch35/convolution_3d_backprop/conv3d_bp_common_func.h
+        - ops/ops-nn/conv/conv3d_backprop_input_v2/op_kernel/arch35/convolution_3d_backprop/conv3d_bp_impl_base.h
+        - ops/ops-nn/conv/conv3d_backprop_input_v2/README.md
+        - ops/ops-nn/conv/conv3d_backprop_input_v2/CMakeLists.txt
+        - ops/ops-nn/conv/conv3d_transpose_v2/op_graph/
+        - ops/ops-nn/conv/conv3d_transpose_v2/op_host/op_tiling/arch32/
+        - ops/ops-nn/conv/conv3d_transpose_v2/op_host/op_tiling/common/
+        - ops/ops-nn/conv/conv3d_transpose_v2/op_host/op_tiling/conv3d_transpose_v2_tiling.cpp
+        - ops/ops-nn/conv/conv3d_transpose_v2/op_host/conv3d_transpose_v2_def.cpp
+        - ops/ops-nn/conv/conv3d_transpose_v2/op_host/conv3d_transpose_v2_infershape.cpp
+        - ops/ops-nn/conv/conv3d_transpose_v2/op_host/CMakeLists.txt
+        - ops/ops-nn/conv/conv3d_transpose_v2/op_kernel/arch32/
+        - ops/ops-nn/conv/conv3d_transpose_v2/op_kernel/conv3d_transpose_v2.cpp
+        - ops/ops-nn/conv/conv3d_transpose_v2/op_kernel/conv3d_transpose_v2_tiling_key.h
+        - ops/ops-nn/conv/conv3d_transpose_v2/README.md
+        - ops/ops-nn/conv/conv3d_transpose_v2/CMakeLists.txt
+        - ops/ops-nn/conv/convolution_backward/docs/
+        - ops/ops-nn/conv/convolution_backward/op_api/aclnn_convolution_backward.cpp
+        - ops/ops-nn/conv/convolution_backward/op_api/convolution_backward_checker.cpp
+        - ops/ops-nn/conv/convolution_backward/op_api/convolutionbackward.cpp
+        - ops/ops-nn/conv/convolution_backward/op_api/convtbc_backward_checker.cpp
+        - ops/ops-nn/conv/convolution_backward/op_api/aclnn_convolution_backward.h
+        - ops/ops-nn/conv/convolution_backward/op_api/convolution_backward_checker.h
+        - ops/ops-nn/conv/convolution_backward/op_api/convolutionbackward.h
+        - ops/ops-nn/conv/convolution_backward/op_api/convtbc_backward_checker.h
+        - ops/ops-nn/conv/convolution_backward/README.md
+        - ops/ops-nn/conv/convolution_backward/CMakeLists.txt
       opensource_style: null
       kernel_style: null
     unrelease:
@@ -470,10 +597,18 @@ conv_backward-c@ops-nn:
         - ops/ops-nn/rnn/dynamic_rnn/examples/
         - ops/ops-nn/rnn/dynamic_rnnv2/tests/
         - ops/ops-nn/rnn/dynamic_rnnv2/examples/
+        - ops/ops-nn/rnn/single_layer_lstm_grad/tests/
+        - ops/ops-nn/rnn/single_layer_lstm_grad/examples/
+        - ops/ops-nn/rnn/thnn_fused_lstm_cell/tests/
+        - ops/ops-nn/rnn/thnn_fused_lstm_cell/examples/
+        - ops/ops-nn/rnn/thnn_fused_lstm_cell_grad/tests/
+        - ops/ops-nn/rnn/thnn_fused_lstm_cell_grad/examples/
         - ops/ops-nn/pooling/adaptive_avg_pool3d/tests/
         - ops/ops-nn/pooling/adaptive_avg_pool3d/examples/
         - ops/ops-nn/pooling/adaptive_avg_pool3d_grad/tests/
         - ops/ops-nn/pooling/adaptive_avg_pool3d_grad/examples/
+        - ops/ops-nn/pooling/adaptive_max_pool2d/tests/
+        - ops/ops-nn/pooling/adaptive_max_pool2d/examples/
         - ops/ops-nn/pooling/adaptive_max_pool3d/tests/
         - ops/ops-nn/pooling/adaptive_max_pool3d/examples/
         - ops/ops-nn/pooling/adaptive_max_pool3d_grad/tests/
@@ -488,29 +623,46 @@ conv_backward-c@ops-nn:
         - ops/ops-nn/pooling/max_pool3d_grad_with_argmax/examples/
         - ops/ops-nn/pooling/max_pool3d_with_argmax_v2/tests/
         - ops/ops-nn/pooling/max_pool3d_with_argmax_v2/examples/
+        - ops/ops-nn/common/inc/
+        - ops/ops-nn/common/stub/
+        - ops/ops-nn/common/src/legacy_common_manager.cpp
       non_delivery: null
       open_source: null
 conv_forward_ascendc@ops-nn:
   src:
     release:
       style:
-        - ops/ops-nn/conv/conv3d_v2/op_graph
-        - ops/ops-nn/conv/conv3d_v2/op_host/config/ascend950
-        - ops/ops-nn/conv/conv3d_v2/op_kernel/arch35
-        - ops/ops-nn/conv/conv3d_v2/op_kernel/conv3d_v2_apt.cpp
-        - ops/ops-nn/conv/quant_conv3d/op_host/quant_conv3d_def.cpp
-        - ops/ops-nn/conv/extend_conv2d/op_host/extend_conv2d_def.cpp
+        - ops/ops-nn/conv/common/op_host/op_tiling/arch35
+        - ops/ops-nn/conv/common/op_host/op_tiling/conv_tiling_templates_registry.h
+        - ops/ops-nn/conv/common/op_kernel/arch35
+        - ops/ops-nn/conv/common/op_graph
+        - ops/ops-nn/conv/common/op_graph/fusion_pass
+        - ops/ops-nn/conv/conv2d_v2/op_graph
+        - ops/ops-nn/conv/conv2d_v2/op_host/config/ascend950
         - ops/ops-nn/conv/conv2d_v2/op_host/conv2d_v2_def.cpp
-        - ops/ops-nn/conv/conv2d_v2/op_kernel/arch35/conv2d_v2_tilingkey.h
-        - ops/ops-nn/conv/conv2d_v2/op_kernel/arch35/conv2d_v2_inner_batch_tilingkey.h
-        - ops/ops-nn/conv/conv2d_v2/op_kernel/arch35/conv2d_v2_input_hwnc_tilingkey.h
-        - ops/ops-nn/conv/quant_conv3d/op_host/op_tiling/quant_conv3d_tiling.cpp
-        - ops/ops-nn/conv/extend_conv2d/op_host/op_tiling/extend_conv2d_tiling.cpp
+        - ops/ops-nn/conv/conv2d_v2/op_host/conv2d_v2_mdc_def.cpp
         - ops/ops-nn/conv/conv2d_v2/op_host/op_tiling/conv2d_v2_tiling.h
+        - ops/ops-nn/conv/conv2d_v2/op_host/op_tiling/conv2d_v2_mdc_tiling.cpp
         - ops/ops-nn/conv/conv2d_v2/op_host/op_tiling/conv2d_v2_tiling.cpp
         - ops/ops-nn/conv/conv2d_v2/op_host/op_tiling/arch35
-        - ops/ops-nn/conv/common/op_host/op_tiling/arch35
-        - ops/ops-nn/conv/common/op_kernel/arch35
+        - ops/ops-nn/conv/conv2d_v2/op_kernel/arch35
+        - ops/ops-nn/conv/conv2d_v2/op_kernel/conv2d_v2.cpp
+        - ops/ops-nn/conv/conv3d_v2/op_graph
+        - ops/ops-nn/conv/conv3d_v2/op_host/config/ascend950
+        - ops/ops-nn/conv/conv3d_v2/op_host/op_tiling/arch35
+        - ops/ops-nn/conv/conv3d_v2/op_kernel/arch35
+        - ops/ops-nn/conv/extend_conv2d/op_graph
+        - ops/ops-nn/conv/extend_conv2d/op_graph/fusion_pass
+        - ops/ops-nn/conv/extend_conv2d/op_host/config/ascend950
+        - ops/ops-nn/conv/extend_conv2d/op_host/extend_conv2d_def.cpp
+        - ops/ops-nn/conv/extend_conv2d/op_host/op_tiling/extend_conv2d_tiling.cpp
+        - ops/ops-nn/conv/extend_conv2d/op_host/op_kernel
+        - ops/ops-nn/conv/quant_conv3d/op_graph
+        - ops/ops-nn/conv/quant_conv3d/op_graph/fusion_pass
+        - ops/ops-nn/conv/quant_conv3d/op_host/quant_conv3d_def.cpp
+        - ops/ops-nn/conv/quant_conv3d/op_host/config/ascend950
+        - ops/ops-nn/conv/quant_conv3d/op_host/op_tiling/quant_conv3d_tiling.cpp
+        - ops/ops-nn/conv/quant_conv3d/op_host/op_kernel
         - ops/ops-nn/conv/convolution_forward/op_host/op_api/
       opensource_style: null
       kernel_style: null
@@ -524,16 +676,27 @@ convolution_backprop@ops-nn:
       style:
         - ops/ops-nn/conv/conv3d_backprop_input_v2/op_graph
         - ops/ops-nn/conv/conv3d_backprop_input_v2/op_host/op_tiling/arch35
-        - ops/ops-nn/conv/conv3d_backprop_input_v2/op_host/op_tiling/arch35/conv3d_backprop_input_v2_base_tiling.cpp
         - ops/ops-nn/conv/conv3d_backprop_input_v2/op_kernel/arch35
+        - ops/ops-nn/conv/conv3d_backprop_input_v2/op_kernel/arch35/conv3d_backprop_input_v2_arch35.h
+        - ops/ops-nn/conv/conv3d_backprop_input_v2/op_kernel/arch35/conv3d_backprop_input_v2/conv3d_dx_kernel_split_block.h
+        - ops/ops-nn/conv/conv3d_backprop_input_v2/op_kernel/arch35/conv3d_backprop_input_v2/conv3d_bp_common_func.h
         - ops/ops-nn/conv/conv3d_backprop_input_v2/op_kernel/arch35/conv3d_backprop_input_v2/conv3d_backprop_input_v2_tiling_data.h
+        - ops/ops-nn/conv/conv3d_backprop_input_v2/op_kernel/arch35/conv3d_backprop_input_v2/conv3d_backprop_input_v2.h
+        - ops/ops-nn/conv/conv3d_backprop_input_v2/op_kernel/arch35/conv3d_backprop_input_v2/conv3d_backprop_input_v2_init_output.h
+        - ops/ops-nn/conv/conv3d_backprop_input_v2/op_kernel/arch35/convolution_3d_backprop/conv3d_bp_util.h
+        - ops/ops-nn/conv/conv3d_backprop_input_v2/op_kernel/arch35/convolution_3d_backprop/conv3d_bp_func.h
         - ops/ops-nn/conv/conv3d_backprop_input_v2/op_kernel/conv3d_backprop_input_v2_arch35_tiling_key.h
         - ops/ops-nn/conv/conv3d_transpose_v2/op_graph
         - ops/ops-nn/conv/conv3d_transpose_v2/op_host/op_tiling/arch35
         - ops/ops-nn/conv/conv3d_transpose_v2/op_kernel/conv3d_transpose_v2_arch35_tiling_key.h
+        - ops/ops-nn/conv/conv3d_transpose_v2/op_kernel/arch35/conv3d_transpose_v2_arch35.h
         - ops/ops-nn/conv/conv3d_backprop_filter_v2/op_graph
         - ops/ops-nn/conv/conv3d_backprop_filter_v2/op_host/op_tiling/arch35
         - ops/ops-nn/conv/conv3d_backprop_filter_v2/op_kernel/arch35
+        - ops/ops-nn/conv/conv3d_backprop_filter_v2/op_kernel/arch35/conv3d_backprop/conv_bp_func.h
+        - ops/ops-nn/conv/conv3d_backprop_filter_v2/op_kernel/arch35/conv3d_backprop/conv_bp_impl_base.h
+        - ops/ops-nn/conv/conv3d_backprop_filter_v2/op_kernel/arch35/conv3d_backprop/impl/dav_v310/conv_bp_sub_func_deterministic_calculate.h
+        - ops/ops-nn/conv/conv3d_backprop_filter_v2/op_kernel/arch35/conv3d_backprop_filter_v2/conv3d_backprop_filter_v2.h
         - ops/ops-nn/conv/convolution_backward/op_api
         - ops/ops-nn/conv/common/op_host/conv_backprop_infershape.cpp
       opensource_style: null
@@ -543,13 +706,15 @@ convolution_backprop@ops-nn:
         - ops/ops-nn/conv/conv3d_transpose_v2/tests
         - ops/ops-nn/conv/conv3d_backprop_input_v2/tests
         - ops/ops-nn/conv/conv3d_backprop_filter_v2/tests
-      non_delivery: null
+      non_delivery:
+        - ops/ops-nn/conv/conv3d_backprop_input_v2/op_host/op_tiling/arch35/conv3d_backprop_input_v2_base_tiling.cpp
       open_source: null
 activation-c@ops-nn:
   src:
     release:
       style:
         - ops/ops-nn/activation/
+        - ops/ops-nn/rnn/bidirection_lstm/op_host/bidirection_lstm_tiling.cpp
       opensource_style: null
       kernel_style: null
     unrelease:
@@ -604,8 +769,8 @@ activation-c@ops-nn:
         - ops/ops-nn/activation/leaky_relu/examples/
         - ops/ops-nn/activation/leaky_relu_grad/tests/
         - ops/ops-nn/activation/leaky_relu_grad/examples/
-        - ops/ops-nn/activation/logsigmoid/tests/
-        - ops/ops-nn/activation/logsigmoid/examples/
+        - ops/ops-nn/activation/log_sigmoid/tests/
+        - ops/ops-nn/activation/log_sigmoid/examples/
         - ops/ops-nn/activation/logsigmoid_grad/tests/
         - ops/ops-nn/activation/logsigmoid_grad/examples/
         - ops/ops-nn/activation/logsoftmax_grad/tests/
@@ -616,8 +781,8 @@ activation-c@ops-nn:
         - ops/ops-nn/activation/mish/examples/
         - ops/ops-nn/activation/mish_grad/tests/
         - ops/ops-nn/activation/mish_grad/examples/
-        - ops/ops-nn/activation/prelu/tests/
-        - ops/ops-nn/activation/prelu/examples/
+        - ops/ops-nn/activation/p_relu/tests/
+        - ops/ops-nn/activation/p_relu/examples/
         - ops/ops-nn/activation/prelu_grad_update/tests/
         - ops/ops-nn/activation/prelu_grad_update/examples/
         - ops/ops-nn/activation/relu/tests/
@@ -682,10 +847,6 @@ vfusion-c@ops-nn:
         - ops/ops-nn/vfusion/multi_scale_deformable_attention_grad/examples/
         - ops/ops-nn/vfusion/multi_scale_deformable_attn_function/tests/
         - ops/ops-nn/vfusion/multi_scale_deformable_attn_function/examples/
-        - ops/ops-nn/vfusion/norm_rope_concat/tests/
-        - ops/ops-nn/vfusion/norm_rope_concat/examples/
-        - ops/ops-nn/vfusion/norm_rope_concat_grad/tests/
-        - ops/ops-nn/vfusion/norm_rope_concat_grad/examples/
         - ops/ops-nn/vfusion/scaled_masked_softmax_grad_v2/tests/
         - ops/ops-nn/vfusion/scaled_masked_softmax_grad_v2/examples/
         - ops/ops-nn/vfusion/scaled_masked_softmax_v2/tests/
@@ -744,6 +905,21 @@ matmul-c@ops-nn:
         - ops/ops-nn/matmul/weight_quant_batch_matmul_v2/examples/
         - ops/ops-nn/matmul/dual_level_quant_batch_matmul/tests/
         - ops/ops-nn/matmul/dual_level_quant_batch_matmul/examples/
+        - ops/ops-nn/matmul/weight_quant_batch_matmul_v2/op_kernel/weight_quant_batch_matmul_v2_kernel_tiling_key.h
+        - ops/ops-nn/matmul/quant_batch_matmul_v4/op_host/quant_batch_matmul_v4_def.cpp
+        - ops/ops-nn/matmul/quant_batch_matmul_v3/op_host/quant_batch_matmul_v3_def.cpp
+        - ops/ops-nn/matmul/weight_quant_batch_matmul_v2/op_host/weight_quant_batch_matmul_v2_def.cpp
+        - ops/ops-nn/matmul/fused_quant_mat_mul/op_host/fused_quant_mat_mul_def.cpp
+        - ops/ops-nn/matmul/fused_mat_mul/examples/arch35/test_aclnn_fused_mat_mul_relu.cpp
+        - ops/ops-nn/matmul/fused_mat_mul/examples/arch35/test_aclnn_fused_mat_mul_gelu.cpp
+        - ops/ops-nn/matmul/fused_mat_mul/examples/arch35/test_aclnn_fused_mat_mul.cpp
+        - ops/ops-nn/matmul/transpose_quant_batch_mat_mul/examples/arch35/test_aclnn_transpose_quant_batch_mat_mul.cpp
+        - ops/ops-nn/matmul/batch_mat_mul_v3/op_host/batch_mat_mul_v3_def.cpp
+        - ops/ops-nn/matmul/mat_mul_v3/op_host/mat_mul_v3_def.cpp
+        - ops/ops-nn/matmul/gemm_v3/examples/arch35/test_aclnn_gemmv3.cpp
+        - ops/ops-nn/matmul/sparse4to2quant_matmul/examples/test_aclnn_sparse4to2quant_matmul.cpp
+        - ops/ops-nn/matmul/quant_matmul_reduce_sum/examples/test_aclnn_quant_matmul_reduce_sum_weight_nz.cpp
+        - ops/ops-nn/matmul/quant_batch_matmul_inplace_add/examples/arch35/test_aclnn_quant_batch_matmul_inplace_add_mxfp8.cpp
       non_delivery: null
       open_source: null
 
@@ -823,163 +999,312 @@ norm-c@ops-nn:
   src:
     release:
       style:
+        - ops/ops-nn/conv/deformable_conv2d/
         - ops/ops-nn/norm/ada_layer_norm/
         - ops/ops-nn/norm/ada_layer_norm_quant/
         - ops/ops-nn/norm/ada_layer_norm_v2/
-        - ops/ops-nn/norm/add_layer_norm/
-        - ops/ops-nn/norm/add_layer_norm_grad/
-        - ops/ops-nn/norm/add_layer_norm_quant/
-        - ops/ops-nn/norm/add_rms_norm/
-        - ops/ops-nn/norm/add_rms_norm_cast/
-        - ops/ops-nn/norm/add_rms_norm_dynamic_quant/
-        - ops/ops-nn/norm/add_rms_norm_dynamic_quant_v2/
-        - ops/ops-nn/norm/add_rms_norm_quant/
-        - ops/ops-nn/norm/add_rms_norm_quant_v2/
+        - ops/ops-nn/norm/add_layer_norm/op_graph/add_layer_norm_proto.h
+        - ops/ops-nn/norm/add_layer_norm/op_host/add_layer_norm_def.cpp
+        - ops/ops-nn/norm/add_layer_norm/op_host/add_layer_norm_infershape.cpp
+        - ops/ops-nn/norm/add_layer_norm/op_host/add_layer_norm_tiling.cpp
+        - ops/ops-nn/norm/add_layer_norm/op_host/add_layer_norm_tiling.h
+        - ops/ops-nn/norm/add_layer_norm/op_kernel/add_layer_norm.cpp
+        - ops/ops-nn/norm/add_layer_norm/op_kernel/add_layer_norm_base.h
+        - ops/ops-nn/norm/add_layer_norm/op_kernel/add_layer_norm_kernel.h
+        - ops/ops-nn/norm/add_layer_norm/op_kernel/add_layer_norm_normal_special_reduce.h
+        - ops/ops-nn/norm/add_layer_norm/op_kernel/add_layer_norm_single_row_less_tensor.h
+        - ops/ops-nn/norm/add_layer_norm/op_kernel/add_layer_norm_special_kernel.h
+        - ops/ops-nn/norm/add_layer_norm_grad/op_graph/add_layer_norm_grad_proto.h
+        - ops/ops-nn/norm/add_layer_norm_grad/op_host/add_layer_norm_grad_def.cpp
+        - ops/ops-nn/norm/add_layer_norm_grad/op_host/add_layer_norm_grad_infershape.cpp
+        - ops/ops-nn/norm/add_layer_norm_grad/op_host/add_layer_norm_grad_tiling.cpp
+        - ops/ops-nn/norm/add_layer_norm_grad/op_host/add_layer_norm_grad_tiling.h
+        - ops/ops-nn/norm/add_layer_norm_grad/op_kernel/add_layer_norm_determinstic_compute.h
+        - ops/ops-nn/norm/add_layer_norm_grad/op_kernel/add_layer_norm_grad.cpp
+        - ops/ops-nn/norm/add_layer_norm_grad/op_kernel/add_layer_norm_grad_cut_d.h
+        - ops/ops-nn/norm/add_layer_norm_grad/op_kernel/add_layer_norm_grad_cut_n.h
+        - ops/ops-nn/norm/add_layer_norm_grad/op_kernel/add_layer_norm_grad_utils.h
+        - ops/ops-nn/norm/add_layer_norm_quant/op_graph/add_layer_norm_quant_proto.h
+        - ops/ops-nn/norm/add_layer_norm_quant/op_host/add_layer_norm_quant_def.cpp
+        - ops/ops-nn/norm/add_layer_norm_quant/op_host/add_layer_norm_quant_empty_tiling.cpp
+        - ops/ops-nn/norm/add_layer_norm_quant/op_host/add_layer_norm_quant_infershape.cpp
+        - ops/ops-nn/norm/add_layer_norm_quant/op_host/add_layer_norm_quant_tiling.cpp
+        - ops/ops-nn/norm/add_layer_norm_quant/op_host/add_layer_norm_quant_tiling.h
+        - ops/ops-nn/norm/add_layer_norm_quant/op_host/op_api/aclnn_add_layer_norm_quant.cpp
+        - ops/ops-nn/norm/add_layer_norm_quant/op_host/op_api/aclnn_add_layer_norm_quant.h
+        - ops/ops-nn/norm/add_layer_norm_quant/op_host/op_api/add_layer_norm_quant.cpp
+        - ops/ops-nn/norm/add_layer_norm_quant/op_host/op_api/add_layer_norm_quant.h
+        - ops/ops-nn/norm/add_layer_norm_quant/op_kernel/add_layer_norm_dynamic_quant_normal_kernel.h
+        - ops/ops-nn/norm/add_layer_norm_quant/op_kernel/add_layer_norm_dynamic_quant_single_row_kernel.h
+        - ops/ops-nn/norm/add_layer_norm_quant/op_kernel/add_layer_norm_quant.cpp
+        - ops/ops-nn/norm/add_layer_norm_quant/op_kernel/add_layer_norm_quant_base.h
+        - ops/ops-nn/norm/add_layer_norm_quant/op_kernel/add_layer_norm_quant_helper.h
+        - ops/ops-nn/norm/add_layer_norm_quant/op_kernel/add_layer_norm_static_quant_normal_kernel.h
+        - ops/ops-nn/norm/add_layer_norm_quant/op_kernel/add_layer_norm_static_quant_single_row_kernel.h
+        - ops/ops-nn/norm/add_layer_norm_quant/op_kernel/reduce_common.h
+        - ops/ops-nn/norm/add_rms_norm/op_graph/add_rms_norm_proto.h
+        - ops/ops-nn/norm/add_rms_norm/op_host/add_rms_norm_def.cpp
+        - ops/ops-nn/norm/add_rms_norm/op_host/add_rms_norm_infershape.cpp
+        - ops/ops-nn/norm/add_rms_norm/op_host/add_rms_norm_tiling.cpp
+        - ops/ops-nn/norm/add_rms_norm/op_host/add_rms_norm_tiling.h
+        - ops/ops-nn/norm/add_rms_norm/op_host/op_api/aclnn_add_rms_norm.cpp
+        - ops/ops-nn/norm/add_rms_norm/op_host/op_api/aclnn_add_rms_norm.h
+        - ops/ops-nn/norm/add_rms_norm/op_host/op_api/add_rms_norm.cpp
+        - ops/ops-nn/norm/add_rms_norm/op_host/op_api/add_rms_norm.h
+        - ops/ops-nn/norm/add_rms_norm/op_kernel/add_rms_norm.cpp
+        - ops/ops-nn/norm/add_rms_norm/op_kernel/add_rms_norm.h
+        - ops/ops-nn/norm/add_rms_norm/op_kernel/add_rms_norm_base.h
+        - ops/ops-nn/norm/add_rms_norm/op_kernel/add_rms_norm_merge_n.h
+        - ops/ops-nn/norm/add_rms_norm/op_kernel/add_rms_norm_multi_n.h
+        - ops/ops-nn/norm/add_rms_norm/op_kernel/add_rms_norm_single_n.h
+        - ops/ops-nn/norm/add_rms_norm/op_kernel/add_rms_norm_split_d.h
+        - ops/ops-nn/norm/add_rms_norm_cast/op_graph/add_rms_norm_cast_proto.h
+        - ops/ops-nn/norm/add_rms_norm_cast/op_host/add_rms_norm_cast_def.cpp
+        - ops/ops-nn/norm/add_rms_norm_cast/op_host/add_rms_norm_cast_infershape.cpp
+        - ops/ops-nn/norm/add_rms_norm_cast/op_host/add_rms_norm_cast_tiling.cpp
+        - ops/ops-nn/norm/add_rms_norm_cast/op_host/add_rms_norm_cast_tiling.h
+        - ops/ops-nn/norm/add_rms_norm_cast/op_kernel/add_rms_norm_cast.cpp
+        - ops/ops-nn/norm/add_rms_norm_cast/op_kernel/add_rms_norm_cast.h
+        - ops/ops-nn/norm/add_rms_norm_cast/op_kernel/add_rms_norm_cast_multi_n.h
+        - ops/ops-nn/norm/add_rms_norm_cast/op_kernel/add_rms_norm_cast_single_n.h
+        - ops/ops-nn/norm/add_rms_norm_cast/op_kernel/add_rms_norm_cast_split_d.h
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant/op_graph/add_rms_norm_dynamic_quant_proto.h
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant/op_host/add_rms_norm_dynamic_quant_def.cpp
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant/op_host/add_rms_norm_dynamic_quant_infershape.cpp
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant/op_host/add_rms_norm_dynamic_quant_tiling.cpp
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant/op_host/add_rms_norm_dynamic_quant_tiling.h
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant/op_host/add_rms_norm_dynamic_quant_tiling_empty.cpp
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant/op_host/op_api/aclnn_add_rms_norm_dynamic_quant.cpp
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant/op_host/op_api/aclnn_add_rms_norm_dynamic_quant.h
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant/op_host/op_api/aclnn_add_rms_norm_dynamic_quant_v2.cpp
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant/op_host/op_api/aclnn_add_rms_norm_dynamic_quant_v2.h
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant/op_host/op_api/add_rms_norm_dynamic_quant.cpp
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant/op_host/op_api/add_rms_norm_dynamic_quant.h
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant/op_kernel/add_rms_norm_dynamic_quant.cpp
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant/op_kernel/add_rms_norm_dynamic_quant_base.h
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant/op_kernel/add_rms_norm_dynamic_quant_cut_d_kernel.h
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant/op_kernel/add_rms_norm_dynamic_quant_helper.h
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant/op_kernel/add_rms_norm_dynamic_quant_normal_kernel.h
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant/op_kernel/add_rms_norm_dynamic_quant_single_row_kernel.h
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant/op_kernel/reduce_common.h
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant_v2/op_graph/add_rms_norm_dynamic_quant_v2_proto.h
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant_v2/op_host/add_rms_norm_dynamic_quant_v2_def.cpp
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant_v2/op_host/add_rms_norm_dynamic_quant_v2_infershape.cpp
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant_v2/op_host/add_rms_norm_dynamic_quant_v2_tiling.cpp
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant_v2/op_host/add_rms_norm_dynamic_quant_v2_tiling.h
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant_v2/op_kernel/add_rms_norm_dynamic_quant_v2.cpp
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant_v2/op_kernel/add_rms_norm_dynamic_quant_v2_base.h
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant_v2/op_kernel/add_rms_norm_dynamic_quant_v2_cut_d_kernel.h
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant_v2/op_kernel/add_rms_norm_dynamic_quant_v2_helper.h
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant_v2/op_kernel/add_rms_norm_dynamic_quant_v2_normal_kernel.h
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant_v2/op_kernel/add_rms_norm_dynamic_quant_v2_single_row_kernel.h
+        - ops/ops-nn/norm/add_rms_norm_dynamic_quant_v2/op_kernel/reduce_common.h
+        - ops/ops-nn/norm/add_rms_norm_quant/op_graph/add_rms_norm_quant_proto.h
+        - ops/ops-nn/norm/add_rms_norm_quant/op_host/add_rms_norm_quant_def.cpp
+        - ops/ops-nn/norm/add_rms_norm_quant/op_host/add_rms_norm_quant_infershape.cpp
+        - ops/ops-nn/norm/add_rms_norm_quant/op_host/add_rms_norm_quant_tiling.cpp
+        - ops/ops-nn/norm/add_rms_norm_quant/op_host/add_rms_norm_quant_tiling.h
+        - ops/ops-nn/norm/add_rms_norm_quant/op_host/op_api/aclnn_add_rms_norm_quant.cpp
+        - ops/ops-nn/norm/add_rms_norm_quant/op_host/op_api/aclnn_add_rms_norm_quant.h
+        - ops/ops-nn/norm/add_rms_norm_quant/op_host/op_api/aclnn_add_rms_norm_quant_v2.h
+        - ops/ops-nn/norm/add_rms_norm_quant/op_host/op_api/add_rms_norm_quant.cpp
+        - ops/ops-nn/norm/add_rms_norm_quant/op_host/op_api/add_rms_norm_quant.h
+        - ops/ops-nn/norm/add_rms_norm_quant/op_kernel/add_rms_norm_quant.cpp
+        - ops/ops-nn/norm/add_rms_norm_quant/op_kernel/add_rms_norm_quant.h
+        - ops/ops-nn/norm/add_rms_norm_quant/op_kernel/add_rms_norm_quant_base.h
+        - ops/ops-nn/norm/add_rms_norm_quant/op_kernel/add_rms_norm_quant_single_n.h
+        - ops/ops-nn/norm/add_rms_norm_quant/op_kernel/add_rms_norm_quant_split_d.h
+        - ops/ops-nn/norm/add_rms_norm_quant/op_kernel/reduce_common.h
+        - ops/ops-nn/norm/add_rms_norm_quant_v2/op_host/add_rms_norm_quant_v2_def.cpp
+        - ops/ops-nn/norm/add_rms_norm_quant_v2/op_host/op_api/aclnn_add_rms_norm_quant_v2.cpp
+        - ops/ops-nn/norm/add_rms_norm_quant_v2/op_host/op_api/aclnn_add_rms_norm_quant_v2.h
+        - ops/ops-nn/norm/add_rms_norm_quant_v2/op_kernel/add_rms_norm_quant_v2.cpp
         - ops/ops-nn/norm/batch_norm_elemt/
-        - ops/ops-nn/norm/batch_norm_grad_v3/
-        - ops/ops-nn/norm/batch_norm_v3/
+        - ops/ops-nn/norm/batch_norm_grad_v3/op_graph/batch_norm_grad_v3_proto.h
+        - ops/ops-nn/norm/batch_norm_grad_v3/op_host/batch_norm_grad_v3_base_tiling.cpp
+        - ops/ops-nn/norm/batch_norm_grad_v3/op_host/batch_norm_grad_v3_base_tiling.h
+        - ops/ops-nn/norm/batch_norm_grad_v3/op_host/batch_norm_grad_v3_def.cpp
+        - ops/ops-nn/norm/batch_norm_grad_v3/op_host/batch_norm_grad_v3_fullload_tiling.cpp
+        - ops/ops-nn/norm/batch_norm_grad_v3/op_host/batch_norm_grad_v3_infershape.cpp
+        - ops/ops-nn/norm/batch_norm_grad_v3/op_host/batch_norm_grad_v3_splitload_crosscore_tiling.cpp
+        - ops/ops-nn/norm/batch_norm_grad_v3/op_host/batch_norm_grad_v3_splitload_tiling.cpp
+        - ops/ops-nn/norm/batch_norm_grad_v3/op_host/op_api/aclnn_batch_norm_backward.cpp
+        - ops/ops-nn/norm/batch_norm_grad_v3/op_host/op_api/aclnn_batch_norm_backward.h
+        - ops/ops-nn/norm/batch_norm_grad_v3/op_host/op_api/aclnn_fast_batch_norm_backward.cpp
+        - ops/ops-nn/norm/batch_norm_grad_v3/op_host/op_api/aclnn_fast_batch_norm_backward.h
+        - ops/ops-nn/norm/batch_norm_grad_v3/op_host/op_api/batch_norm_backward.cpp
+        - ops/ops-nn/norm/batch_norm_grad_v3/op_host/op_api/batch_norm_backward.h
+        - ops/ops-nn/norm/batch_norm_grad_v3/op_kernel/batch_norm_grad_v3.cpp
+        - ops/ops-nn/norm/batch_norm_grad_v3/op_kernel/batch_norm_grad_v3_base_common.h
+        - ops/ops-nn/norm/batch_norm_grad_v3/op_kernel/batch_norm_grad_v3_fullLoad_common.h
+        - ops/ops-nn/norm/batch_norm_grad_v3/op_kernel/batch_norm_grad_v3_infer_fullLoad.h
+        - ops/ops-nn/norm/batch_norm_grad_v3/op_kernel/batch_norm_grad_v3_infer_splitLoad.h
+        - ops/ops-nn/norm/batch_norm_grad_v3/op_kernel/batch_norm_grad_v3_infer_splitLoad_crossCore.h
+        - ops/ops-nn/norm/batch_norm_grad_v3/op_kernel/batch_norm_grad_v3_splitLoad_common.h
+        - ops/ops-nn/norm/batch_norm_grad_v3/op_kernel/batch_norm_grad_v3_splitLoad_crosscore_common.h
+        - ops/ops-nn/norm/batch_norm_grad_v3/op_kernel/batch_norm_grad_v3_train_fullLoad.h
+        - ops/ops-nn/norm/batch_norm_grad_v3/op_kernel/batch_norm_grad_v3_train_splitLoad.h
+        - ops/ops-nn/norm/batch_norm_grad_v3/op_kernel/batch_norm_grad_v3_train_splitLoad_crossCore.h
+        - ops/ops-nn/norm/batch_norm_v3/op_graph/batch_norm_v3_proto.h
+        - ops/ops-nn/norm/batch_norm_v3/op_host/batch_norm_v3_def.cpp
+        - ops/ops-nn/norm/batch_norm_v3/op_host/batch_norm_v3_full_reduce_tiling.cpp
+        - ops/ops-nn/norm/batch_norm_v3/op_host/batch_norm_v3_infershape.cpp
+        - ops/ops-nn/norm/batch_norm_v3/op_host/batch_norm_v3_tiling.cpp
+        - ops/ops-nn/norm/batch_norm_v3/op_host/batch_norm_v3_tiling.h
+        - ops/ops-nn/norm/batch_norm_v3/op_host/batch_norm_v3_tiling_base.cpp
+        - ops/ops-nn/norm/batch_norm_v3/op_host/batch_norm_v3_welford_tiling.cpp
+        - ops/ops-nn/norm/batch_norm_v3/op_host/op_api/aclnn_batch_norm.cpp
+        - ops/ops-nn/norm/batch_norm_v3/op_host/op_api/aclnn_batch_norm.h
+        - ops/ops-nn/norm/batch_norm_v3/op_host/op_api/batch_norm.cpp
+        - ops/ops-nn/norm/batch_norm_v3/op_host/op_api/batch_norm.h
+        - ops/ops-nn/norm/batch_norm_v3/op_kernel/batch_norm_v3.cpp
+        - ops/ops-nn/norm/batch_norm_v3/op_kernel/batch_norm_v3_base.h
+        - ops/ops-nn/norm/batch_norm_v3/op_kernel/batch_norm_v3_full_reduce.h
+        - ops/ops-nn/norm/batch_norm_v3/op_kernel/batch_norm_v3_welford.h
         - ops/ops-nn/norm/bn_training_reduce/
         - ops/ops-nn/norm/deep_norm/
         - ops/ops-nn/norm/deep_norm_grad/
         - ops/ops-nn/norm/dua_quantize_add_layer_norm/
-        - ops/ops-nn/norm/gemma_rms_norm/
+        - ops/ops-nn/norm/gemma_rms_norm/op_graph/gemma_rms_norm_proto.h
+        - ops/ops-nn/norm/gemma_rms_norm/op_host/gemma_rms_norm_def.cpp
+        - ops/ops-nn/norm/gemma_rms_norm/op_kernel/gemma_rms_norm.cpp
         - ops/ops-nn/norm/group_norm/
-        - ops/ops-nn/norm/group_norm_grad/
+        - ops/ops-nn/norm/group_norm_grad/op_graph/group_norm_grad_proto.h
+        - ops/ops-nn/norm/group_norm_grad/op_host/group_norm_grad_def.cpp
+        - ops/ops-nn/norm/group_norm_grad/op_host/group_norm_grad_infershape.cpp
+        - ops/ops-nn/norm/group_norm_grad/op_host/group_norm_grad_tiling.cpp
+        - ops/ops-nn/norm/group_norm_grad/op_host/group_norm_grad_tiling.h
+        - ops/ops-nn/norm/group_norm_grad/op_host/op_api/aclnn_group_norm_backward.cpp
+        - ops/ops-nn/norm/group_norm_grad/op_host/op_api/aclnn_group_norm_backward.h
+        - ops/ops-nn/norm/group_norm_grad/op_host/op_api/group_norm_grad.cpp
+        - ops/ops-nn/norm/group_norm_grad/op_host/op_api/group_norm_grad.h
+        - ops/ops-nn/norm/group_norm_grad/op_kernel/group_norm_grad.cpp
+        - ops/ops-nn/norm/group_norm_grad/op_kernel/group_norm_grad.h
         - ops/ops-nn/norm/inplace_add_layer_norm/
-        - ops/ops-nn/norm/inplace_add_rms_norm/
+        - ops/ops-nn/norm/inplace_add_rms_norm/op_graph/inplace_add_rms_norm_proto.h
+        - ops/ops-nn/norm/inplace_add_rms_norm/op_host/inplace_add_rms_norm_def.cpp
+        - ops/ops-nn/norm/inplace_add_rms_norm/op_kernel/inplace_add_rms_norm.cpp
         - ops/ops-nn/norm/instance_norm_v3/
-        - ops/ops-nn/norm/layer_norm_grad_v3/
-        - ops/ops-nn/norm/layer_norm_v4/
-        - ops/ops-nn/norm/lp_norm_v2/
-        - ops/ops-nn/norm/norm_common/
+        - ops/ops-nn/norm/layer_norm_grad_v3/op_graph/layer_norm_grad_v3_proto.h
+        - ops/ops-nn/norm/layer_norm_grad_v3/op_host/layer_norm_grad_v3_common_tiling.cpp
+        - ops/ops-nn/norm/layer_norm_grad_v3/op_host/layer_norm_grad_v3_def.cpp
+        - ops/ops-nn/norm/layer_norm_grad_v3/op_host/layer_norm_grad_v3_infershape.cpp
+        - ops/ops-nn/norm/layer_norm_grad_v3/op_host/layer_norm_grad_v3_single_read_tiling.cpp
+        - ops/ops-nn/norm/layer_norm_grad_v3/op_host/layer_norm_grad_v3_tiling.cpp
+        - ops/ops-nn/norm/layer_norm_grad_v3/op_host/layer_norm_grad_v3_tiling_base.cpp
+        - ops/ops-nn/norm/layer_norm_grad_v3/op_host/layer_norm_grad_v3_transpose_tiling.cpp
+        - ops/ops-nn/norm/layer_norm_grad_v3/op_host/layer_norm_grad_v3_workspace_tiling.cpp
+        - ops/ops-nn/norm/layer_norm_grad_v3/op_host/op_api/aclnn_layer_norm_backward.cpp
+        - ops/ops-nn/norm/layer_norm_grad_v3/op_host/op_api/aclnn_layer_norm_backward.h
+        - ops/ops-nn/norm/layer_norm_grad_v3/op_host/op_api/layer_norm_beta_gamma_backprop_v2.cpp
+        - ops/ops-nn/norm/layer_norm_grad_v3/op_host/op_api/layer_norm_beta_gamma_backprop_v2.h
+        - ops/ops-nn/norm/layer_norm_grad_v3/op_host/op_api/layer_norm_grad_v3.cpp
+        - ops/ops-nn/norm/layer_norm_grad_v3/op_host/op_api/layer_norm_grad_v3.h
+        - ops/ops-nn/norm/layer_norm_grad_v3/op_host/op_api/layer_norm_x_backprop_v3.cpp
+        - ops/ops-nn/norm/layer_norm_grad_v3/op_host/op_api/layer_norm_x_backprop_v3.h
+        - ops/ops-nn/norm/layer_norm_grad_v3/op_kernel/layer_norm_grad_v3.cpp
+        - ops/ops-nn/norm/layer_norm_grad_v3/op_kernel/layer_norm_grad_v3_common.h
+        - ops/ops-nn/norm/layer_norm_grad_v3/op_kernel/layer_norm_grad_v3_determinstic_compute.h
+        - ops/ops-nn/norm/layer_norm_grad_v3/op_kernel/layer_norm_grad_v3_single_read.h
+        - ops/ops-nn/norm/layer_norm_grad_v3/op_kernel/layer_norm_grad_v3_transpose.h
+        - ops/ops-nn/norm/layer_norm_grad_v3/op_kernel/layer_norm_grad_v3_workspace.h
+        - ops/ops-nn/norm/layer_norm_quant/
+        - ops/ops-nn/norm/layer_norm_v4/op_graph/layer_norm_v4_proto.h
+        - ops/ops-nn/norm/layer_norm_v4/op_host/layer_norm_v4_common_tiling.cpp
+        - ops/ops-nn/norm/layer_norm_v4/op_host/layer_norm_v4_def.cpp
+        - ops/ops-nn/norm/layer_norm_v4/op_host/layer_norm_v4_infershape.cpp
+        - ops/ops-nn/norm/layer_norm_v4/op_host/layer_norm_v4_merge_n_tiling.cpp
+        - ops/ops-nn/norm/layer_norm_v4/op_host/layer_norm_v4_single_read_tiling.cpp
+        - ops/ops-nn/norm/layer_norm_v4/op_host/layer_norm_v4_tiling.cpp
+        - ops/ops-nn/norm/layer_norm_v4/op_host/layer_norm_v4_tiling.h
+        - ops/ops-nn/norm/layer_norm_v4/op_host/layer_norm_v4_tiling_base.cpp
+        - ops/ops-nn/norm/layer_norm_v4/op_host/layer_norm_v4_transpose_tiling.cpp
+        - ops/ops-nn/norm/layer_norm_v4/op_host/op_api/aclnn_fast_layer_norm.cpp
+        - ops/ops-nn/norm/layer_norm_v4/op_host/op_api/aclnn_layer_norm.cpp
+        - ops/ops-nn/norm/layer_norm_v4/op_host/op_api/aclnn_layer_norm.h
+        - ops/ops-nn/norm/layer_norm_v4/op_host/op_api/layer_norm_v3.cpp
+        - ops/ops-nn/norm/layer_norm_v4/op_host/op_api/layer_norm_v3.h
+        - ops/ops-nn/norm/layer_norm_v4/op_host/op_api/layer_norm_v4.cpp
+        - ops/ops-nn/norm/layer_norm_v4/op_host/op_api/layer_norm_v4.h
+        - ops/ops-nn/norm/layer_norm_v4/op_kernel/block/block_layer_norm_copy_in_x.h
+        - ops/ops-nn/norm/layer_norm_v4/op_kernel/block/block_layer_norm_copy_out.h
+        - ops/ops-nn/norm/layer_norm_v4/op_kernel/kernel/kernel_layer_norm.h
+        - ops/ops-nn/norm/layer_norm_v4/op_kernel/layer_norm_v4.cpp
+        - ops/ops-nn/norm/layer_norm_v4/op_kernel/layer_norm_v4_align.h
+        - ops/ops-nn/norm/layer_norm_v4/op_kernel/layer_norm_v4_align_limit.h
+        - ops/ops-nn/norm/layer_norm_v4/op_kernel/layer_norm_v4_common.h
+        - ops/ops-nn/norm/layer_norm_v4/op_kernel/layer_norm_v4_one.h
+        - ops/ops-nn/norm/layer_norm_v4/op_kernel/layer_norm_v4_single_read.h
+        - ops/ops-nn/norm/layer_norm_v4/op_kernel/layer_norm_v4_transpose.h
+        - ops/ops-nn/norm/layer_norm_v4/op_kernel/layer_norm_v4_transpose_310p.h
+        - ops/ops-nn/norm/layer_norm_v4/op_kernel/subblock/sub_block_empty.h
+        - ops/ops-nn/norm/layer_norm_v4/op_kernel/subblock/sub_block_layer_norm_copy_in_x.h
+        - ops/ops-nn/norm/layer_norm_v4/op_kernel/subblock/sub_block_layer_norm_copy_out.h
+        - ops/ops-nn/norm/layer_norm_v4/op_kernel/tile/tile_copy.h
+        - ops/ops-nn/norm/layer_norm_v4/op_kernel/tile/tile_copy_out.h
+        - ops/ops-nn/norm/lp_norm_v2/op_api/aclnn_linalg_vector_norm.cpp
+        - ops/ops-nn/norm/lp_norm_v2/op_api/aclnn_linalg_vector_norm.h
+        - ops/ops-nn/norm/lp_norm_v2/op_api/aclnn_norm.cpp
+        - ops/ops-nn/norm/lp_norm_v2/op_api/aclnn_norm.h
+        - ops/ops-nn/norm/lp_norm_v2/op_api/lp_norm_reduce_v2.cpp
+        - ops/ops-nn/norm/lp_norm_v2/op_api/lp_norm_reduce_v2.h
+        - ops/ops-nn/norm/lp_norm_v2/op_api/lp_norm_update_v2.cpp
+        - ops/ops-nn/norm/lp_norm_v2/op_api/lp_norm_update_v2.h
+        - ops/ops-nn/norm/lp_norm_v2/op_api/lp_norm_v2.cpp
+        - ops/ops-nn/norm/lp_norm_v2/op_api/lp_norm_v2.h
+        - ops/ops-nn/norm/lp_norm_v2/op_graph/lp_norm_v2_proto.h
+        - ops/ops-nn/norm/lp_norm_v2/op_host/lp_norm_v2_def.cpp
+        - ops/ops-nn/norm/lp_norm_v2/op_host/lp_norm_v2_infershape.cpp
+        - ops/ops-nn/norm/norm_common/op_host/norm_tiling_check_common.h
+        - ops/ops-nn/norm/norm_common/op_host/op_api/norm_tensor_util.cpp
+        - ops/ops-nn/norm/norm_common/op_host/op_api/norm_tensor_util.h
+        - ops/ops-nn/norm/norm_common/op_kernel/reduce_common.h
+        - ops/ops-nn/norm/norm_common/op_kernel/reduce_common_regbase.h
         - ops/ops-nn/norm/quantize_add_layer_norm/
         - ops/ops-nn/norm/quantized_batch_norm/
-        - ops/ops-nn/norm/rms_norm/
-        - ops/ops-nn/norm/rms_norm_grad/
+        - ops/ops-nn/norm/rms_norm/op_graph/rms_norm_proto.h
+        - ops/ops-nn/norm/rms_norm/op_host/rms_norm_def.cpp
+        - ops/ops-nn/norm/rms_norm/op_host/rms_norm_infershape.cpp
+        - ops/ops-nn/norm/rms_norm/op_host/rms_norm_tiling.cpp
+        - ops/ops-nn/norm/rms_norm/op_host/rms_norm_tiling.h
+        - ops/ops-nn/norm/rms_norm/op_kernel/reduce_common.h
+        - ops/ops-nn/norm/rms_norm/op_kernel/rms_norm.cpp
+        - ops/ops-nn/norm/rms_norm/op_kernel/rms_norm.h
+        - ops/ops-nn/norm/rms_norm/op_kernel/rms_norm_base.h
+        - ops/ops-nn/norm/rms_norm/op_kernel/rms_norm_merge_n.h
+        - ops/ops-nn/norm/rms_norm/op_kernel/rms_norm_single_row.h
+        - ops/ops-nn/norm/rms_norm/op_kernel/rms_norm_split_d.h
+        - ops/ops-nn/norm/rms_norm/op_kernel/rms_norm_whole_reduce_sum.h
+        - ops/ops-nn/norm/rms_norm_grad/op_graph/rms_norm_grad_proto.h
+        - ops/ops-nn/norm/rms_norm_grad/op_host/rms_norm_grad_def.cpp
+        - ops/ops-nn/norm/rms_norm_grad/op_host/rms_norm_grad_empty_tiling.cpp
+        - ops/ops-nn/norm/rms_norm_grad/op_host/rms_norm_grad_infershape.cpp
+        - ops/ops-nn/norm/rms_norm_grad/op_host/rms_norm_grad_regbase_big_m_tiling.cpp
+        - ops/ops-nn/norm/rms_norm_grad/op_host/rms_norm_grad_tiling.cpp
+        - ops/ops-nn/norm/rms_norm_grad/op_host/rms_norm_grad_tiling.h
+        - ops/ops-nn/norm/rms_norm_grad/op_kernel/reduce_common.h
+        - ops/ops-nn/norm/rms_norm_grad/op_kernel/rms_norm_grad.cpp
+        - ops/ops-nn/norm/rms_norm_grad/op_kernel/rms_norm_grad_common.h
+        - ops/ops-nn/norm/rms_norm_grad/op_kernel/rms_norm_grad_split_d.h
+        - ops/ops-nn/norm/rms_norm_grad/op_kernel/rms_norm_grad_split_d_high_precision.h
+        - ops/ops-nn/norm/rms_norm_grad/op_kernel/rms_norm_grad_split_n.h
+        - ops/ops-nn/norm/rms_norm_grad/op_kernel/rms_norm_grad_split_n_high_precision.h
+        - ops/ops-nn/norm/rms_norm_grad/op_kernel/rms_norm_grad_whole_reduce_d.h
+        - ops/ops-nn/norm/rms_norm_grad/op_kernel/rms_norm_grad_whole_reduce_n.h
         - ops/ops-nn/norm/rms_norm_quant/
         - ops/ops-nn/norm/sync_batch_norm_backward_elemt/
         - ops/ops-nn/norm/sync_batch_norm_backward_reduce/
         - ops/ops-nn/norm/sync_batch_norm_gather_stats/
         - ops/ops-nn/norm/sync_batch_norm_gather_stats_with_counts/
-        - ops/ops-nn/conv/deformable_conv2d/
+        - ops/ops-nn/norm/softmax_grad_ext/
       opensource_style: null
       kernel_style: null
     unrelease:
       test_code:
-        ## ada_layer_norm
-        - ops/ops-nn/norm/ada_layer_norm/examples
-        - ops/ops-nn/norm/ada_layer_norm/tests
-        ## ada_layer_norm_quant
-        - ops/ops-nn/norm/ada_layer_norm_quant/examples
-        - ops/ops-nn/norm/ada_layer_norm_quant/tests
-        ## ada_layer_norm_v2
-        - ops/ops-nn/norm/ada_layer_norm_v2/examples
-        - ops/ops-nn/norm/ada_layer_norm_v2/tests
-        ## add_layer_norm
-        - ops/ops-nn/norm/add_layer_norm/examples
-        - ops/ops-nn/norm/add_layer_norm/tests
-        ## add_layer_norm_grad
-        - ops/ops-nn/norm/add_layer_norm_grad/examples
-        - ops/ops-nn/norm/add_layer_norm_grad/tests
-        ## add_layer_norm_quant
-        - ops/ops-nn/norm/add_layer_norm_quant/examples
-        - ops/ops-nn/norm/add_layer_norm_quant/tests
-        ## add_rms_norm
-        - ops/ops-nn/norm/add_rms_norm/examples
-        - ops/ops-nn/norm/add_rms_norm/tests
-        ## add_rms_norm_cast
-        - ops/ops-nn/norm/add_rms_norm_cast/examples
-        - ops/ops-nn/norm/add_rms_norm_cast/tests
-        ## add_rms_norm_dynamic_quant
-        - ops/ops-nn/norm/add_rms_norm_dynamic_quant/examples
-        - ops/ops-nn/norm/add_rms_norm_dynamic_quant/tests
-        ## add_rms_norm_dynamic_quant_v2
-        - ops/ops-nn/norm/add_rms_norm_dynamic_quant_v2/examples
-        - ops/ops-nn/norm/add_rms_norm_dynamic_quant_v2/tests
-        ## add_rms_norm_quant
-        - ops/ops-nn/norm/add_rms_norm_quant/examples
-        - ops/ops-nn/norm/add_rms_norm_quant/tests
-        ## add_rms_norm_quant_v2
-        - ops/ops-nn/norm/add_rms_norm_quant_v2/examples
-        - ops/ops-nn/norm/add_rms_norm_quant_v2/tests
-        ## batch_norm_elemt
-        - ops/ops-nn/norm/batch_norm_elemt/examples
-        - ops/ops-nn/norm/batch_norm_elemt/tests
-        ## batch_norm_grad_v3
-        - ops/ops-nn/norm/batch_norm_grad_v3/examples
-        - ops/ops-nn/norm/batch_norm_grad_v3/tests
-        ## batch_norm_v3
-        - ops/ops-nn/norm/batch_norm_v3/examples
-        - ops/ops-nn/norm/batch_norm_v3/tests
-        ## bn_training_reduce
-        - ops/ops-nn/norm/bn_training_reduce/examples
-        - ops/ops-nn/norm/bn_training_reduce/tests
-        ## deep_norm
-        - ops/ops-nn/norm/deep_norm/examples
-        - ops/ops-nn/norm/deep_norm/tests
-        ## deep_norm_grad
-        - ops/ops-nn/norm/deep_norm_grad/examples
-        - ops/ops-nn/norm/deep_norm_grad/tests
-        ## dua_quantize_add_layer_norm
-        - ops/ops-nn/norm/dua_quantize_add_layer_norm/examples
-        - ops/ops-nn/norm/dua_quantize_add_layer_norm/tests
-        ## gemma_rms_norm
-        - ops/ops-nn/norm/gemma_rms_norm/examples
-        - ops/ops-nn/norm/gemma_rms_norm/tests
-        ## group_norm
-        - ops/ops-nn/norm/group_norm/examples
-        - ops/ops-nn/norm/group_norm/tests
-        ## group_norm_grad
-        - ops/ops-nn/norm/group_norm_grad/examples
-        - ops/ops-nn/norm/group_norm_grad/tests
-        ## inplace_add_layer_norm
-        - ops/ops-nn/norm/inplace_add_layer_norm/examples
-        - ops/ops-nn/norm/inplace_add_layer_norm/tests
-        ## inplace_add_rms_norm
-        - ops/ops-nn/norm/inplace_add_rms_norm/examples
-        - ops/ops-nn/norm/inplace_add_rms_norm/tests
-        ## instance_norm_v3
-        - ops/ops-nn/norm/instance_norm_v3/examples
-        - ops/ops-nn/norm/instance_norm_v3/tests
-        ## layer_norm_grad_v3
-        - ops/ops-nn/norm/layer_norm_grad_v3/examples
-        - ops/ops-nn/norm/layer_norm_grad_v3/tests
-        ## layer_norm_v4
-        - ops/ops-nn/norm/layer_norm_v4/examples
-        - ops/ops-nn/norm/layer_norm_v4/tests
-        ## lp_norm_v2
-        - ops/ops-nn/norm/lp_norm_v2/examples
-        - ops/ops-nn/norm/lp_norm_v2/tests
-        ## quantize_add_layer_norm
-        - ops/ops-nn/norm/quantize_add_layer_norm/examples
-        - ops/ops-nn/norm/quantize_add_layer_norm/tests
-        ## quantized_batch_norm
-        - ops/ops-nn/norm/quantized_batch_norm/examples
-        - ops/ops-nn/norm/quantized_batch_norm/tests
-        ## rms_norm
-        - ops/ops-nn/norm/rms_norm/examples
-        - ops/ops-nn/norm/rms_norm/tests
-        ## rms_norm_grad
-        - ops/ops-nn/norm/rms_norm_grad/examples
-        - ops/ops-nn/norm/rms_norm_grad/tests
-        ## rms_norm_quant
-        - ops/ops-nn/norm/rms_norm_quant/examples
-        - ops/ops-nn/norm/rms_norm_quant/tests
-        ## sync_batch_norm_backward_elemt
-        - ops/ops-nn/norm/sync_batch_norm_backward_elemt/examples
-        - ops/ops-nn/norm/sync_batch_norm_backward_elemt/tests
-        ## sync_batch_norm_backward_reduce
-        - ops/ops-nn/norm/sync_batch_norm_backward_reduce/examples
-        - ops/ops-nn/norm/sync_batch_norm_backward_reduce/tests
-        ## sync_batch_norm_gather_stats
-        - ops/ops-nn/norm/sync_batch_norm_gather_stats/examples
-        - ops/ops-nn/norm/sync_batch_norm_gather_stats/tests
-        ## sync_batch_norm_gather_stats_with_counts
-        - ops/ops-nn/norm/sync_batch_norm_gather_stats_with_counts/examples
-        - ops/ops-nn/norm/sync_batch_norm_gather_stats_with_counts/tests
-        ## deformable_conv2d
-        - ops/ops-nn/conv/deformable_conv2d/examples
-        - ops/ops-nn/conv/deformable_conv2d/tests
+        - ops/ops-nn/norm/*/examples/
+        - ops/ops-nn/norm/*/tests/
+        - ops/ops-nn/conv/deformable_conv2d/examples/
+        - ops/ops-nn/conv/deformable_conv2d/tests/
       non_delivery: null
       open_source: null
 
@@ -987,9 +1312,15 @@ HPTG5@ops-nn:
   src:
     release:
       style:
-        - ops-nn/foreach/foreach_div_scalar_list/op_host/foreach_div_scalar_list_def.cpp
-        - ops-nn/activation/swi_glu/op_host/swi_glu_def.cpp
-        - ops-nn/norm/group_norm_silu/op_host/group_norm_silu_def.cpp
+        - ops/ops-nn/foreach/foreach_div_scalar_list/op_host/foreach_div_scalar_list_def.cpp
+        - ops/ops-nn/activation/swi_glu/op_host/swi_glu_def.cpp
+        - ops/ops-nn/activation/swi_glu/op_host/swi_glu_infershape.cpp
+        - ops/ops-nn/activation/swi_glu/op_host/swi_glu_tiling.cpp
+        - ops/ops-nn/activation/swi_glu/op_host/swi_glu_tiling.h
+        - ops/ops-nn/norm/group_norm_silu/op_host/group_norm_silu_def.cpp
+        - ops/ops-nn/norm/group_norm_silu/op_host/group_norm_silu_infershape.cpp
+        - ops/ops-nn/norm/group_norm_silu/op_host/group_norm_silu_tiling.cpp
+        - ops/ops-nn/norm/group_norm_silu/op_host/group_norm_silu_tiling.h
       opensource_style: null
       kernel_style: null
     unrelease:
@@ -1128,6 +1459,189 @@ HPTG3@ops-nn:
       non_delivery: null
       open_source: null
 
+loss-c@ops-nn:
+  src:
+    release:
+      style:
+        - ops/ops-nn/loss/binary_cross_entropy/docs/
+        - ops/ops-nn/loss/binary_cross_entropy/README.md
+        - ops/ops-nn/loss/binary_cross_entropy/op_api/
+        - ops/ops-nn/loss/binary_cross_entropy/op_graph/
+        - ops/ops-nn/loss/binary_cross_entropy_grad/docs/
+        - ops/ops-nn/loss/binary_cross_entropy_grad/README.md
+        - ops/ops-nn/loss/binary_cross_entropy_grad/op_api/
+        - ops/ops-nn/loss/binary_cross_entropy_grad/op_graph/
+        - ops/ops-nn/loss/chamfer_distance_grad/
+        - ops/ops-nn/loss/cross_entropy_loss/docs/
+        - ops/ops-nn/loss/cross_entropy_loss/README.md
+        - ops/ops-nn/loss/cross_entropy_loss/config/ascend910b/
+        - ops/ops-nn/loss/cross_entropy_loss/op_graph/
+        - ops/ops-nn/loss/cross_entropy_loss/op_host/cross_entropy_loss_def.cpp
+        - ops/ops-nn/loss/cross_entropy_loss/op_host/cross_entropy_loss_infershape.cpp
+        - ops/ops-nn/loss/cross_entropy_loss/op_host/cross_entropy_loss_tiling.cpp
+        - ops/ops-nn/loss/cross_entropy_loss/op_host/cross_entropy_loss_tiling.h
+        - ops/ops-nn/loss/cross_entropy_loss/op_kernel/cross_entropy_loss_base.h
+        - ops/ops-nn/loss/cross_entropy_loss/op_kernel/cross_entropy_loss_fp32.h
+        - ops/ops-nn/loss/cross_entropy_loss/op_kernel/cross_entropy_loss.cpp
+        - ops/ops-nn/loss/cross_entropy_loss/op_kernel/cross_entropy_loss.h
+        - ops/ops-nn/loss/cross_entropy_loss_grad/docs/
+        - ops/ops-nn/loss/cross_entropy_loss_grad/README.md
+        - ops/ops-nn/loss/cross_entropy_loss_grad/config/ascend910b/
+        - ops/ops-nn/loss/cross_entropy_loss_grad/op_graph/
+        - ops/ops-nn/loss/cross_entropy_loss_grad/op_host/cross_entropy_loss_grad_def.cpp
+        - ops/ops-nn/loss/cross_entropy_loss_grad/op_host/cross_entropy_loss_grad_infershape.cpp
+        - ops/ops-nn/loss/cross_entropy_loss_grad/op_host/cross_entropy_loss_grad_tiling.cpp
+        - ops/ops-nn/loss/cross_entropy_loss_grad/op_host/cross_entropy_loss_grad_tiling.h
+        - ops/ops-nn/loss/cross_entropy_loss_grad/op_kernel/cross_entropy_loss_grad_base.h
+        - ops/ops-nn/loss/cross_entropy_loss_grad/op_kernel/cross_entropy_loss_grad_weight_none.h
+        - ops/ops-nn/loss/cross_entropy_loss_grad/op_kernel/cross_entropy_loss_grad_weight_not_none.h
+        - ops/ops-nn/loss/cross_entropy_loss_grad/op_kernel/cross_entropy_loss_grad.cpp
+        - ops/ops-nn/loss/ctc_loss_v2/docs/
+        - ops/ops-nn/loss/ctc_loss_v2/README.md
+        - ops/ops-nn/loss/ctc_loss_v2/op_api/
+        - ops/ops-nn/loss/ctc_loss_v2/op_graph/
+        - ops/ops-nn/loss/ctc_loss_v2_grad/docs/
+        - ops/ops-nn/loss/ctc_loss_v2_grad/README.md
+        - ops/ops-nn/loss/ctc_loss_v2_grad/op_api/
+        - ops/ops-nn/loss/ctc_loss_v2_grad/op_graph/
+        - ops/ops-nn/loss/ctc_loss_v3/
+        - ops/ops-nn/loss/ctc_loss_v3_grad/
+        - ops/ops-nn/loss/kl_div_loss_grad/docs/
+        - ops/ops-nn/loss/kl_div_loss_grad/README.md
+        - ops/ops-nn/loss/kl_div_loss_grad/op_api/
+        - ops/ops-nn/loss/kl_div_loss_grad/op_graph/
+        - ops/ops-nn/loss/l1_loss_grad/docs/
+        - ops/ops-nn/loss/l1_loss_grad/README.md
+        - ops/ops-nn/loss/l1_loss_grad/op_api/
+        - ops/ops-nn/loss/l1_loss_grad/op_graph/
+        - ops/ops-nn/loss/lp_loss/docs/
+        - ops/ops-nn/loss/lp_loss/README.md
+        - ops/ops-nn/loss/lp_loss/op_api/
+        - ops/ops-nn/loss/lp_loss/op_graph/
+        - ops/ops-nn/loss/mse_loss/docs/
+        - ops/ops-nn/loss/mse_loss/README.md
+        - ops/ops-nn/loss/mse_loss/op_api/
+        - ops/ops-nn/loss/mse_loss/op_graph/
+        - ops/ops-nn/loss/mse_loss_grad/docs/
+        - ops/ops-nn/loss/mse_loss_grad/README.md
+        - ops/ops-nn/loss/mse_loss_grad/op_api/
+        - ops/ops-nn/loss/mse_loss_grad/op_graph/
+        - ops/ops-nn/loss/mse_loss_grad_v2/
+        - ops/ops-nn/loss/mse_loss_v2/
+        - ops/ops-nn/loss/multilabel_margin_loss/
+        - ops/ops-nn/loss/nll_loss/docs/
+        - ops/ops-nn/loss/nll_loss/README.md
+        - ops/ops-nn/loss/nll_loss/op_api/
+        - ops/ops-nn/loss/nll_loss/op_graph/
+        - ops/ops-nn/loss/nll_loss_grad/docs/
+        - ops/ops-nn/loss/nll_loss_grad/README.md
+        - ops/ops-nn/loss/nll_loss_grad/op_api/
+        - ops/ops-nn/loss/nll_loss_grad/op_graph/
+        - ops/ops-nn/loss/sigmoid_cross_entropy_with_logits_grad_v2/
+        - ops/ops-nn/loss/sigmoid_cross_entropy_with_logits_v2/docs/
+        - ops/ops-nn/loss/sigmoid_cross_entropy_with_logits_v2/README.md
+        - ops/ops-nn/loss/sigmoid_cross_entropy_with_logits_v2/op_api/
+        - ops/ops-nn/loss/sigmoid_cross_entropy_with_logits_v2/op_graph/
+        - ops/ops-nn/loss/smooth_l1_loss_grad_v2/docs/
+        - ops/ops-nn/loss/smooth_l1_loss_grad_v2/README.md
+        - ops/ops-nn/loss/smooth_l1_loss_grad_v2/op_api/
+        - ops/ops-nn/loss/smooth_l1_loss_grad_v2/op_graph/
+        - ops/ops-nn/loss/smooth_l1_loss_v2/docs/
+        - ops/ops-nn/loss/smooth_l1_loss_v2/README.md
+        - ops/ops-nn/loss/smooth_l1_loss_v2/op_api/
+        - ops/ops-nn/loss/smooth_l1_loss_v2/op_graph/
+        - ops/ops-nn/loss/soft_margin_loss/
+        - ops/ops-nn/loss/soft_margin_loss_grad/
+        - ops/ops-nn/optim/apply_adam_w_quant/docs/
+        - ops/ops-nn/optim/apply_adam_w_quant/README.md
+        - ops/ops-nn/optim/apply_adam_w_quant/op_host/
+        - ops/ops-nn/optim/apply_adam_w_quant/op_kernel/apply_adam_w_quant_base.h
+        - ops/ops-nn/optim/apply_adam_w_quant/op_kernel/apply_adam_w_quant_fp32.h
+        - ops/ops-nn/optim/apply_adam_w_quant/op_kernel/apply_adam_w_quant.cpp
+        - ops/ops-nn/optim/apply_adam_w_v2/docs/
+        - ops/ops-nn/optim/apply_adam_w_v2/README.md
+        - ops/ops-nn/optim/apply_adam_w_v2/op_host/op_api/
+        - ops/ops-nn/optim/apply_adam_w_v2/op_host/config/ascend910b/
+        - ops/ops-nn/optim/apply_adam_w_v2/op_host/apply_adam_w_v2_def.cpp
+        - ops/ops-nn/optim/apply_adam_w_v2/op_host/apply_adam_w_v2_infershape.cpp
+        - ops/ops-nn/optim/apply_adam_w_v2/op_host/apply_adam_w_v2_tiling.cpp
+        - ops/ops-nn/optim/apply_adam_w_v2/op_host/apply_adam_w_v2_tiling.h
+        - ops/ops-nn/optim/apply_adam_w_v2/op_kernel/apply_adam_w_v2_b16.h
+        - ops/ops-nn/optim/apply_adam_w_v2/op_kernel/apply_adam_w_v2_base.h
+        - ops/ops-nn/optim/apply_adam_w_v2/op_kernel/apply_adam_w_v2_fp.h
+        - ops/ops-nn/optim/apply_adam_w_v2/op_kernel/apply_adam_w_v2_mix_dtype.h
+        - ops/ops-nn/optim/apply_adam_w_v2/op_kernel/apply_adam_w_v2.cpp
+        - ops/ops-nn/optim/apply_fused_ema_adam/
+      opensource_style: null
+      kernel_style: null
+    unrelease:
+      test_code:
+        - ops/ops-nn/loss/binary_cross_entropy/examples/
+        - ops/ops-nn/loss/binary_cross_entropy/tests/
+        - ops/ops-nn/loss/binary_cross_entropy_grad/examples/
+        - ops/ops-nn/loss/binary_cross_entropy_grad/tests/
+        - ops/ops-nn/loss/chamfer_distance_grad/examples/
+        - ops/ops-nn/loss/chamfer_distance_grad/tests/
+        - ops/ops-nn/loss/cross_entropy_loss/examples/
+        - ops/ops-nn/loss/cross_entropy_loss/tests/
+        - ops/ops-nn/loss/cross_entropy_loss_grad/examples/
+        - ops/ops-nn/loss/cross_entropy_loss_grad/tests/
+        - ops/ops-nn/loss/cross_v2/examples/
+        - ops/ops-nn/loss/cross_v2/tests/
+        - ops/ops-nn/loss/ctc_loss_v2/tests/
+        - ops/ops-nn/loss/ctc_loss_v2_grad/tests/
+        - ops/ops-nn/loss/ctc_loss_v3/examples/
+        - ops/ops-nn/loss/ctc_loss_v3/tests/
+        - ops/ops-nn/loss/ctc_loss_v3_grad/examples/
+        - ops/ops-nn/loss/ctc_loss_v3_grad/tests/
+        - ops/ops-nn/loss/fused_cross_entropy_loss_with_max_sum/examples/
+        - ops/ops-nn/loss/fused_cross_entropy_loss_with_max_sum/tests/
+        - ops/ops-nn/loss/kl_div_loss_grad/examples/
+        - ops/ops-nn/loss/kl_div_loss_grad/tests/
+        - ops/ops-nn/loss/l1_loss_grad/examples/
+        - ops/ops-nn/loss/l1_loss_grad/tests/
+        - ops/ops-nn/loss/l2_loss/examples/
+        - ops/ops-nn/loss/l2_loss/tests/
+        - ops/ops-nn/loss/logit/examples/
+        - ops/ops-nn/loss/logit/tests/
+        - ops/ops-nn/loss/logit_grad/examples/
+        - ops/ops-nn/loss/logit_grad/tests/
+        - ops/ops-nn/loss/lp_loss/examples/
+        - ops/ops-nn/loss/lp_loss/tests/
+        - ops/ops-nn/loss/mse_loss/tests/
+        - ops/ops-nn/loss/mse_loss_grad/examples/
+        - ops/ops-nn/loss/mse_loss_grad/tests/
+        - ops/ops-nn/loss/mse_loss_grad_v2/examples/
+        - ops/ops-nn/loss/mse_loss_grad_v2/tests/
+        - ops/ops-nn/loss/mse_loss_v2/examples/
+        - ops/ops-nn/loss/mse_loss_v2/tests/
+        - ops/ops-nn/loss/multilabel_margin_loss/examples/
+        - ops/ops-nn/loss/multilabel_margin_loss/tests/
+        - ops/ops-nn/loss/nll_loss/examples/
+        - ops/ops-nn/loss/nll_loss/tests/
+        - ops/ops-nn/loss/nll_loss_grad/examples/
+        - ops/ops-nn/loss/nll_loss_grad/tests/
+        - ops/ops-nn/loss/sigmoid_cross_entropy_with_logits_grad_v2/examples/
+        - ops/ops-nn/loss/sigmoid_cross_entropy_with_logits_grad_v2/tests/
+        - ops/ops-nn/loss/sigmoid_cross_entropy_with_logits_v2/examples/
+        - ops/ops-nn/loss/sigmoid_cross_entropy_with_logits_v2/tests/
+        - ops/ops-nn/loss/smooth_l1_loss_grad_v2/examples/
+        - ops/ops-nn/loss/smooth_l1_loss_grad_v2/tests/
+        - ops/ops-nn/loss/smooth_l1_loss_v2/examples/
+        - ops/ops-nn/loss/smooth_l1_loss_v2/tests/
+        - ops/ops-nn/loss/soft_margin_loss/examples/
+        - ops/ops-nn/loss/soft_margin_loss/tests/
+        - ops/ops-nn/loss/soft_margin_loss_grad/examples/
+        - ops/ops-nn/loss/soft_margin_loss_grad/tests/
+        - ops/ops-nn/optim/apply_adam_w_quant/examples/
+        - ops/ops-nn/optim/apply_adam_w_quant/tests/
+        - ops/ops-nn/optim/apply_adam_w_v2/examples/
+        - ops/ops-nn/optim/apply_adam_w_v2/tests/
+        - ops/ops-nn/optim/apply_fused_ema_adam/examples/
+        - ops/ops-nn/optim/apply_fused_ema_adam/tests/
+      non_delivery: null
+      open_source: null
+
 VC1@ops-nn:
   src:
     release:
@@ -1175,7 +1689,9 @@ VC1@ops-nn:
         - ops/ops-nn/activation/hardtanh_grad/
         - ops/ops-nn/activation/leaky_relu/
         - ops/ops-nn/activation/leaky_relu_grad/
-        - ops/ops-nn/activation/prelu/
+        - ops/ops-nn/activation/p_relu/
+        - ops/ops-nn/activation/erfinv/
+        - ops/ops-nn/activation/mish/
         - ops/ops-nn/activation/relu/
         - ops/ops-nn/activation/relu_grad/
         - ops/ops-nn/activation/relu_v2/
@@ -1205,6 +1721,9 @@ VC1@ops-nn:
         - ops/ops-nn/quant/ascend_quant_v2/op_kernel/arch35/
         - ops/ops-nn/quant/ascend_quant_v2/op_kernel/ascend_quant_v2_apt.cpp
         - ops/ops-nn/quant/dynamic_block_quant/op_graph/
+        - ops/ops-nn/quant/dynamic_block_quant/op_host/dynamic_block_quant_i8_tiling.cpp
+        - ops/ops-nn/quant/dynamic_block_quant/op_host/config/ascend910_93/
+        - ops/ops-nn/quant/dynamic_block_quant/op_host/config/ascend910b/
         - ops/ops-nn/quant/dynamic_block_quant/op_host/config/ascend950/
         - ops/ops-nn/quant/dynamic_block_quant/op_host/dynamic_block_quant_def.cpp
         - ops/ops-nn/quant/dynamic_block_quant/op_host/dynamic_block_quant_infershape.cpp
@@ -1214,6 +1733,9 @@ VC1@ops-nn:
         - ops/ops-nn/quant/dynamic_block_quant/op_kernel/dynamic_block_quant_apt.cpp
         - ops/ops-nn/quant/grouped_dynamic_block_quant/
         - ops/ops-nn/quant/dynamic_mx_quant/
+        - ops/ops-nn/quant/dynamic_mx_quant_with_dual_axis/op_kernel/dynamic_mx_quant_with_dual_axis.cpp
+        - ops/ops-nn/quant/dynamic_mx_quant_with_dual_axis/op_kernel/arch35/dynamic_mx_quant_with_dual_axis_base.h
+        - ops/ops-nn/quant/dynamic_mx_quant_with_dual_axis/op_host/dynamic_mx_quant_with_dual_axis_tiling.cpp
         - ops/ops-nn/quant/dynamic_quant/framework/
         - ops/ops-nn/quant/dynamic_quant/op_graph/
         - ops/ops-nn/quant/dynamic_quant/op_host/config/ascend950/
@@ -1225,15 +1747,20 @@ VC1@ops-nn:
         - ops/ops-nn/quant/dynamic_quant/op_host/dynamic_quant_tiling.h
         - ops/ops-nn/quant/dynamic_quant/op_kernel/arch35/
         - ops/ops-nn/quant/dynamic_quant/op_kernel/dynamic_quant_apt.cpp
+        - ops/ops-nn/quant/dynamic_quant/op_kernel/dynamic_quant_unalign_large_310p.h
         - ops/ops-nn/quant/dynamic_quant_v2/op_graph/
         - ops/ops-nn/quant/dynamic_quant_v2/op_host/config/ascend950/
         - ops/ops-nn/quant/dynamic_quant_v2/op_host/op_api/
         - ops/ops-nn/quant/dynamic_quant_v2/op_host/dynamic_quant_v2_def.cpp
         - ops/ops-nn/quant/dynamic_quant_v2/op_host/dynamic_quant_v2_infershape.cpp
         - ops/ops-nn/quant/dynamic_quant_v2/op_kernel/dynamic_quant_v2_apt.cpp
+        - ops/ops-nn/quant/dynamic_dual_level_mx_quant/op_kernel/dynamic_dual_level_mx_quant.cpp
+        - ops/ops-nn/quant/dynamic_dual_level_mx_quant/op_kernel/arch35/dynamic_dual_level_mx_quant_base.h
         - ops/ops-nn/quant/grouped_dynamic_mx_quant/
         - ops/ops-nn/quant/quantize/
+        - ops/ops-nn/quant/trans_quant_param_v2/op_kernel/trans_quant_param_v2.h
         - ops/ops-nn/index/quant_update_scatter/
+        - ops/ops-nn/index/sparse_slice/
       opensource_style: null
       kernel_style: null
     unrelease:
@@ -1292,6 +1819,8 @@ VC1@ops-nn:
         - ops/ops-nn/quant/ascend_quant/tests/
         - ops/ops-nn/quant/ascend_quant_v2/examples/
         - ops/ops-nn/quant/ascend_quant_v2/tests/
+        - ops/ops-nn/quant/dynamic_block_quant/README.md
+        - ops/ops-nn/quant/dynamic_block_quant/docs/
         - ops/ops-nn/quant/dynamic_block_quant/examples/
         - ops/ops-nn/quant/dynamic_block_quant/tests/
         - ops/ops-nn/quant/grouped_dynamic_block_quant/tests/
@@ -1307,6 +1836,7 @@ VC1@ops-nn:
         - ops/ops-nn/quant/quantize/tests/
         - ops/ops-nn/index/quant_update_scatter/examples/
         - ops/ops-nn/index/quant_update_scatter/tests/
+        - ops/ops-nn/index/sparse_slice/tests/
       non_delivery: null
       open_source: null
 
@@ -1328,8 +1858,10 @@ VC6@ops-nn:
     release:
       style:
         - ops/ops-nn/index/non_zero/
-        - ops/ops-nn/index/index/
-        - ops/ops-nn/index/index_put_v2/
+        - ops/ops-nn/index/index/op_kernel/
+        - ops/ops-nn/index/index/op_host/
+        - ops/ops-nn/index/index_put_v2/op_kernel/
+        - ops/ops-nn/index/index_put_v2/op_host/
       opensource_style: null
       kernel_style: null
     unrelease:
@@ -1393,6 +1925,16 @@ VC7@ops-nn:
         - ops/ops-nn/index/embedding_bag/op_kernel/arch35/
         - ops/ops-nn/pooling/max_pool_with_argmax/op_kernel/
         - ops/ops-nn/pooling/max_pool_with_argmax/op_host/
+        - ops/ops-nn/pooling/avg_pool_v2_grad/op_host/
+        - ops/ops-nn/pooling/avg_pool_v2_grad/op_kernel/
+        - ops/ops-nn/pooling/pool_grad_common/op_host/
+        - ops/ops-nn/pooling/pool_grad_common/op_kernel/
+        - ops/ops-nn/pooling/adaptive_pool3d_common/op_host/
+        - ops/ops-nn/pooling/adaptive_pool3d_common/op_kernel/
+        - ops/ops-nn/pooling/adaptive_avg_pool2d/op_kernel/
+        - ops/ops-nn/pooling/adaptive_avg_pool2d/op_host/
+        - ops/ops-nn/pooling/max_pool3d_grad/op_host/
+        - ops/ops-nn/pooling/max_pool3d_grad/op_kernel/
       opensource_style: null
       kernel_style: null
     unrelease:
@@ -1419,8 +1961,11 @@ VC8@ops-nn:
       style:
         - ops/ops-nn/index/scatter_elements/op_host/arch35/
         - ops/ops-nn/index/scatter_elements/op_kernel/arch35/
-        - ops/ops-nn/index/scatter_elements_v2/op_host/
-        - ops/ops-nn/index/scatter_elements_v2/op_kernel/
+        - ops/ops-nn/index/scatter_elements_v2/op_host/scatter_elements_v2_asc_tiling.cpp
+        - ops/ops-nn/index/scatter_elements_v2/op_host/scatter_elements_v2_asc_tiling.h
+        - ops/ops-nn/index/scatter_elements_v2/op_kernel/scatter_elements_deterministic.h
+        - ops/ops-nn/index/scatter_elements_v2/op_kernel/scatter_elements_v2_apt.cpp
+        - ops/ops-nn/index/scatter_elements_v2/op_kernel/scatter_elements.h
         - ops/ops-nn/index/masked_scatter/op_host/arch35/
         - ops/ops-nn/index/masked_scatter/op_kernel/arch35/
         - ops/ops-nn/index/scatter_nd_add/op_host/arch35/
@@ -1429,12 +1974,20 @@ VC8@ops-nn:
         - ops/ops-nn/index/index_fill_d/op_host/arch35/
         - ops/ops-nn/index/index_fill_d/op_kernel/arch35/
         - ops/ops-nn/index/gather_nd/op_host/
-        - ops/ops-nn/index/gather_v2/op_host/arch35/
+        - ops/ops-nn/index/gather_v2/op_host/arch35/gather_v2_tiling.cpp
+        - ops/ops-nn/index/gather_v2/op_host/arch35/gather_v2_tiling.h
         - ops/ops-nn/index/gather_v2/op_kernel/arch35/
+        - ops/ops-nn/index/embedding/op_host/arch35/
+        - ops/ops-nn/index/embedding/op_kernel/arch35/
+        - ops/ops-nn/index/concat_offset/op_host/arch35/
+        - ops/ops-nn/index/concat_offset/op_kernel/arch35/
+        - ops/ops-nn/index/sparse_segment_mean/op_host/arch35/
+        - ops/ops-nn/index/sparse_segment_mean/op_kernel/arch35/
         - ops/ops-nn/index/scatter/op_host/
         - ops/ops-nn/index/scatter_nd/op_host/arch35/
         - ops/ops-nn/index/scatter_nd/op_kernel/arch35/
-        - ops/ops-nn/index/scatter_add/op_host/arch35/
+        - ops/ops-nn/index/scatter_add/op_host/arch35/scatter_add_tiling_base.cpp
+        - ops/ops-nn/index/scatter_add/op_host/arch35/scatter_add_tiling_base.h
         - ops/ops-nn/index/scatter_add/op_kernel/arch35/
         - ops/ops-nn/index/inplace_index_add/op_host/
         - ops/ops-nn/index/scatter_nd_update/op_host/
@@ -1443,6 +1996,8 @@ VC8@ops-nn:
         - ops/ops-nn/index/linear_index_v2/op_kernel/arch35/
         - ops/ops-nn/index/sparse_to_dense/op_host/
         - ops/ops-nn/index/sparse_to_dense/op_kernel/arch35/
+        - ops/ops-nn/index/sorted_sparse_segment_mean_grad/op_host/
+        - ops/ops-nn/index/sorted_sparse_segment_mean_grad/op_kernel/arch35/
       opensource_style: null
       kernel_style: null
     unrelease:
@@ -1457,11 +2012,16 @@ VC8@ops-nn:
         - ops/ops-nn/index/index_fill_d/tests/
         - ops/ops-nn/index/gather_v2/examples/
         - ops/ops-nn/index/gather_v2/tests/
+        - ops/ops-nn/index/embedding/examples/
+        - ops/ops-nn/index/embedding/tests/
+        - ops/ops-nn/index/concat_offset/tests/
+        - ops/ops-nn/index/sparse_segment_mean/tests/
         - ops/ops-nn/index/scatter_nd/examples/
         - ops/ops-nn/index/scatter_nd/tests/
         - ops/ops-nn/index/scatter_add/examples/
         - ops/ops-nn/index/scatter_add/tests/
         - ops/ops-nn/index/linear_index_v2/tests/
         - ops/ops-nn/index/sparse_to_dense/tests/
+        - ops/ops-nn/index/sorted_sparse_segment_mean_grad/tests/
       non_delivery: null
       open_source: null

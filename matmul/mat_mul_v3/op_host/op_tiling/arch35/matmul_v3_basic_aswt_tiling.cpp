@@ -21,20 +21,14 @@ using Ops::NN::MathUtil;
 
 namespace optiling {
 namespace matmul_v3_advanced {
-constexpr uint64_t FP32_SPLIT_K_THRESHOLD = 8192UL;
 using namespace strategy;
 
 // 注册BASIC_ASWT作为基础API实现的模板策略
 MM_REGISTER_TILING_TEMPLATE(MatMulV3, MatMulV3BasicAswtTiling, DAV_3510, BASIC_ASWT);
+MM_REGISTER_TILING_TEMPLATE(MatMulV3, MatMulV3BasicAswtTiling, DAV_RESV, BASIC_ASWT); // supportMmadS8S4平台
 
 bool MatMulV3BasicAswtTiling::IsCapable()
 {
-    // FP32场景且K>8192需要核内切K模板,跳出当前模板
-    if (args_.aDtypeSize == DATA_SIZE_FP32 && !args_.isHf32 && args_.bFormat == ge::FORMAT_ND &&
-        args_.kValue > FP32_SPLIT_K_THRESHOLD) {
-        OP_LOGD(args_.opName, "fp32 big k is not supported for basic api");
-        return false;
-    }
     OP_LOGI(args_.opName, "operator launched with BasicAswt module.");
     return true;
 }
@@ -54,7 +48,7 @@ uint64_t MatMulV3BasicAswtTiling::GetAFullLoadBasicNL1() const
 }
 
 // A全载切换基础API的条件
-bool MatMulV3BasicAswtTiling::CheckAL1FullLoadDav3510(const uint64_t kAlignedValue, const uint64_t mAlignedValue)
+bool MatMulV3BasicAswtTiling::CheckAL1FullLoadDav3510(const uint64_t kAlignedValue, const uint64_t mAlignedValue) const
 {
     uint64_t al1Size = kAlignedValue * mAlignedValue * args_.aDtypeSize;
     // 单核上只有一轮，走basic api模板， 头开销较小，无需走全载模板
@@ -82,7 +76,7 @@ bool MatMulV3BasicAswtTiling::CheckAL1FullLoadDav3510(const uint64_t kAlignedVal
     return true;
 }
 
-bool MatMulV3BasicAswtTiling::CheckAL1FullLoad()
+bool MatMulV3BasicAswtTiling::CheckAL1FullLoad() const
 {
     if (l0C2Out_ != MatMulV3L0C2Out::ON_THE_FLY) {
         return false;
@@ -186,7 +180,7 @@ void MatMulV3BasicAswtTiling::DoAL1FullLoad(uint64_t bBatchDimAll, uint64_t bias
     return;
 }
 
-bool MatMulV3BasicAswtTiling::CheckBL1FullLoadDav3510(const uint64_t kAlignedValue, const uint64_t nAlignedValue)
+bool MatMulV3BasicAswtTiling::CheckBL1FullLoadDav3510(const uint64_t kAlignedValue, const uint64_t nAlignedValue) const
 {
     uint64_t bl1Size = kAlignedValue * nAlignedValue * args_.bDtypeSize;
     // 单核上只有一轮，走basic api模板， 头开销较小，无需走全载模板
@@ -214,7 +208,7 @@ bool MatMulV3BasicAswtTiling::CheckBL1FullLoadDav3510(const uint64_t kAlignedVal
     return true;
 }
 
-bool MatMulV3BasicAswtTiling::CheckBL1FullLoad()
+bool MatMulV3BasicAswtTiling::CheckBL1FullLoad() const
 {
     if (args_.mValue < CACHELINE) {
         return false;

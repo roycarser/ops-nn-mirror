@@ -1,9 +1,9 @@
 # ----------------------------------------------------------------------------
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd.
-# This program is free software, you can redistribute it and/or modify it under the terms and conditions of 
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
 # CANN Open Software License Agreement Version 2.0 (the "License").
 # Please refer to the License for details. You may not use this file except in compliance with the License.
-# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED, 
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 # ----------------------------------------------------------------------------
@@ -56,7 +56,9 @@ option(OP_GRAPH_UT "Enable graph ut" OFF)
 option(OP_KERNEL_UT "Enable kernel ut" OFF)
 option(OP_KERNEL_AICPU_UT "Enable aicpu kernel ut" OFF)
 option(UT_TEST_ALL "Enable all ut" OFF)
+option(ENABLE_GEN_ACLNN "Enable gen aclnn" OFF)
 
+set(BISHENG_FLAGS "" CACHE STRING "bisheng compiler flags")
 set(CANN_3RD_LIB_PATH ${PROJECT_SOURCE_DIR}/build/third_party CACHE STRING "cann third party lib path")
 
 if(ENABLE_TEST)
@@ -81,6 +83,7 @@ set(ASCEND_ALL_COMPUTE_UNIT
 set(VENDOR_NAME
     "custom"
     CACHE STRING "vendor name")
+set(KERNEL_TEMPLATE_INPUT "" CACHE STRING "kernel template input")
 
 if(NOT ${BUILD_MODE} STREQUAL "" AND NOT ${BUILD_MODE} STREQUAL "FALSE")
   set(COMPILE_OP_MODE ${BUILD_MODE})
@@ -96,6 +99,7 @@ endif()
 set(CMAKE_CXX_STANDARD
     17
     CACHE STRING "c++17 is needed for this project")
+include(cmake/third_party/opbase.cmake) # 放在dependencies.cmake前面
 include(cmake/dependencies.cmake)
 include(cmake/third_party/nlohmann_json.cmake)
 include(cmake/third_party/abseil-cpp.cmake)
@@ -106,10 +110,16 @@ include(cmake/opbuild.cmake)
 include(cmake/third_party/eigen.cmake)
 include(cmake/intf_pub_linux.cmake)
 include(cmake/modules/Finddlog.cmake)
+include(version.cmake)
 
 if(ENABLE_CUSTOM AND ENABLE_ASC_BUILD)
   include(cmake/custom_kernel.cmake)
 endif()
+
+if(BUILD_WITH_INSTALLED_DEPENDENCY_CANN_PKG)
+  check_pkg_build_deps("ops-nn")
+endif()
+add_version_info_targets()
 
 if(ENABLE_TEST)
   # ut common dependencies

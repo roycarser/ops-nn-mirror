@@ -18,19 +18,19 @@
 #include "util/math_util.h"
 #include "tiling/platform/platform_ascendc.h"
 #include "platform/platform_infos_def.h"
-#include "tiling_base/tiling_base.h"
+#include "op_host/tiling_base.h"
 #include "op_common/op_host/util/platform_util.h"
-#include "tiling_base/tiling_templates_registry.h"
+#include "op_host/tiling_templates_registry.h"
 #include "error_util.h"
 
 namespace optiling {
 BEGIN_TILING_DATA_DEF(AddRmsNormDynamicQuantTilingData)
 TILING_DATA_FIELD_DEF(uint64_t, useCore);
 TILING_DATA_FIELD_DEF(uint64_t, numFirstDim);
-TILING_DATA_FIELD_DEF(uint64_t, numLastDim);
 TILING_DATA_FIELD_DEF(uint64_t, numLastDimAligned);
-TILING_DATA_FIELD_DEF(uint64_t, firstDimPerCore);
+TILING_DATA_FIELD_DEF(uint64_t, numLastDim);
 TILING_DATA_FIELD_DEF(uint64_t, firstDimPerCoreTail);
+TILING_DATA_FIELD_DEF(uint64_t, firstDimPerCore);
 TILING_DATA_FIELD_DEF(uint64_t, firstDimPerLoop);
 TILING_DATA_FIELD_DEF(uint64_t, lastDimLoopNum);
 TILING_DATA_FIELD_DEF(uint64_t, lastDimSliceLen);
@@ -63,12 +63,24 @@ REGISTER_TILING_DATA_CLASS(AddRmsNormDynamicQuant, AddRmsNormDynamicQuantTilingD
 REGISTER_TILING_DATA_CLASS(AddRmsNormDynamicQuant_100, AddRmsNormDynamicQuantRegbaseTilingData)
 REGISTER_TILING_DATA_CLASS(AddRmsNormDynamicQuant_120, AddRmsNormDynamicQuantRegbaseTilingData)
 REGISTER_TILING_DATA_CLASS(AddRmsNormDynamicQuant_130, AddRmsNormDynamicQuantRegbaseTilingData)
+REGISTER_TILING_DATA_CLASS(AddRmsNormDynamicQuant_140, AddRmsNormDynamicQuantRegbaseTilingData)
+REGISTER_TILING_DATA_CLASS(AddRmsNormDynamicQuant_160, AddRmsNormDynamicQuantRegbaseTilingData)
+REGISTER_TILING_DATA_CLASS(AddRmsNormDynamicQuant_170, AddRmsNormDynamicQuantRegbaseTilingData)
+
 REGISTER_TILING_DATA_CLASS(AddRmsNormDynamicQuant_101, AddRmsNormDynamicQuantRegbaseTilingData)
 REGISTER_TILING_DATA_CLASS(AddRmsNormDynamicQuant_121, AddRmsNormDynamicQuantRegbaseTilingData)
 REGISTER_TILING_DATA_CLASS(AddRmsNormDynamicQuant_131, AddRmsNormDynamicQuantRegbaseTilingData)
+REGISTER_TILING_DATA_CLASS(AddRmsNormDynamicQuant_141, AddRmsNormDynamicQuantRegbaseTilingData)
+REGISTER_TILING_DATA_CLASS(AddRmsNormDynamicQuant_161, AddRmsNormDynamicQuantRegbaseTilingData)
+REGISTER_TILING_DATA_CLASS(AddRmsNormDynamicQuant_171, AddRmsNormDynamicQuantRegbaseTilingData)
+
 REGISTER_TILING_DATA_CLASS(AddRmsNormDynamicQuant_102, AddRmsNormDynamicQuantRegbaseTilingData)
 REGISTER_TILING_DATA_CLASS(AddRmsNormDynamicQuant_122, AddRmsNormDynamicQuantRegbaseTilingData)
 REGISTER_TILING_DATA_CLASS(AddRmsNormDynamicQuant_132, AddRmsNormDynamicQuantRegbaseTilingData)
+REGISTER_TILING_DATA_CLASS(AddRmsNormDynamicQuant_142, AddRmsNormDynamicQuantRegbaseTilingData)
+REGISTER_TILING_DATA_CLASS(AddRmsNormDynamicQuant_162, AddRmsNormDynamicQuantRegbaseTilingData)
+REGISTER_TILING_DATA_CLASS(AddRmsNormDynamicQuant_172, AddRmsNormDynamicQuantRegbaseTilingData)
+
 REGISTER_TILING_DATA_CLASS(AddRmsNormDynamicQuant_199, AddRmsNormDynamicQuantRegbaseTilingData)
 
 BEGIN_TILING_DATA_DEF(AddRmsNormDynamicQuantEmptyTilingData)
@@ -91,6 +103,7 @@ constexpr uint32_t TILING_TYPE_NORMAL = 0;
 constexpr uint32_t TILING_TYPE_SPILT = 1;
 constexpr uint32_t TILING_TYPE_PERF = 2;
 constexpr uint32_t TILING_OFFSET_HAS_QUANT = 10;
+constexpr uint32_t TILING_HAS_BETA = 40;
 constexpr uint32_t TILING_OFFSET_REGBASE = 100;
 constexpr uint64_t TILING_KEY_UNRUN = 199;
 
@@ -205,6 +218,7 @@ struct AddRmsNormDynamicQuantRegbaseTilingParams {
     uint32_t quantBufCnt{0};
     bool hasSmoothScale1{false};
     bool hasSmoothScale2{false};
+    bool hasBeta{false};
     bool hasY2Scale2{false};
     bool needGetCompileInfo{false};
     bool needRun{true};
@@ -244,8 +258,8 @@ protected:
     // Order: GetShapeAttrsInfo->GetPlatformInfo->
     //        IsCapable->DoOpTiling->DoLibApiTiling->
     //        GetWorkspaceSize->PostTiling->GetTilingKey
-    ge::graphStatus GetShapeAttrsInfo() override;
     ge::graphStatus GetPlatformInfo() override;
+    ge::graphStatus GetShapeAttrsInfo() override;
     bool IsCapable() override;
     ge::graphStatus DoOpTiling() override;
     ge::graphStatus DoLibApiTiling() override;

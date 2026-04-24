@@ -17,7 +17,7 @@
 
 - 接口功能：二维平均池化的反向传播，计算二维平均池化正向传播的输入梯度。
 
-- 计算公式：假设二位平均池化正向的输入张量为$X$，输出张量为$Y$，池化窗口大小为$k*k$,步长为$s$,则$X$的梯度$\frac{\partial L}{\partial X}$计算公式为：
+- 计算公式：假设二维平均池化正向的输入张量为$X$，输出张量为$Y$，池化窗口大小为$k*k$,步长为$s$,则$X$的梯度$\frac{\partial L}{\partial X}$计算公式为：
 
   $$
   \frac{\partial L}{\partial X_{i,j}}=\frac{1}{k^2}\sum_{n=0}^{k-1}\frac{\partial L}{\partial Y_{\lfloor\frac{i*s+m}{k}\rfloor,\lfloor\frac{j*s+n}{k}\rfloor}}
@@ -52,6 +52,7 @@ aclnnStatus aclnnAvgPool2dBackwardGetWorkspaceSize(
   uint64_t          *workspaceSize,
   aclOpExecutor     **executor)
 ```
+
 ```Cpp
 aclnnStatus aclnnAvgPool2dBackward(
   void          *workspace,
@@ -59,6 +60,7 @@ aclnnStatus aclnnAvgPool2dBackward(
   aclOpExecutor *executor,
   aclrtStream    stream)
 ```
+
 ## aclnnAvgPool2dBackwardGetWorkspaceSize
 
 - **参数说明**：
@@ -118,7 +120,7 @@ aclnnStatus aclnnAvgPool2dBackward(
       <td>stride</td>
       <td>输入</td>
       <td>池化操作的步长，公式中的strides。</td>
-      <td>长度为1（sH=sW）或2（sH, sW），数值必须大于0。</td>
+      <td>长度为0（stride=kernelSize）或1（sH=sW）或2（sH, sW），数值大于0。</td>
       <td>INT64</td>
       <td>-</td>
       <td>-</td>
@@ -166,7 +168,7 @@ aclnnStatus aclnnAvgPool2dBackward(
     </tr>
     <tr>
       <td>cubeMathType</td>
-      <td>out</td>
+      <td>输入</td>
       <td>指定Cube单元的计算逻辑</td>
       <td>-</td>
       <td>INT8</td>
@@ -268,6 +270,7 @@ aclnnStatus aclnnAvgPool2dBackward(
     </tr>
   </tbody>
   </table>
+
 ## aclnnAvgPool2dBackward
 
 - **参数说明：**
@@ -305,19 +308,24 @@ aclnnStatus aclnnAvgPool2dBackward(
     </tr>
   </tbody>
   </table>
--  **返回值：**
+
+- **返回值：**
 
     aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 
 ## 约束说明
+
 - 确定性计算：
   - aclnnAvgPool2dBackward默认非确定性实现，支持通过aclrtCtxSetSysParamOpt开启确定性。
 
 - <term>Atlas 训练系列产品</term>、<term>Atlas 推理系列产品</term>：Cube单元不支持FLOAT32计算。当输入为FLOAT32，可通过设置cubeMathType=1（ALLOW_FP32_DOWN_PRECISION）来允许接口内部cast到FLOAT16进行计算。
 
 ## 调用示例
+
 示例代码如下，仅供参考，具体编译和执行过程请参考[编译与运行样例](../../../docs/zh/context/编译与运行样例.md)。
+
 ```Cpp
+#include <cstdio>
 #include <iostream>
 #include <vector>
 #include "acl/acl.h"

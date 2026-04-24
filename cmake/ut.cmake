@@ -7,6 +7,22 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 # ----------------------------------------------------------------------------
+function(add_opbase_ut_common)
+    if(TARGET opbase_ut_common)
+        return()
+    endif()
+    add_library(opbase_ut_common STATIC
+        $<$<TARGET_EXISTS:opbase_util_objs>:$<TARGET_OBJECTS:opbase_util_objs>>
+        $<$<TARGET_EXISTS:opbase_infer_objs>:$<TARGET_OBJECTS:opbase_infer_objs>>
+        $<$<TARGET_EXISTS:opbase_tiling_objs>:$<TARGET_OBJECTS:opbase_tiling_objs>>
+    )
+    target_link_libraries(opbase_ut_common PRIVATE
+        ascendalog
+        unified_dlog
+    )
+    target_link_directories(opbase_ut_common PRIVATE ${ASCEND_DIR}/${SYSTEM_PREFIX}/lib64)
+endfunction()
+
 
 function(add_optiling_ut_modules OP_TILING_MODULE_NAME)
 
@@ -15,7 +31,7 @@ function(add_optiling_ut_modules OP_TILING_MODULE_NAME)
     set(UT_CONV3DV2_TILING_INC ${PROJECT_SOURCE_DIR}/common/inc/op_host
                                ${PROJECT_SOURCE_DIR}
                                ${PROJECT_SOURCE_DIR}/common/include)
-
+    add_opbase_ut_common()
     # add op tiling ut test cases obj
     add_library(${OP_TILING_MODULE_NAME}_cases_obj OBJECT)
     add_dependencies(${OP_TILING_MODULE_NAME}_cases_obj json)
@@ -57,13 +73,14 @@ function(add_optiling_ut_modules OP_TILING_MODULE_NAME)
     target_link_libraries(${OP_TILING_MODULE_NAME}_static_lib PRIVATE
         ${OP_TILING_MODULE_NAME}_common_obj
         ${OP_TILING_MODULE_NAME}_cases_obj
+        opbase_ut_common
     )
 endfunction()
 
 function(add_infershape_ut_modules OP_INFERSHAPE_MODULE_NAME)
     # set variables
     set(UT_COMMON_INC ${PROJECT_SOURCE_DIR}/tests/ut/common)
-
+    add_opbase_ut_common()
     # add op tiling ut test cases obj
     add_library(${OP_INFERSHAPE_MODULE_NAME}_cases_obj OBJECT)
     add_dependencies(${OP_INFERSHAPE_MODULE_NAME}_cases_obj json)
@@ -104,6 +121,7 @@ function(add_infershape_ut_modules OP_INFERSHAPE_MODULE_NAME)
     target_link_libraries(${OP_INFERSHAPE_MODULE_NAME}_static_lib PRIVATE
         ${OP_INFERSHAPE_MODULE_NAME}_common_obj
         ${OP_INFERSHAPE_MODULE_NAME}_cases_obj
+        opbase_ut_common
     )
 endfunction()
 
@@ -188,6 +206,7 @@ function(add_op_graph_ut_modules OP_GRAPH_MODULE_NAME)
         ${JSON_INCLUDE}
         ${GTEST_INCLUDE}
         ${OPBASE_INC_DIRS}
+        ${PROJECT_SOURCE_DIR}/common/graph_fusion
         ${PROJECT_SOURCE_DIR}/common/inc
         ${ASCEND_DIR}/include
         ${ASCEND_DIR}/include/external
@@ -219,6 +238,7 @@ function(add_op_graph_ut_modules OP_GRAPH_MODULE_NAME)
     target_link_libraries(${OP_GRAPH_MODULE_NAME}_static_lib PRIVATE
             ${OP_GRAPH_MODULE_NAME}_cases_obj
             ${GRAPH_PLUGIN_NAME}_obj
+            ${CUBE_UTILS_PLUGIN_NAME}_obj
             es_math
             es_nn
     )
@@ -473,17 +493,11 @@ function(AddOpTestCase opName supportedSocVersion otherCompileOptions)
                     message(STATUS "get_opfile_from_opsinfo kernel_cpp_name is ${kernel_cpp_name}")
                 else()
                     gen_aclnn_with_opdef()
-                    if(NOT TARGET opbuild_custom_gen_aclnn_all)
-                        message(STATUS "no need build binary, for all the ops donot have any operator def")
-                        break()
-                    endif()
 
                     merge_ini_files(TARGET merge_ini_${compute_unit}_${opName}
                         OPS_INFO_DIR ${ASCEND_AUTOGEN_PATH}
                         COMPUTE_UNIT ${compute_unit}
                     )
-
-                    add_dependencies(merge_ini_${compute_unit}_${opName} opbuild_custom_gen_aclnn_all)
 
                     add_ops_info_target_v1(
                         TARGET ops_info_gen_${lowerSocVersion}_${opName}
@@ -515,6 +529,8 @@ function(AddOpTestCase opName supportedSocVersion otherCompileOptions)
                 )
         target_sources(${opName}_${socVersion}_tiling_tmp PUBLIC
             $<TARGET_OBJECTS:${OPHOST_NAME}_tiling_obj>
+            $<$<TARGET_EXISTS:opbase_util_objs>:$<TARGET_OBJECTS:opbase_util_objs>>
+            $<$<TARGET_EXISTS:opbase_tiling_objs>:$<TARGET_OBJECTS:opbase_tiling_objs>>
             # 只要尝试跑ophost ut，legacy_common_manager.cpp就不会编译到tiling obj里，此时需要把打桩代码编译进去
             $<$<OR:$<BOOL:${UT_TEST_ALL}>,$<BOOL:${OP_HOST_UT}>>:${OPS_NN_DIR}/tests/ut/common/legacy_common_manager_stub.cpp>
         )
@@ -524,15 +540,14 @@ function(AddOpTestCase opName supportedSocVersion otherCompileOptions)
                 _GLIBCXX_USE_CXX11_ABI=0
                 )
         target_link_libraries(${opName}_${socVersion}_tiling_tmp PRIVATE
-                -Wl,--no-as-needed
-                    $<$<TARGET_EXISTS:opsbase>:opsbase>
-                -Wl,--as-needed
                 $<BUILD_INTERFACE:dlog_headers>
                 -Wl,--whole-archive
                     tiling_api
                 -Wl,--no-whole-archive
                 gcov
                 metadef
+                register
+                opp_registry
                 )
 
         ## gen ascendc tiling head files
@@ -695,7 +710,6 @@ if(UT_TEST_ALL OR OP_KERNEL_AICPU_UT)
             gtest
             c_sec
             Eigen3::EigenNn
-            $<$<TARGET_EXISTS:opsbase>:opsbase>
             )
 
     ## add object: nn_op_kernel_ut_cases_obj
@@ -716,7 +730,6 @@ if(UT_TEST_ALL OR OP_KERNEL_AICPU_UT)
             gtest
             c_sec
             Eigen3::EigenNn
-      $<$<TARGET_EXISTS:opsbase>:opsbase>
             )
   endfunction()
 endif()

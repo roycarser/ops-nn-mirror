@@ -17,7 +17,12 @@
 #define DEQUANT_SWIGLU_QUANT_STATIC_NOT_FULL_H
 
 #include "kernel_tiling/kernel_tiling.h"
-#include "kernel_operator.h"
+#if ASC_DEVKIT_MAJOR >= 9
+    #include "basic_api/kernel_vec_intf.h"
+    #include "utils/std/algorithm.h"
+#else
+    #include "kernel_operator.h"
+#endif
 #include "dequant_swiglu_quant_common.h"
 
 
@@ -530,8 +535,13 @@ __aicore__ inline void DequantSwigluQuantStaticNotFull<TXtype, TActScale, TBias,
                 qScalePtr = (__local_mem__ float*)quantScaleLocal.GetPhyAddr(0);
             }
             // SwiGlu with QuantScale
-            VF_CALL<SwigluSingleYWithQuantScale<hasQuantScale_>>(tmpPtr, qScalePtr, tmpPtr, static_cast<uint32_t>(tl_->UbFactorDimy),
+            if (ifQuantIsOne_) {
+                VF_CALL<SwigluSingleYWithQuantScale<hasQuantScale_, true>>(tmpPtr, qScalePtr, tmpPtr, static_cast<uint32_t>(tl_->UbFactorDimy),
                                                 repeatTimesPerFactor, sizePerRepeat, processNum, ifQuantIsOne_);
+            } else {
+                VF_CALL<SwigluSingleYWithQuantScale<hasQuantScale_, false>>(tmpPtr, qScalePtr, tmpPtr, static_cast<uint32_t>(tl_->UbFactorDimy),
+                                                repeatTimesPerFactor, sizePerRepeat, processNum, ifQuantIsOne_);
+            }
         } else {
             if constexpr (ifXIntIndex_) {
                 if (ifBiasIntIndex_ || !hasBiasIndex_) {
@@ -569,8 +579,13 @@ __aicore__ inline void DequantSwigluQuantStaticNotFull<TXtype, TActScale, TBias,
                 qScalePtr = (__local_mem__ float*)quantScaleLocal.GetPhyAddr(0);
             }
             // SwiGluV2 with QuantScale
-            VF_CALL<SwigluV2SingleYWithQuantScale<hasQuantScale_>>(tmpPtr, qScalePtr, tmpPtr, processNum * 2, 0, 1, repeatTimesPerFactorForV2,
+            if (ifQuantIsOne_) {
+                VF_CALL<SwigluV2SingleYWithQuantScale<hasQuantScale_, true>>(tmpPtr, qScalePtr, tmpPtr, processNum * 2, 0, 1, repeatTimesPerFactorForV2,
                         sizePerRepeat, 0, ifQuantIsOne_, tl_->clampLimit, tl_->gluAlpha, tl_->gluBias);
+            } else {
+                VF_CALL<SwigluV2SingleYWithQuantScale<hasQuantScale_, false>>(tmpPtr, qScalePtr, tmpPtr, processNum * 2, 0, 1, repeatTimesPerFactorForV2,
+                        sizePerRepeat, 0, ifQuantIsOne_, tl_->clampLimit, tl_->gluAlpha, tl_->gluBias);
+            }
         }
         if constexpr (hasQuantScale_) {
             quantScaleQueue_.FreeTensor(quantScaleLocal);
@@ -582,8 +597,13 @@ __aicore__ inline void DequantSwigluQuantStaticNotFull<TXtype, TActScale, TBias,
         }
         // static quant with QuantOffset
         if constexpr (hasQuantOffset_) {
-            VF_CALL<StaticQuantSingleY<hasQuantOffset_>>(tmpPtr, qOffsetPtr, tmpPtr,
+            if (ifQuantIsOne_) {
+                VF_CALL<StaticQuantSingleY<hasQuantOffset_, true>>(tmpPtr, qOffsetPtr, tmpPtr,
                                                         repeatTimesPerFactor, sizePerRepeat, processNum, ifQuantIsOne_);
+            } else {
+                VF_CALL<StaticQuantSingleY<hasQuantOffset_, false>>(tmpPtr, qOffsetPtr, tmpPtr,
+                                                        repeatTimesPerFactor, sizePerRepeat, processNum, ifQuantIsOne_);
+            }
         }
         if constexpr (hasQuantOffset_) {
             quantOffsetQueue_.FreeTensor(quantOffsetLocal);

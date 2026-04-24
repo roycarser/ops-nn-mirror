@@ -13,7 +13,7 @@
  * \brief
  */
 #include <vector>
-#include "tiling_base/tiling_util.h"
+#include "op_host/tiling_util.h"
 #include "add_layer_norm_quant_tiling.h"
 
 namespace optiling {
@@ -86,9 +86,9 @@ static ge::graphStatus CanUseRegbase(gert::TilingContext* context, bool& useRegb
     auto platformInfo = context->GetPlatformInfo();
     if (platformInfo != nullptr) {
         auto ascendcPlatform = platform_ascendc::PlatformAscendC(platformInfo);
-        auto npuArch = ascendcPlatform.GetCurNpuArch();
+        auto npuArchType = ascendcPlatform.GetCurNpuArch();
         useRegbase = (IsRegbaseSocVersion(context) ||
-                      npuArch == NpuArch::DAV_5102);
+                      npuArchType == NpuArch::DAV_5102);
     } else {
         auto compileInfo = reinterpret_cast<const AddLayerNormQuantCompileInfo*>(context->GetCompileInfo());
         OP_CHECK_NULL_WITH_CONTEXT(context, compileInfo);
@@ -143,13 +143,6 @@ inline TILING_TYPE AddLayerNormQuantTilingImpl(
     int64_t biasNum = biasType == BIAS_TYPE::BROADCAST_BIAS ? 1 : 0;
     auto numColAligned = (numCol + BLOCK_SIZE - 1) / BLOCK_SIZE * BLOCK_SIZE;
 
-    uint64_t tmpUbSize = 3 * numColAligned * bufferNum * dtSize + 2 * numColAligned * sizeof(float) +
-                         biasNum * numColAligned * dtSize + ROW_FACTOR * sizeof(float) * 4 + 32 + UB_RESERVED_BYTE;
-    if (firstdimPerCore == 1 && tmpUbSize < maxUbSize) {
-        rowPerTime = 1;
-        colPerTime = numCol;
-        return TILING_TYPE::SINGLE_ROW;
-    }
     // try Normal case:
     float avaUb = static_cast<float>(static_cast<float>(maxUbSize) - 1024);
     float liveTensorFactor = static_cast<float>(14 * numColAligned + 6 * numColAligned + 8 + 32 + 256 + 4);
@@ -159,6 +152,16 @@ inline TILING_TYPE AddLayerNormQuantTilingImpl(
         colPerTime = numCol;
         return TILING_TYPE::NORMAL;
     }
+
+    // try Single case:
+    uint64_t tmpUbSize = 3 * numColAligned * bufferNum * dtSize + 2 * numColAligned * sizeof(float) +
+                         biasNum * numColAligned * dtSize + ROW_FACTOR * sizeof(float) * 4 + 32 + UB_RESERVED_BYTE;
+    if (tmpUbSize < maxUbSize) {
+        rowPerTime = 1;
+        colPerTime = numCol;
+        return TILING_TYPE::SINGLE_ROW;
+    }
+
     // try Silce case
     int64_t numPerBlock = 1;
     if (dtSize > 0) {

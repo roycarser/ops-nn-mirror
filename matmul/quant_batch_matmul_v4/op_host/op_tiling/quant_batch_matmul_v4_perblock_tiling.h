@@ -19,7 +19,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "tiling_base/tiling_templates_registry.h"
+#include "op_host/tiling_templates_registry.h"
 #include "common/op_host/op_tiling/tiling_type.h"
 #include "tiling/tiling_api.h"
 
@@ -35,9 +35,6 @@ constexpr int32_t GROUP_M_OFFSET = 32;
 constexpr int32_t GROUP_N_OFFSET = 16;
 constexpr uint64_t GROUP_MNK_BIT_SIZE = 0xFFFF;
 constexpr int32_t CV_PARALL_NUM = 2;
-
-struct QuantBatchMatmulPerblockInfo: public QuantBatchMatmulMsdInfo {
-};
 
 class QuantBatchMatmulV4PerblockTiling : public QuantBatchMatmulV3BasicTiling
 {

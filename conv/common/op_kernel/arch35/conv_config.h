@@ -18,7 +18,7 @@
 
 #include "kernel_basic_intf.h"
 #include "kernel_tiling/kernel_tiling.h"
-#include "kernel_utils.h"
+#include "kernel_common.h"
 #include "conv_util.h"
 
 namespace conv {
@@ -358,6 +358,7 @@ public:
         uint8_t pingPongFlag = 0;
 
         // Used in opt group mode(groups > 1)
+        uint32_t enlarge = 0;
         uint16_t ciPerGroup = 0;
         uint16_t coPerGroup = 0;
         uint16_t ciOpt = 0;
@@ -378,6 +379,9 @@ public:
         uint16_t ddr2l1LoopOuter = 0;
         uint16_t outerIter = 0;
         uint16_t bL1LoadTimes = 0;
+
+        uint16_t updateEnlarge = 0; 
+        uint16_t updateSingleCoOpt = N_VALUE_MAX;
 
         int64_t ciStartPos = 0;
         int64_t coStartPos = 0;

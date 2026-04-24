@@ -15,7 +15,7 @@
 
 ## 功能说明
 
-- 接口功能： 实现adamW优化器功能。
+- 接口功能： 实现AdamW优化器功能。
 
 - 计算公式：
 
@@ -40,6 +40,7 @@
   $$
 
 ## 函数原型
+
 每个算子分为[两段式接口](../../../docs/zh/context/两段式接口.md)，必须先调用“aclnnApplyAdamWV2GetWorkspaceSize”接口获取计算所需workspace大小以及包含了算子计算流程的执行器，再调用“aclnnApplyAdamWV2”接口执行计算。
 
 ```cpp
@@ -73,15 +74,15 @@ aclnnStatus aclnnApplyAdamWV2(
 
 - **参数说明：**
 
-    <table style="undefined;table-layout: fixed; width: 1345px"><colgroup>
-    <col style="width: 232px">
-    <col style="width: 125px">
-    <col style="width: 225px">
-    <col style="width: 200px">
-    <col style="width: 227px">
+    <table style="undefined;table-layout: fixed; width: 1520px"><colgroup>
+    <col style="width: 230px">
     <col style="width: 120px">
-    <col style="width: 108px">
-    <col style="width: 108px">
+    <col style="width: 330px">
+    <col style="width: 220px">
+    <col style="width: 230px">
+    <col style="width: 115px">
+    <col style="width: 130px">
+    <col style="width: 145px">
     </colgroup>
     <thead>
       <tr>
@@ -98,7 +99,7 @@ aclnnStatus aclnnApplyAdamWV2(
       <tr>
         <td>varRef（aclTensor*）</td>
         <td>输入/输出</td>
-        <td>待计算的权重输入同时也是输出，公式中的theta。</td>
+        <td>待计算的权重输入同时也是输出，公式中的θ。</td>
         <td>-</td>
         <td>FLOAT16、BFLOAT16、FLOAT32</td>
         <td>ND</td>
@@ -108,7 +109,7 @@ aclnnStatus aclnnApplyAdamWV2(
       <tr>
         <td>mRef（aclTensor*）</td>
         <td>输入/输出</td>
-        <td>adamw优化器中m参数，公式中的m。</td>
+        <td>AdamW优化器中m参数，公式中的m。</td>
         <td>-</td>
         <td>与“varRef”参数一致。</td>
         <td>ND</td>
@@ -118,7 +119,7 @@ aclnnStatus aclnnApplyAdamWV2(
       <tr>
         <td>vRef（aclTensor*）</td>
         <td>输入/输出</td>
-        <td>adamw优化器中v参数，公式中的v。</td>
+        <td>AdamW优化器中v参数，公式中的v，不能为负数。</td>
         <td>-</td>
         <td>与“varRef”参数一致。</td>
         <td>ND</td>
@@ -128,7 +129,7 @@ aclnnStatus aclnnApplyAdamWV2(
       <tr>
         <td>maxGradNormOptionalRef（aclTensor*）</td>
         <td>输入/输出</td>
-        <td>保存vRef参数的最大值。</td>
+        <td>输入maxGradNormOptionalRef与更新后的vRef比较后，得到的最大值输出到maxGradNormOptionalRef。</td>
         <td>此参数在amsgrad参数为true时必选，在amsgrad参数为false时可选。</td>
         <td>与“varRef”参数一致。</td>
         <td>ND</td>
@@ -138,7 +139,7 @@ aclnnStatus aclnnApplyAdamWV2(
       <tr>
         <td>grad（aclTensor*）</td>
         <td>输入</td>
-        <td>梯度数据，公式中的gt。</td>
+        <td>梯度数据，公式中的g<sub>t</sub>。</td>
         <td>-</td>
         <td>与“varRef”参数一致。</td>
         <td>ND</td>
@@ -148,7 +149,7 @@ aclnnStatus aclnnApplyAdamWV2(
       <tr>
         <td>step（aclTensor*）</td>
         <td>输入</td>
-        <td>迭代次数，公式中的t。</td>
+        <td>迭代次数，公式中的t，需要大于0。</td>
         <td>元素个数为1。</td>
         <td>INT64、FLOAT32</td>
         <td>ND</td>
@@ -156,9 +157,9 @@ aclnnStatus aclnnApplyAdamWV2(
         <td>x</td>
       </tr>
       <tr>
-        <td>lr（double）</td>
+        <td>lr（float）</td>
         <td>输入</td>
-        <td>学习率，公式中的eta。</td>
+        <td>学习率，公式中的η。</td>
         <td>-</td>
         <td>FLOAT</td>
         <td>-</td>
@@ -166,9 +167,9 @@ aclnnStatus aclnnApplyAdamWV2(
         <td>-</td>
       </tr>
       <tr>
-        <td>beta1（double）</td>
+        <td>beta1（float）</td>
         <td>输入</td>
-        <td>beta1参数。</td>
+        <td>β<sub>1</sub>参数。</td>
         <td>-</td>
         <td>FLOAT</td>
         <td>-</td>
@@ -176,9 +177,9 @@ aclnnStatus aclnnApplyAdamWV2(
         <td>-</td>
       </tr>
       <tr>
-        <td>beta2（double）</td>
+        <td>beta2（float）</td>
         <td>输入</td>
-        <td>beta2参数。</td>
+        <td>β<sub>2</sub>参数。</td>
         <td>-</td>
         <td>FLOAT</td>
         <td>-</td>
@@ -186,9 +187,9 @@ aclnnStatus aclnnApplyAdamWV2(
         <td>-</td>
       </tr>
       <tr>
-        <td>weightDecay（double）</td>
+        <td>weightDecay（float）</td>
         <td>输入</td>
-        <td>权重衰减系数。</td>
+        <td>权重衰减系数，公式中的λ。</td>
         <td>-</td>
         <td>FLOAT</td>
         <td>-</td>
@@ -196,7 +197,7 @@ aclnnStatus aclnnApplyAdamWV2(
         <td>-</td>
       </tr>
       <tr>
-        <td>eps（double）</td>
+        <td>eps（float）</td>
         <td>输入</td>
         <td>防止除数为0。</td>
         <td>-</td>
@@ -334,13 +335,16 @@ aclnnStatus aclnnApplyAdamWV2(
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 
 ## 约束说明
+
 - 输入张量中varRef、mRef、vRef、grad的数据类型必须一致时，数据类型支持FLOAT16、BFLOAT16、FLOAT32。
 - 输入张量中varRef、mRef、vRef、grad的shape必须保持一致。
 - 确定性计算：
   - aclnnApplyAdamWV2默认确定性实现。
 
 ## 调用示例
+
 示例代码如下，仅供参考，具体编译和执行过程请参考[编译与运行样例](../../../docs/zh/context/编译与运行样例.md)。
+
 ```Cpp
 #include <iostream>
 #include <vector>

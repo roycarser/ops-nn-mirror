@@ -8,7 +8,7 @@
 | <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>     |    √    |
 | <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>     |    √     |
 | <term>Atlas 200I/500 A2 推理产品</term>                      |    ×     |
-| <term>Atlas 推理系列产品 </term>                             |    ×     |
+| <term>Atlas 推理系列产品</term>                             |    ×     |
 | <term>Atlas 训练系列产品</term>                              |    ×   |
 
 ## 功能说明
@@ -17,6 +17,7 @@
   根据输入词频logits、topK/topP采样参数、随机采样权重分布q，进行topK-topP-sample采样计算，输出每个batch的最大词频logitsSelectIdx，以及topK-topP采样后的词频分布logitsTopKPSelect。
 
   算子包含三个可单独使能，但上下游处理关系保持不变的采样算法（从原始输入到最终输出）：TopK采样、TopP采样、指数采样（本文档中Sample所指）。它们可以构成八种计算场景。如下表所示：
+  
   | 计算场景 | TopK采样 | TopP采样 | 指数分布采样 |备注|
   | :-------:| :------:|:-------:|:-------:|:-------:|
   |Softmax-Argmax采样|×|×|×|对输入logits按每个batch，取SoftMax后取最大结果|
@@ -267,6 +268,7 @@ aclnnStatus aclnnTopKTopPSample(
         <td>-</td>
         <td>-</td>
       </tr>
+      <tr>
         <td>isNeedLogits</td>
         <td>输入</td>
         <td>表示控制logitsTopKPselect的输出条件，建议设置为0。</td>
@@ -276,7 +278,7 @@ aclnnStatus aclnnTopKTopPSample(
         <td>-</td>
         <td>-</td>
       </tr>
-      </tr>
+      <tr>
         <td>topKGuess</td>
         <td>输入</td>
         <td>表示每个batch在尝试topP部分遍历采样logits时的候选logits大小，必须为正整数。</td>
@@ -286,7 +288,7 @@ aclnnStatus aclnnTopKTopPSample(
         <td>-</td>
         <td>-</td>
       </tr>
-      </tr>
+      <tr>
         <td>logitsSelectIdx</td>
         <td>输出</td>
         <td>表示经过topK-topP-sample计算流程后，每个batch中词频最大元素max(probsOpt[batch, :])在输入logits中的位置索引。</td>
@@ -296,7 +298,7 @@ aclnnStatus aclnnTopKTopPSample(
         <td>1</td>
         <td>√</td>
       </tr>
-      </tr>
+      <tr>
         <td>logitsTopKPSelect</td>
         <td>输出</td>
         <td>表示经过topK-topP计算流程后，输入logits中剩余未被过滤的logits。</td>

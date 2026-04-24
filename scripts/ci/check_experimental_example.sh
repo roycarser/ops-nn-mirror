@@ -13,7 +13,7 @@ export BUILD_PATH="${BASE_PATH}/build"
 pr_file=$(realpath "${1:-pr_filelist.txt}")
 
 mkdir -p "${BUILD_PATH}"
-cd "${BUILD_PATH}" && rm -f CMakeCache.txt && cmake -DENABLE_EXPERIMENTAL=TRUE -DPREPROCESS_ONLY=ON ..
+cd "${BUILD_PATH}" && rm -f CMakeCache.txt && cmake -DENABLE_EXPERIMENTAL=TRUE -DPREPROCESS_ONLY=ON .. &>/dev/null
 
 cd "${BASE_PATH}"
 {
@@ -28,5 +28,10 @@ ops=(${ops//;/ })
 cd "${BASE_PATH}"
 
 for op in "${ops[@]}"; do
+    count=$(find -path "*/${op}/examples/test_aclnn*.cpp" -not -path "*/opgen/template/*" | grep "experimental" | wc -l)
+    if [[ ${count} -eq 0 ]]; then
+        echo "[WARNING] experimental op: ${op} doesn't have eager examples, skip."
+        continue
+    fi
     bash build.sh --run_example ${op} eager cust --vendor_name=ci_test  --experimental
 done

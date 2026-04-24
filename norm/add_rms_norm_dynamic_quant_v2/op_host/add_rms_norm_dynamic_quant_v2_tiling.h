@@ -21,7 +21,7 @@
 #include "util/math_util.h"
 #include "tiling/platform/platform_ascendc.h"
 #include "platform/platform_infos_def.h"
-#include "tiling_base/tiling_templates_registry.h"
+#include "op_host/tiling_templates_registry.h"
 
 
 namespace optiling {
@@ -84,8 +84,8 @@ private:
 
     uint64_t useCore_{1};
     uint64_t numFirstDim_{1};
-    uint64_t numLastDim_{1};
     uint64_t numLastDimAligned_{1};
+    uint64_t numLastDim_{1};
     uint64_t firstDimPerCore_{1};
     uint64_t firstDimPerCoreTail_{1};
     uint64_t firstDimPerLoop_{1};

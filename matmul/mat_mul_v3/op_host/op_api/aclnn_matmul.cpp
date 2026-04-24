@@ -51,7 +51,7 @@ static const int NZ_K0_VALUE_32 = 8;
 static const int NZ_STORAGE_PENULTIMATE_DIM = 16;
 static const size_t MAX_SUPPORT_MATMUL_DIMS_NUMS = 6;
 static const std::initializer_list<op::DataType> DTYPE_SUPPORT_LIST = {
-    DataType::DT_FLOAT16, DataType::DT_BF16};
+    DataType::DT_FLOAT, DataType::DT_FLOAT16, DataType::DT_BF16};
 static const std::initializer_list<op::DataType> DTYPE_SUPPORT_LIST_WITHOUT_BF16 = {
     DataType::DT_FLOAT, DataType::DT_FLOAT16};
 inline static bool CheckNotNull(const aclTensor* self, const aclTensor* mat2, const aclTensor* out)
@@ -80,15 +80,6 @@ static bool CheckWeightNzDtype(const aclTensor* self, const aclTensor* mat2)
 {
     if (mat2->GetStorageFormat() == Format::FORMAT_FRACTAL_NZ) {
         auto socVersion = GetCurrentPlatformInfo().GetSocVersion();
-        // only support fp16|bf16 weightNZ
-        if (self->GetDataType() == DataType::DT_FLOAT || mat2->GetDataType() == DataType::DT_FLOAT) {
-            OP_LOGE(
-                ACLNN_ERR_PARAM_INVALID,
-                "Float32 weight NZ is unsupported by the current SOC version [%s], now self is %s, mat2 is %s .",
-                op::ToString(socVersion).GetString(), op::ToString(self->GetDataType()).GetString(),
-                op::ToString(mat2->GetDataType()).GetString());
-            return false;
-        }
         // weightnz暂不支持self,mat2为bfloat16和float16的数据类型推导
         if ((self->GetDataType() == op::DataType::DT_FLOAT16 && mat2->GetDataType() == op::DataType::DT_BF16) ||
             (self->GetDataType() == op::DataType::DT_BF16 && mat2->GetDataType() == op::DataType::DT_FLOAT16)) {
@@ -233,8 +224,7 @@ static bool CheckFormat(
     if (noSupportFormat) {
         OP_LOGE(
             ACLNN_ERR_PARAM_INVALID,
-            " The 'self' or 'out' tensor currently not supports NZ format"
-            "format");
+            " The 'self' or 'out' tensor currently not supports NZ format");
         return false;
     }
     return true;
@@ -247,7 +237,7 @@ inline static aclnnStatus CheckInputParams(
     CHECK_RET(CheckNotNull(self, mat2, out), ACLNN_ERR_PARAM_NULLPTR);
 
     // 2. 检查输入的数据类型是否在API支持的数据类型范围之内，需要根据api定义校验
-    auto archRule = NpuArchMatMulRule::getInstance();
+    auto archRule = BuildRule();
     CHECK_RET(archRule != nullptr, ACLNN_ERR_PARAM_INVALID);
     CHECK_RET(
         archRule -> CheckInput(self, mat2, nullptr, out, cubeMathType),
@@ -368,7 +358,7 @@ aclnnStatus CheckWeightNzParam(const aclTensor* self, const aclTensor* mat2, con
     CHECK_RET(CheckWeightNzShapeValid(self, mat2), ACLNN_ERR_PARAM_INVALID);
     // 4. 检查cubeMathType
     CHECK_RET(CheckMathType(self, mat2, cubeMathType), ACLNN_ERR_PARAM_INVALID);
-    auto archRule = NpuArchMatMulRule::getInstance();
+    auto archRule = BuildRule();
     CHECK_RET(archRule != nullptr, ACLNN_ERR_PARAM_INVALID);
     CHECK_RET(
         archRule -> CheckInput(self, mat2, nullptr, out, cubeMathType),
@@ -383,7 +373,7 @@ aclnnStatus CheckWeightNzInputParams(const aclTensor* self, const aclTensor* mat
     CHECK_RET(CheckNotNull(self, mat2, out), ACLNN_ERR_PARAM_NULLPTR);
 
     // 2. 检查输入的数据类型是否在API支持的数据类型范围之内，需要根据api定义校验
-    auto archRule = NpuArchMatMulRule::getInstance();
+    auto archRule = BuildRule();
     CHECK_RET(archRule != nullptr, ACLNN_ERR_PARAM_INVALID);
     CHECK_RET(
         archRule -> CheckInput(self, mat2, nullptr, out, cubeMathType),
@@ -496,6 +486,7 @@ static const aclTensor* BuildMatMulWeightNzGraph(
 
     // Set Nz format
     mat2 = SetTensorToNZFormat(mat2, weightNzShape, executor);
+    CHECK_RET(mat2 != nullptr, nullptr);
 
     // 固定selt二维 mat2四维
     matmulOut = ExecMmOpWithBias(self, mat2, nullptr, cubeMathType, executor, transposeX2);
@@ -542,10 +533,15 @@ public:
         CHECK_RET(outputNew != nullptr, ACLNN_ERR_INNER_NULLPTR);
         FVector<int64_t> fillShape = GetShape(outputNew);
         const aclTensor* dims = executor->ConvertToTensor(fillShape.data(), fillShape.size(), op::DataType::DT_INT64);
+        CHECK_RET(dims != nullptr, ACLNN_ERR_INNER_NULLPTR);
         aclIntArray* shapeArray = executor->AllocIntArray(fillShape.data(), fillShape.size());
+        CHECK_RET(shapeArray != nullptr, ACLNN_ERR_INNER_NULLPTR);
         const aclScalar* valueScalar = executor->AllocScalar(0);
+        CHECK_RET(valueScalar != nullptr, ACLNN_ERR_INNER_NULLPTR);
         const aclTensor* valueTensor = executor->ConvertToTensor(valueScalar, output->GetDataType());
+        CHECK_RET(valueTensor != nullptr, ACLNN_ERR_INNER_NULLPTR);
         auto fillTensor = l0op::Fill(dims, valueTensor, shapeArray, executor);
+        CHECK_RET(fillTensor != nullptr, ACLNN_ERR_INNER_NULLPTR);
         convOut = fillTensor;
         return ACLNN_SUCCESS;
     };
@@ -818,7 +814,7 @@ public:
 
         // Set Nz format
         matB = SetTensorToNZFormat(matB, weightNzShape, executor);
-
+        CHECK_RET(matB != nullptr, ACLNN_ERR_INNER_NULLPTR);
         // 执行 Matmul: out = matA @ matB
         const aclTensor* out = MatmulCommonProcess(matA, matB, nullptr, output, cubeMathType, opInfo, executor, transposeX2);
         CHECK_RET(out != nullptr, ACLNN_ERR_INNER_NULLPTR);

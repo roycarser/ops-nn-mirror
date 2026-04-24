@@ -11,7 +11,6 @@
 | <term>Atlas 推理系列产品</term>                             |    √     |
 | <term>Atlas 训练系列产品</term>                              |    √     |
 
-
 ## 功能说明
 
 - 接口功能：返回给定张量的矩阵范数或者向量范数。
@@ -107,9 +106,8 @@
     </tr>
   </tbody></table>
 
-  - <term>Atlas 推理系列产品</term>、<term>Atlas 训练系列产品</term>、<term>Atlas 200I/500 A2 推理产品</term>：数据类型不支持BFLOAT16。
-
 ## 约束说明
+
 无
 
 ## 调用示例

@@ -66,21 +66,21 @@ __aicore__ inline bool OptGroupUpdateBL1(Intf *self)
     if constexpr (Intf::outputOrder == static_cast<int8_t>(ConvOutputOrder::HW_MODE)) {
         if constexpr (Intf::iterateMFirstFlag) {
             updateBL1Flag = self->ctx.woL0Iter == self->ctx.maxWoL0Iter &&
-                            self->ctx.hoL0Iter == self->ctx.maxHoL0Iter &&
-                            self->ctx.nL0Iter == self->ctx.maxNL0Iter &&
                             self->ctx.woAL1Iter == self->ctx.maxWoL1Iter &&
+                            self->ctx.hoL0Iter == self->ctx.maxHoL0Iter &&
                             self->ctx.hoAL1Iter == self->ctx.maxHoL1Iter &&
+                            self->ctx.nL0Iter == self->ctx.maxNL0Iter &&
                             self->ctx.batchIter == self->ctx.ddr2l1LoopBatch - 1;
         } else {
             updateBL1Flag = self->ctx.nL0Iter == self->ctx.maxNL0Iter &&
-                            self->ctx.woL0Iter == self->ctx.maxWoL0Iter &&
-                            self->ctx.hoL0Iter == self->ctx.maxHoL0Iter;
+                            self->ctx.hoL0Iter == self->ctx.maxHoL0Iter &&
+                            self->ctx.woL0Iter == self->ctx.maxWoL0Iter;
         }
     } else if constexpr (Intf::outputOrder == static_cast<int8_t>(ConvOutputOrder::M_MODE)) {
         if constexpr (Intf::iterateMFirstFlag) {
-            updateBL1Flag = self->ctx.mL0Iter == self->ctx.maxML0Iter &&
+            updateBL1Flag = self->ctx.mAL1Iter == self->ctx.maxMAL1Iter &&
                             self->ctx.nL0Iter == self->ctx.maxNL0Iter &&
-                            self->ctx.mAL1Iter == self->ctx.maxMAL1Iter &&
+                            self->ctx.mL0Iter == self->ctx.maxML0Iter &&
                             self->ctx.batchIter == self->ctx.ddr2l1LoopBatch - 1;
         } else {
             updateBL1Flag = self->ctx.nL0Iter == self->ctx.maxNL0Iter &&
@@ -124,9 +124,21 @@ __aicore__ inline void OptGroupSyncSet(Intf *self)
 }
 
 template <class Intf>
+__aicore__ inline void OptGroupPreloadSyncSet(Intf *self)
+{
+    if (!OptGroupUpdateBL1<Intf>(self)) {
+        return;
+    }
+
+    if ((self->ctx.groupOptIter < self->ctx.singleGroupOpt - 2)) {
+        CrossCoreSetFlag<CV_ENHANCE_MODE, PIPE_MTE1>(self->ctx.vecId + CV_SYNC_ID_MTE1_MTE3);
+    }
+}
+
+template <class Intf>
 __aicore__ inline void OptGroupUpdateLoopN(Intf *self) {
     if constexpr (Intf::hasNL0IterFlag) {
-        self->ctx.l12l0LoopN = self->ctx.nBL1Iter == self->ctx.maxNBL1Iter ?
+        self->ctx.l12l0LoopN = self->ctx.maxNBL1Iter == self->ctx.nBL1Iter ?
             CeilDiv(self->ctx.nBL1Tail, self->ctx.convTiling->nL0) : self->ctx.convTiling->multiNBL1;
         self->ctx.ddr2l1LoopInner = self->ctx.ddr2l1LoopTmp * self->ctx.l12l0LoopN;
     }
@@ -135,22 +147,22 @@ __aicore__ inline void OptGroupUpdateLoopN(Intf *self) {
 template <class Intf>
 __aicore__ inline void OptGroupUpdateLoopInner(Intf *self) {
     if (!self->ctx.kBL1fullload) {
-        if constexpr (Intf::outputOrder == static_cast<int8_t>(ConvOutputOrder::M_MODE)) {
+        if constexpr (static_cast<int8_t>(ConvOutputOrder::M_MODE) == Intf::outputOrder) {
             self->ctx.ddr2l1LoopTmp = self->ctx.outerIter == self->ctx.maxMAL1Iter ?
                 CeilDiv(self->ctx.mAL1Tail, self->ctx.mL0) : self->ctx.l12l0LoopM;
         } else {
             if constexpr (Intf::hasWL1IterFlag) {
                 self->ctx.woAL1Iter = self->ctx.outerIter % self->ctx.ddr2l1LoopW;
                 if (self->ctx.woL1SmallTail > 0) {
-                    if (self->ctx.woAL1Iter == self->ctx.maxWoL1Iter) {
-                        self->ctx.currentWoL1 = self->ctx.woL1SmallTail;
-                    } else if (self->ctx.woAL1Iter == self->ctx.maxWoL1Iter - 1) {
+                    if (self->ctx.woAL1Iter == self->ctx.maxWoL1Iter - 1) {
                         self->ctx.currentWoL1 = self->ctx.woAL1Tail;
+                    } else if (self->ctx.woAL1Iter == self->ctx.maxWoL1Iter) {
+                        self->ctx.currentWoL1 = self->ctx.woL1SmallTail;
                     } else {
                         self->ctx.currentWoL1 = self->ctx.convTiling->woL1;
                     }
                 } else {
-                    self->ctx.currentWoL1 = self->ctx.woAL1Iter == self->ctx.maxWoL1Iter ?
+                    self->ctx.currentWoL1 = self->ctx.maxWoL1Iter == self->ctx.woAL1Iter ?
                         self->ctx.woAL1Tail : self->ctx.convTiling->woL1;
                 }
             }
@@ -174,6 +186,22 @@ __aicore__ inline void OptGroupUpdateLoopInner(Intf *self) {
 }
 
 template <class Intf>
+__aicore__ inline void OptGroupIterInit(Intf *self)
+{
+    self->ctx.kBL1Iter = 0;
+    self->ctx.nBL1Iter = 0;
+    self->ctx.innerIter = 0;
+    self->ctx.outerIter = 0;
+    self->ctx.loadUB2L1Iter = 0;
+    self->ctx.pingPongFlag = self->ctx.vecId == 0 ? 0 : self->ctx.bL1LoadTimes % DOUBLE_BUF;
+    OptGroupUpdateLoopN<Intf>(self);
+    if constexpr (Intf::iterateNFirstFlag) {
+        OptGroupUpdateLoopInner<Intf>(self);
+    }
+    self->ctx.ddr2l1LoopInner = self->ctx.ddr2l1LoopTmp * self->ctx.l12l0LoopN;
+}
+
+template <class Intf>
 __aicore__ inline bool OptGroupUB2L1Iter(Intf *self)
 {
     if (self->ctx.loadUB2L1Iter == 0) {
@@ -182,10 +210,10 @@ __aicore__ inline bool OptGroupUB2L1Iter(Intf *self)
 
     if (!self->ctx.kBL1fullload) {
         self->ctx.kBL1Iter++;
-        if (self->ctx.kBL1Iter == self->ctx.ddr2l1LoopKB) {
-            self->ctx.kBL1Iter = 0;
-        } else {
+        if (self->ctx.kBL1Iter != self->ctx.ddr2l1LoopKB) {
             return true;
+        } else {
+            self->ctx.kBL1Iter = 0;
         }
 
         // Total iter merge before nBL1Iter.
@@ -218,22 +246,6 @@ __aicore__ inline bool OptGroupUB2L1Iter(Intf *self)
     }
 
     return false;
-}
-
-template <class Intf>
-__aicore__ inline void OptGroupIterInit(Intf *self)
-{
-    self->ctx.kBL1Iter = 0;
-    self->ctx.nBL1Iter = 0;
-    self->ctx.innerIter = 0;
-    self->ctx.outerIter = 0;
-    self->ctx.loadUB2L1Iter = 0;
-    self->ctx.pingPongFlag = self->ctx.vecId == 0 ? 0 : self->ctx.bL1LoadTimes % DOUBLE_BUF;
-    OptGroupUpdateLoopN<Intf>(self);
-    if constexpr (Intf::iterateNFirstFlag) {
-        OptGroupUpdateLoopInner<Intf>(self);
-    }
-    self->ctx.ddr2l1LoopInner = self->ctx.ddr2l1LoopTmp * self->ctx.l12l0LoopN;
 }
 
 template <class Intf>
@@ -284,6 +296,52 @@ __aicore__ inline bool OptGroupVecImpl(Intf *self)
         CrossCoreSetFlag<CV_ENHANCE_MODE, PIPE_MTE3>(CV_SYNC_ID_MTE3_MTE1);
 
         self->ctx.loadUB2L1Iter++;
+    }
+
+    return false;
+}
+
+template <class Intf>
+__aicore__ inline bool OptGroupPreloadVecImpl(Intf *self)
+{
+    while (self->ctx.groupOptIter < self->ctx.singleGroupOpt) {
+        if (self->ctx.vecId != (self->ctx.groupOptIter % VEC_NUM)) {
+            self->ctx.groupOptIter++;
+            continue;
+        }
+
+        // For next nddma wait nd2nz
+        event_t eventId = static_cast<event_t>(self->ctx.pipe.FetchEventID(HardEvent::V_MTE2));
+        SetFlag<HardEvent::V_MTE2>(eventId);
+        WaitFlag<HardEvent::V_MTE2>(eventId);
+
+        self->ctx.optGroupLoadGm2UBTools.LoadGM2UB();
+
+        // For nd2nz wait nddma
+        eventId = static_cast<event_t>(self->ctx.pipe.FetchEventID(HardEvent::MTE2_V));
+        SetFlag<HardEvent::MTE2_V>(eventId);
+        WaitFlag<HardEvent::MTE2_V>(eventId);
+        // For next nd2nz wait ub2l1
+        eventId = static_cast<event_t>(self->ctx.pipe.FetchEventID(HardEvent::MTE3_V));
+        SetFlag<HardEvent::MTE3_V>(eventId);
+        WaitFlag<HardEvent::MTE3_V>(eventId);
+
+        self->ctx.optGroupTransND2NZTools.TransND2NZ();
+
+        // For ub2l1 wait nd2nz
+        eventId = static_cast<event_t>(self->ctx.pipe.FetchEventID(HardEvent::V_MTE3));
+        SetFlag<HardEvent::V_MTE3>(eventId);
+        WaitFlag<HardEvent::V_MTE3>(eventId);
+
+        OptGroupIterInit<Intf>(self);
+        if (!(self->ctx.groupOptIter == 0 || self->ctx.groupOptIter == 1)) {
+            CrossCoreWaitFlag<CV_ENHANCE_MODE, PIPE_MTE3>(CV_SYNC_ID_MTE1_MTE3);
+        }
+
+        self->ctx.optGroupLoadUB2L1Tools.LoadUB2L1();
+        CrossCoreSetFlag<CV_ENHANCE_MODE, PIPE_MTE3>(CV_SYNC_ID_MTE3_MTE1);
+
+        self->ctx.groupOptIter++;
     }
 
     return false;

@@ -1,5 +1,7 @@
 # aclnnConvDepthwise2d
 
+[📄 查看源码](https://gitcode.com/cann/ops-nn/tree/master/conv/convolution_forward)
+
 ## 产品支持情况
 
 | 产品                                                         | 是否支持 |
@@ -58,17 +60,17 @@ aclnnStatus aclnnConvDepthwise2d(
 
   <table>
   <tr>
-  <th style="width:420px">参数名</th>
+  <th style="width:220px">参数名</th>
   <th style="width:120px">输入/输出</th>
-  <th style="width:300px">描述</th>
-  <th style="width:420px">使用说明</th>
-  <th style="width:212px">数据类型</th>
-  <th style="width:100px">数据格式</th>
-  <th style="width:100px">维度（shape）</th>
+  <th style="width:280px">描述</th>
+  <th style="width:350px">使用说明</th>
+  <th style="width:200px">数据类型</th>
+  <th style="width:120px">数据格式</th>
+  <th style="width:130px">维度（shape）</th>
   <th style="width:145px">非连续 Tensor</th>
   </tr>
   <tr>
-  <td>self（const aclTensor*）</td>
+  <td>self（aclTensor*）</td>
   <td>输入</td>
   <td>公式中的 self，表示卷积输入。</td>
   <td><ul><li>支持空 Tensor。</li><li>数据类型与 weight 的数据类型需满足数据类型推导规则（参见<a href="../../../docs/zh/context/互推导关系.md">互推导关系</a>）。</li><li>shape 为（N,C<sub>in</sub>,H<sub>in</sub>,W<sub>in</sub>）。</li><li>N≥0，C≥1，H≥0，W≥0。</li></ul></td>
@@ -78,7 +80,7 @@ aclnnStatus aclnnConvDepthwise2d(
   <td style="text-align:center">√</td>
   </tr>
   <tr>
-  <td>weight（const aclTensor*）</td>
+  <td>weight（aclTensor*）</td>
   <td>输入</td>
   <td>公式中的 weight，表示卷积权重。</td>
   <td><ul><li>支持空 Tensor。</li><li>数据类型与 self 的数据类型需满足数据类型推导规则（参见<a href="../../../docs/zh/context/互推导关系.md">互推导关系</a>）。</li><li>shape 为（C<sub>out</sub>,C<sub>in</sub>/groups,K<sub>H</sub>,K<sub>W</sub>）。</li><li>weight 第一维的数值应等于 self 通道数的整数倍，第二维仅能为1。</li><li>所有维度≥1，H、W 维度应小于 self 的 H、W 维度。</li></ul></td>
@@ -91,14 +93,14 @@ aclnnStatus aclnnConvDepthwise2d(
   <td>kernelSize（aclIntArray*）</td>
   <td>输入</td>
   <td>卷积核尺寸。</td>
-  <td><ul><li>（INT64, INT64）型元组。</li><li>数值为weight的H、W两维的数值。</li></td>
+  <td><ul><li>（INT64, INT64）型元组。</li><li>数值为weight的H、W两维的数值。</li></ul></td>
   <td>INT64</td>
   <td>-</td>
   <td>-</td>
   <td style="text-align:center">-</td>
   </tr>
   <tr>
-  <td>bias（const aclTensor*）</td>
+  <td>bias（aclTensor*）</td>
   <td>输入</td>
   <td>公式中的 bias，表示卷积偏置。</td>
   <td><ul><li>shape 为（C<sub>out</sub>）。</li><li>一维且数值与 weight 第一维相等。</li></ul></td>
@@ -190,12 +192,11 @@ aclnnStatus aclnnConvDepthwise2d(
     <col style="width:1050px">
     </colgroup>
    <thead>
-  
   <tr>
   <td>返回值</td>
   <td>错误码</td>
   <td>描述</td>
-  </tr>
+  </tr> </thead>
   <tr>
   <td align="left">ACLNN_ERR_PARAM_NULLPTR</td>
   <td align="left">161001</td>
@@ -303,7 +304,7 @@ aclnnStatus aclnnConvDepthwise2d(
         <li>为 1（ALLOW_FP32_DOWN_PRECISION）时，当输入是 FLOAT 允许转换为 HFLOAT32 计算。</li>
         <li>为 2（USE_FP16）时，当输入是 BFLOAT16 不支持该选项。</li>
         <li>为 3（USE_HF32）时，当输入是 FLOAT 转换为 HFLOAT32 计算。</li>
-      <ul>
+      </ul>
     </td>
     <td>
       <ul>

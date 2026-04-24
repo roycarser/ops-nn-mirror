@@ -70,14 +70,14 @@
 <td>输入</td>
 <td>公式中的输入张量 x。</td>
 <td>FLOAT8_E4M3FN、INT8、HIFLOAT8</td>
-<td>NCDHW、NDHWC</td>
+<td>NCDHW</td>
 </tr>
 <tr>
 <td>filter</td>
 <td>输入</td>
 <td>公式中的卷积权重张量 filter。</td>
 <td>FLOAT8_E4M3FN、INT8、HIFLOAT8</td>
-<td>NCDHW、DHWCN</td>
+<td>NCDHW</td>
 </tr>
 <tr>
 <td>scale</td>
@@ -104,13 +104,13 @@
 <td>y</td>
 <td>输出</td>
 <td>公式中的输出张量 y。</td>
-<td>FLOAT16、FLOAT、FLOAT8_E4M3FN、INT8、HIFLOAT8</td>
-<td>NCDHW、NDHWC</td>
+<td>FLOAT、FLOAT16、BFLOAT16、FLOAT8_E4M3FN、HIFLOAT8</td>
+<td>NCDHW</td>
 </tr>
 <tr>
 <td>dtype</td>
 <td>属性</td>
-<td>表示输出 y 的数据类型。支持的列表包括 [-1(默认)，0(FLOAT)，1(FLOAT16)，2(INT8)，27(BF16)， 34(HIFLOAT8), 36(FLOAT8_E4M3FN)]。</td>
+<td>表示输出 y 的数据类型。支持的列表包括 [-1(默认)，0(FLOAT)，1(FLOAT16)，27(BFLOAT16)，34(HIFLOAT8)，36(FLOAT8_E4M3FN)]。</td>
 <td>BOOL</td>
 <td>-</td>
 </tr>
@@ -145,7 +145,7 @@
 <tr>
 <td>data_format</td>
 <td>可选属性</td>
-<td>输入数据格式，支持 "NCDHW"、"NDHWC"。</td>
+<td>输入数据格式，支持 "NCDHW"。</td>
 <td>STRING</td>
 <td>-</td>
 </tr>
@@ -175,13 +175,11 @@
 
 ## 约束说明
 
-
 - Ascend 950PR/Ascend 950DT ：
   - `x` 的数据类型必须与 `filter` 一致。`N` 维度大小应该大于等于 0。`D`、`H`、`W` 维度大小应该大于等于 0（等于 0 的场景仅在输出 `y` 的 `D`、`H`、`W` 维度也等于 0 时支持）。`C` 维度大小应该大于等于 0（等于 0 的场景仅在输出 `y` 的任意维度也等于 0 时支持）。
   - 对于 `filter` 输入，`H`、`W` 的大小应该在 [1, 511] 的范围内， `D`维度大小应该在[1, 100000]范围内。`N` 维度大小应该大于等于 0（等于 0 的场景仅在输入 `bias`、输出 `y` 的 `N` 维度也等于 0 时支持），`C` 维度大小的支持情况与输入 `x` 的 `C` 维度 / groups 大小一致。
   - `bias`和`scale`维度大小应该与`filter`的`N`维度大小一致。
   - 支持的数据类型组合入下表：
-
 
   <table>
   <tr>
@@ -198,7 +196,7 @@
   <td style="text-align:center">INT8</td>
   <td style="text-align:center">INT64/UINT64</td>
   <td style="text-align:center">INT32</td>
-  <td style="text-align:center">FLOAT16/INT8</td>
+  <td style="text-align:center">FLOAT16</td>
   </tr>
   <tr>
   <td style="text-align:center">HIFLOAT8</td>
@@ -222,13 +220,6 @@
   <td style="text-align:center">ND</td>
   <td style="text-align:center">NCDHW</td>
   </tr>
-  <tr>
-  <td style="text-align:center">NDHWC</td>
-  <td style="text-align:center">DHWCN</td>
-  <td style="text-align:center">ND</td>
-  <td style="text-align:center">ND</td>
-  <td style="text-align:center">NDHWC</td>
-  </tr>
   </table>
 
 - `x`、`filter`、`bias`、`scale`、`y` 中每一组 `tensor` 的每一维大小都应不大于 1000000。
@@ -240,7 +231,6 @@
 - 如果任何参数超出上述范围，算子的正确性无法保证。
 
 - 由于硬件资源限制，算子在部分参数取值组合场景下会执行失败，请根据日志信息提示分析并排查问题。若无法解决，请单击 [Link](https://www.hiascend.com/support) 获取技术支持。
-
 
 ## 调用说明
 

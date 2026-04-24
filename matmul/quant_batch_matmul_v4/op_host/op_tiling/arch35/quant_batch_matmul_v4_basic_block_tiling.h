@@ -23,7 +23,7 @@
 #include <vector>
 
 #include "error_util.h"
-#include "../../../op_kernel/arch35/quant_batch_matmul_v4_tiling_data.h"
+#include "../../../op_kernel/arch35/quant_batch_matmul_v4_tiling_data_apt.h"
 
 using std::ignore;
 using std::make_tuple;
@@ -70,6 +70,8 @@ constexpr int64_t K_MTE2_ALIGN_K_THRESHOLD = 4096; // 当原始K大于等于这�
 constexpr int64_t BASE_N_THRESHOLD = 128;
 constexpr int64_t BASE_M_THRESHOLD = 64;
 constexpr double EPSILON = 1e-9;
+constexpr int64_t DEFAULT_FALLBACK_BASEM = 256L;
+constexpr int64_t MX_K_ALIGN_SIZE = 64L;
 
 struct PlatformParam {
     int64_t blockNum = 0;
@@ -184,6 +186,8 @@ protected:
     void UpdateL1ParamWithScaleFactor(L1TilingParam& l1TilingParam, int64_t& mte2DataSize, double& mte2Cost, bool& ret, const StepKParam& stepKParams);
     bool CheckL1TilingInvalid(int64_t stepKa, int64_t stepKb, int64_t stepKMax);
     bool GetFinalResult();
+    bool GetFallbackTiling();
+    bool GetFallbackBaseK();
     bool ValidateTilingResult() const;
     void AddOptionalSolution();
     void PrintFinalResult(const BasicBlockParam &param, bool enable) const;

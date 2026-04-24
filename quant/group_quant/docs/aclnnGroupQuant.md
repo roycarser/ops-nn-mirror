@@ -76,7 +76,7 @@ aclnnStatus aclnnGroupQuant(
       <td>x（aclTensor*）</td>
       <td>输入</td>
       <td>表示需要执行量化的输入，对应公式中的`x`。</td>
-      <td><ul><li>支持空Tensor。</li><li>如果`dstType`为3(INT32)，shape的最后一维需要能被8整除。<li>如果`dstType`为29(INT4)，shape的最后一维需要能被2整除。</li></ul></td>
+      <td><ul><li>支持空Tensor。</li>如果`dstType`为3(INT32)，shape的最后一维需要能被8整除。<li>如果`dstType`为29(INT4)，shape的最后一维需要能被2整除。</li></ul></td>
       <td>FLOAT32，FLOAT16，BFLOAT16</td>
       <td>ND</td>
       <td>2</td>
@@ -155,7 +155,7 @@ aclnnStatus aclnnGroupQuant(
   </tbody>
   </table>
 
-- **返回值：**
+- **返回值**
 
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 
@@ -237,7 +237,7 @@ aclnnStatus aclnnGroupQuant(
   </tbody>
   </table>
 
-- **返回值：**
+- **返回值**
 
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 

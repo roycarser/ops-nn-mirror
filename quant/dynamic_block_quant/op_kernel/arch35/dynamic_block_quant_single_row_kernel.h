@@ -71,7 +71,9 @@ private:
 
     int32_t colAlign_ = BLOCK_BYTE_32 / sizeof(OUT_TYPE); // col 32Byte对齐
     uint16_t maxValue_ = 0x7fff;
-    uint16_t infValue_;
+    uint32_t infValue_;
+    float fp8MaxValue_ = 0;
+
     static constexpr AscendC::MicroAPI::CastTrait castTrait32toh8Zero = []() {
         if constexpr (ROUND_MODE == 1 || ROUND_MODE == 4) {
             return AscendC::MicroAPI::CastTrait{
@@ -95,14 +97,10 @@ __aicore__ inline void DynamicBlockQuantSingleRow<IN_TYPE, OUT_TYPE, ROUND_MODE>
         return;
     }
 
-    #if (__NPU_ARCH__ == 3101)
+    #if (__NPU_ARCH__ == 3510)
         AscendC::SetCtrlSpr<FLOAT_OVERFLOW_MODE_CTRL, FLOAT_OVERFLOW_MODE_CTRL>(0);
     #endif
-    if constexpr (IsSameType<IN_TYPE, half>::value) {
-        infValue_ = FP16_INF_VALUE;    
-    } else {
-        infValue_ = BF16_INF_VALUE;
-    }
+    infValue_ = FP32_INF_VALUE;
     // Compute BlockOffset
     int32_t coreRowIdx = blockIdx_ / tilingData_->colTileNum;
     int32_t coreColIdx = blockIdx_ % tilingData_->colTileNum;
@@ -115,13 +113,13 @@ __aicore__ inline void DynamicBlockQuantSingleRow<IN_TYPE, OUT_TYPE, ROUND_MODE>
         rowBlockOffset = coreRowIdx * tilingData_->normalCoreRowTileNum;
         rowCoreNum_ =
             Min(tilingData_->normalCoreRowTileNum * tilingData_->blockSizeRow,
-                tilingData_->rowNum - rowBlockOffset * tilingData_->blockSizeRow);
+                tilingData_->batchNum * tilingData_->rowNum - rowBlockOffset * tilingData_->blockSizeRow);
     } else {
         rowBlockOffset = tilingData_->rowNormalCoreNum * tilingData_->normalCoreRowTileNum +
                          (coreRowIdx - tilingData_->rowNormalCoreNum) * tilingData_->tailCoreRowTileNum;
         rowCoreNum_ =
             Min(tilingData_->tailCoreRowTileNum * tilingData_->blockSizeRow,
-                tilingData_->rowNum - rowBlockOffset * tilingData_->blockSizeRow);
+                tilingData_->batchNum * tilingData_->rowNum - rowBlockOffset * tilingData_->blockSizeRow);
     }
 
     if (coreColIdx < tilingData_->colNormalCoreNum) {
@@ -152,14 +150,11 @@ __aicore__ inline void DynamicBlockQuantSingleRow<IN_TYPE, OUT_TYPE, ROUND_MODE>
     rowUbBlockNum_ = Ceil(rowUbNum_, tilingData_->blockSizeRow);
     colUbBlockNum_ = Ceil(colUbNum_, tilingData_->blockSizeCol);
 
-    int16_t scalePadding = BLOCK_BYTE_32 / sizeof(float);
-    int16_t colPadding = BLOCK_BYTE_32 / sizeof(OUT_TYPE);
-
     // Init Buffer
     tPipe_->InitBuffer(inQueue_, DB_BUFFER, tilingData_->rowUbFactor * tilingData_->colUbFactor * sizeof(IN_TYPE));
     tPipe_->InitBuffer(outQueue_, DB_BUFFER, tilingData_->rowUbFactor * tilingData_->colUbFactor * sizeof(OUT_TYPE));
     tPipe_->InitBuffer(
-        scaleQueue_, DB_BUFFER, scalePadding * tilingData_->colUbBlockLoopNum * tilingData_->rowUbBlockLoopNum * sizeof(float));
+        scaleQueue_, DB_BUFFER, tilingData_->colUbBlockLoopNum * tilingData_->rowUbBlockLoopNum * BLOCK_BYTE_32);
 }
 
 template <typename IN_TYPE, typename OUT_TYPE, int64_t ROUND_MODE>
@@ -169,6 +164,18 @@ inline __aicore__ void DynamicBlockQuantSingleRow<IN_TYPE, OUT_TYPE, ROUND_MODE>
         return;
     }
 
+    if constexpr (IsSameType<OUT_TYPE, fp8_e5m2_t>::value) {
+        fp8MaxValue_ = FP8_E5M2_MAX_VALUE;
+    } else if constexpr (IsSameType<OUT_TYPE, fp8_e4m3fn_t>::value) {
+        fp8MaxValue_ = FP8_E4M3_MAX_VALUE;
+    } else if constexpr (IsSameType<OUT_TYPE, hifloat8_t>::value) {
+        if (tilingData_->dstTypeMax != 0) {
+            fp8MaxValue_ = tilingData_->dstTypeMax;
+        }
+        else {
+            fp8MaxValue_ = HIFP8_MAX_VALUE;
+        }
+    }
     uint64_t rowBaseOffset = 0;
     uint64_t rowScaleBaseOffset = 0;
     uint64_t rowLoopNum = rowCoreNum_ / rowUbNum_;
@@ -216,13 +223,10 @@ inline __aicore__ void DynamicBlockQuantSingleRow<IN_TYPE, OUT_TYPE, ROUND_MODE>
     uint64_t offset, uint64_t rowSize, uint64_t colSize)
 {
     LocalTensor<IN_TYPE> xLocal = inQueue_.AllocTensor<IN_TYPE>();
-    uint16_t dtypeSizeAlign = BLOCK_BYTE_32 / sizeof(IN_TYPE);
-    uint32_t inputColAlign = (colSize + dtypeSizeAlign - 1) / dtypeSizeAlign * dtypeSizeAlign;
-    uint32_t dstStride = 0;
     DataCopyExtParams dataCopyExtParams = {
         static_cast<uint16_t>(rowSize), static_cast<uint32_t>(colSize * sizeof(IN_TYPE)),
-        static_cast<uint32_t>((tilingData_->colNum - colSize) * sizeof(IN_TYPE)), static_cast<uint32_t>(dstStride), 0};
-    DataCopyPadExtParams<IN_TYPE> dataCopyPadExtParams = {true, 0, static_cast<uint8_t>(inputColAlign - colSize), 0};
+        static_cast<uint32_t>((tilingData_->colNum - colSize) * sizeof(IN_TYPE)), static_cast<uint32_t>(0), 0};
+    DataCopyPadExtParams<IN_TYPE> dataCopyPadExtParams = {false, 0, 0, 0};
     DataCopyPad(xLocal, xGm_[offset], dataCopyExtParams, dataCopyPadExtParams);
     inQueue_.EnQue(xLocal);
 }
@@ -264,19 +268,10 @@ inline __aicore__ void DynamicBlockQuantSingleRow<IN_TYPE, OUT_TYPE, ROUND_MODE>
     uint64_t offset, uint64_t rowSize, uint64_t colSize)
 {
     LocalTensor<float> scaleLocal = scaleQueue_.DeQue<float>();
-    uint32_t srcStride = 0;
-    int64_t scaleGmOffset = 0;
     int64_t scaleLocalOffset = 0;
-    uint16_t scaleLocalPadding = BLOCK_BYTE_32 / sizeof(float);
-    for (uint16_t rowIdx = 0; rowIdx < static_cast<uint16_t>(rowSize); rowIdx++) {
-        for (uint16_t colIdx = 0; colIdx < static_cast<uint16_t>(colSize); colIdx++) {
-            scaleGmOffset = offset + rowIdx * tilingData_->colBlockLoopNum + colIdx;
-            scaleLocalOffset = rowIdx * colSize * scaleLocalPadding + colIdx * scaleLocalPadding;
-            DataCopyExtParams dataCopyExtParams = {
-            static_cast<uint16_t>(1), static_cast<uint32_t>(1 * sizeof(float)), srcStride, 0, 0};
-            DataCopyPad(scaleGm_[scaleGmOffset], scaleLocal[scaleLocalOffset], dataCopyExtParams);
-        }
-    }
+    DataCopyExtParams dataCopyExtParams = {
+        static_cast<uint16_t>(rowSize), static_cast<uint32_t>(1 * sizeof(float) * colSize), 0, static_cast<uint32_t>((tilingData_->colBlockLoopNum - colSize) * sizeof(float)), 0};
+    DataCopyPad<float, PaddingMode::Compact>(scaleGm_[offset], scaleLocal[scaleLocalOffset], dataCopyExtParams);
     scaleQueue_.FreeTensor(scaleLocal);
 }
 
@@ -293,9 +288,8 @@ inline __aicore__ void DynamicBlockQuantSingleRow<IN_TYPE, OUT_TYPE, ROUND_MODE>
     uint16_t vfRowBlockSize = rowBlockSize;
     uint16_t vfColBlockSize = colBlockSize;
     uint16_t normalColBlockLoop = colBlockSize - 1;
-    uint32_t dtypeSize = sizeof(IN_TYPE);
     uint16_t scalePadding = BLOCK_BYTE_32 / sizeof(float);
-    uint16_t VL = AscendC::VECTOR_REG_WIDTH / dtypeSize;
+    uint16_t VL = AscendC::VECTOR_REG_WIDTH / sizeof(IN_TYPE);
     uint16_t tailBlockSize = colSize - (colBlockSize - 1) * tilingData_->blockSizeCol;
     uint16_t normalLoopNum = (tilingData_->blockSizeCol + VL - 1) / VL;
     uint16_t tailLoopNum = (tailBlockSize + VL - 1) / VL;
@@ -322,29 +316,23 @@ inline __aicore__ void DynamicBlockQuantSingleRow<IN_TYPE, OUT_TYPE, ROUND_MODE>
         AscendC::MicroAPI::RegTensor<float> vReg18;
         AscendC::MicroAPI::RegTensor<OUT_TYPE> vReg15;
         AscendC::MicroAPI::RegTensor<OUT_TYPE> vReg16;
-        AscendC::MicroAPI::MaskReg maskReg0;
         AscendC::MicroAPI::MaskReg maskReg1;
         AscendC::MicroAPI::MaskReg maskReg2;
         AscendC::MicroAPI::MaskReg maskReg3;
-        AscendC::MicroAPI::MaskReg notZeroMaskReg;
+        AscendC::MicroAPI::MaskReg scaleMaskReg;
         AscendC::MicroAPI::MaskReg defaultMaskReg = AscendC::MicroAPI::CreateMask<IN_TYPE>();
         AscendC::MicroAPI::MaskReg inputMaskReg = AscendC::MicroAPI::CreateMask<IN_TYPE>();
 
-        AscendC::MicroAPI::RegTensor<uint32_t> vRegInvFPMax;
+        AscendC::MicroAPI::RegTensor<float> fp8MaxValue;
         AscendC::MicroAPI::RegTensor<float> reciprocalScale;
         AscendC::MicroAPI::RegTensor<float> minScaleReg;
+        MicroAPI::UnalignRegForStore ureg;
         AscendC::MicroAPI::Duplicate(reciprocalScale, 1.0f);
         AscendC::MicroAPI::Duplicate(minScaleReg, tilingData_->minScale);
         AscendC::MicroAPI::Duplicate((AscendC::MicroAPI::RegTensor<uint16_t>&)vRegFp16Max, maxValue_);
 
         // FP_MAX
-        if constexpr (IsSameType<OUT_TYPE, fp8_e5m2_t>::value) {
-            AscendC::MicroAPI::Duplicate(vRegInvFPMax, INV_FP8_E5M2_MAX_VALUE);
-        } else if constexpr (IsSameType<OUT_TYPE, fp8_e4m3fn_t>::value) {
-            AscendC::MicroAPI::Duplicate(vRegInvFPMax, INV_FP8_E4M3_MAX_VALUE);
-        } else {
-            AscendC::MicroAPI::Duplicate(vRegInvFPMax, INV_HIFP8_MAX_VALUE);
-        }
+        AscendC::MicroAPI::Duplicate(fp8MaxValue, fp8MaxValue_);
 
         static constexpr AscendC::MicroAPI::CastTrait castTraitZero = {
             AscendC::MicroAPI::RegLayout::ZERO, AscendC::MicroAPI::SatMode::NO_SAT,
@@ -364,9 +352,8 @@ inline __aicore__ void DynamicBlockQuantSingleRow<IN_TYPE, OUT_TYPE, ROUND_MODE>
                     AscendC::MicroAPI::DataCopy(vReg0, xLocal + rowIdx * inputColAlign + colIdx * tilingData_->blockSizeCol + vlLoopIdx * VL);
                     AscendC::MicroAPI::And((AscendC::MicroAPI::RegTensor<uint16_t>&)vReg3, (AscendC::MicroAPI::RegTensor<uint16_t>&)vReg0,
              (AscendC::MicroAPI::RegTensor<uint16_t>&)vRegFp16Max, inputMaskReg);
-                    AscendC::MicroAPI::CompareScalar<uint16_t, CMPMODE::LT>(maskReg0, (AscendC::MicroAPI::RegTensor<uint16_t>&)vReg3, infValue_, inputMaskReg);
 
-                    AscendC::MicroAPI::Max<IN_TYPE, AscendC::MicroAPI::MaskMergeMode::MERGING>(vReg2, vReg2, vReg3, maskReg0);
+                    AscendC::MicroAPI::Max<IN_TYPE, AscendC::MicroAPI::MaskMergeMode::MERGING>(vReg2, vReg2, vReg3, inputMaskReg);
                 }
 
                 AscendC::MicroAPI::ReduceMax((AscendC::MicroAPI::RegTensor<uint16_t>&)vReg3, (AscendC::MicroAPI::RegTensor<uint16_t>&)vReg2, defaultMaskReg);
@@ -378,14 +365,17 @@ inline __aicore__ void DynamicBlockQuantSingleRow<IN_TYPE, OUT_TYPE, ROUND_MODE>
                 AscendC::MicroAPI::Cast<float, IN_TYPE, castTraitZero>(vReg5, vReg4, defaultMaskReg);
 
                 // input_max / FP_MAX
-                AscendC::MicroAPI::Mul(vReg7, vReg5, (AscendC::MicroAPI::RegTensor<float>&)vRegInvFPMax, defaultMaskReg);
+                AscendC::MicroAPI::Div<float, &mode>(vReg8, vReg5, fp8MaxValue, defaultMaskReg);
+                AscendC::MicroAPI::CompareScalar<uint32_t, CMPMODE::LT>(scaleMaskReg, (AscendC::MicroAPI::RegTensor<uint32_t>&)vReg8, infValue_, defaultMaskReg);
                 // Min(input_max / FP_MAX, 1 / minScale)
-                AscendC::MicroAPI::Min(vReg8, vReg7, reciprocalScale, defaultMaskReg);
+                AscendC::MicroAPI::Min<float, AscendC::MicroAPI::MaskMergeMode::MERGING>(vReg8, vReg8, reciprocalScale, scaleMaskReg);
 
                 // copy out scale
-                AscendC::MicroAPI::DataCopy<float, AscendC::MicroAPI::StoreDist::DIST_FIRST_ELEMENT_B32>(
-                    scaleLocal + rowIdx * vfColBlockSize * scalePadding + colIdx * scalePadding, vReg8, defaultMaskReg);
-
+                MicroAPI::StoreUnAlign<float, MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                    scaleLocal, vReg8, ureg, static_cast<uint32_t>(1));
+                MicroAPI::StoreUnAlignPost<float, MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                    scaleLocal, ureg, static_cast<int32_t>(0));
+                
                 curSize = tilingData_->blockSizeCol;
                 for(uint16_t vlLoopIdx = 0; vlLoopIdx < normalLoopNum; vlLoopIdx++) {
                     inputMaskReg = AscendC::MicroAPI::UpdateMask<IN_TYPE>(curSize);
@@ -396,20 +386,12 @@ inline __aicore__ void DynamicBlockQuantSingleRow<IN_TYPE, OUT_TYPE, ROUND_MODE>
                     AscendC::MicroAPI::Div<float, &mode>(vReg13, vReg11, vReg8, defaultMaskReg);
                     AscendC::MicroAPI::Div<float, &mode>(vReg14, vReg12, vReg8, defaultMaskReg);
 
-                    AscendC::MicroAPI::And((AscendC::MicroAPI::RegTensor<uint16_t>&)vReg3, (AscendC::MicroAPI::RegTensor<uint16_t>&)vReg0,
-             (AscendC::MicroAPI::RegTensor<uint16_t>&)vRegFp16Max, inputMaskReg);
-                    AscendC::MicroAPI::CompareScalar<uint16_t, CMPMODE::GE>(maskReg1, (AscendC::MicroAPI::RegTensor<uint16_t>&)vReg3, infValue_, inputMaskReg);
-                    
-                    AscendC::MicroAPI::MaskUnPack<AscendC::MicroAPI::HighLowPart::LOWEST>(maskReg2, maskReg1);
-                    AscendC::MicroAPI::MaskUnPack<AscendC::MicroAPI::HighLowPart::HIGHEST>(maskReg3, maskReg1);
-                    AscendC::MicroAPI::Select(vReg17, vReg11, vReg13, maskReg2);
-                    AscendC::MicroAPI::Select(vReg18, vReg12, vReg14, maskReg3);
                     if constexpr (IsSameType<OUT_TYPE, hifloat8_t>::value) {
-                        AscendC::MicroAPI::Cast<OUT_TYPE, float, castTrait32toh8Zero>(vReg15, vReg17, defaultMaskReg);
-                        AscendC::MicroAPI::Cast<OUT_TYPE, float, castTrait32toh8Zero>(vReg16, vReg18, defaultMaskReg);
+                        AscendC::MicroAPI::Cast<OUT_TYPE, float, castTrait32toh8Zero>(vReg15, vReg13, defaultMaskReg);
+                        AscendC::MicroAPI::Cast<OUT_TYPE, float, castTrait32toh8Zero>(vReg16, vReg14, defaultMaskReg);
                     } else {
-                        AscendC::MicroAPI::Cast<OUT_TYPE, float, castTrait32tofp8>(vReg15, vReg17, defaultMaskReg);
-                        AscendC::MicroAPI::Cast<OUT_TYPE, float, castTrait32tofp8>(vReg16, vReg18, defaultMaskReg);
+                        AscendC::MicroAPI::Cast<OUT_TYPE, float, castTrait32tofp8>(vReg15, vReg13, defaultMaskReg);
+                        AscendC::MicroAPI::Cast<OUT_TYPE, float, castTrait32tofp8>(vReg16, vReg14, defaultMaskReg);
                     }
 
                     AscendC::MicroAPI::MaskUnPack<AscendC::MicroAPI::HighLowPart::LOWEST>(maskReg2, inputMaskReg);
@@ -429,9 +411,8 @@ inline __aicore__ void DynamicBlockQuantSingleRow<IN_TYPE, OUT_TYPE, ROUND_MODE>
                 AscendC::MicroAPI::DataCopy(vReg0, xLocal + rowIdx * inputColAlign + normalColBlockLoop * tilingData_->blockSizeCol + vlLoopIdx * VL);
                 AscendC::MicroAPI::And((AscendC::MicroAPI::RegTensor<uint16_t>&)vReg3, (AscendC::MicroAPI::RegTensor<uint16_t>&)vReg0,
             (AscendC::MicroAPI::RegTensor<uint16_t>&)vRegFp16Max, inputMaskReg);
-                AscendC::MicroAPI::CompareScalar<uint16_t, CMPMODE::LT>(maskReg0, (AscendC::MicroAPI::RegTensor<uint16_t>&)vReg3, infValue_, inputMaskReg);
 
-                AscendC::MicroAPI::Max<IN_TYPE, AscendC::MicroAPI::MaskMergeMode::MERGING>(vReg2, vReg2, vReg3, maskReg0);
+                AscendC::MicroAPI::Max<IN_TYPE, AscendC::MicroAPI::MaskMergeMode::MERGING>(vReg2, vReg2, vReg3, inputMaskReg);
             }
 
             AscendC::MicroAPI::ReduceMax((AscendC::MicroAPI::RegTensor<uint16_t>&)vReg3, (AscendC::MicroAPI::RegTensor<uint16_t>&)vReg2, defaultMaskReg);
@@ -443,14 +424,17 @@ inline __aicore__ void DynamicBlockQuantSingleRow<IN_TYPE, OUT_TYPE, ROUND_MODE>
             AscendC::MicroAPI::Cast<float, IN_TYPE, castTraitZero>(vReg5, vReg4, defaultMaskReg);
 
             // input_max / FP_MAX
-            AscendC::MicroAPI::Mul(vReg7, vReg5, (AscendC::MicroAPI::RegTensor<float>&)vRegInvFPMax, defaultMaskReg);
+            AscendC::MicroAPI::Div<float, &mode>(vReg8, vReg5, fp8MaxValue, defaultMaskReg);
+            AscendC::MicroAPI::CompareScalar<uint32_t, CMPMODE::LT>(scaleMaskReg, (AscendC::MicroAPI::RegTensor<uint32_t>&)vReg8, infValue_, defaultMaskReg);
             // Min(input_max / FP_MAX, 1 / minScale)
-            AscendC::MicroAPI::Min(vReg8, vReg7, reciprocalScale, defaultMaskReg);
+            AscendC::MicroAPI::Min<float, AscendC::MicroAPI::MaskMergeMode::MERGING>(vReg8, vReg8, reciprocalScale, scaleMaskReg);
 
             // copy out scale
-            AscendC::MicroAPI::DataCopy<float, AscendC::MicroAPI::StoreDist::DIST_FIRST_ELEMENT_B32>(
-                scaleLocal + rowIdx * vfColBlockSize * scalePadding + normalColBlockLoop * scalePadding, vReg8, defaultMaskReg);
-
+            MicroAPI::StoreUnAlign<float, MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                scaleLocal, vReg8, ureg, static_cast<uint32_t>(1));
+            MicroAPI::StoreUnAlignPost<float, MicroAPI::PostLiteral::POST_MODE_UPDATE>(
+                scaleLocal, ureg, static_cast<int32_t>(0));
+            
             curSize = tailBlockSize;
             for(uint16_t vlLoopIdx = 0; vlLoopIdx < tailLoopNum; vlLoopIdx++) {
                 inputMaskReg = AscendC::MicroAPI::UpdateMask<IN_TYPE>(curSize);
@@ -461,20 +445,12 @@ inline __aicore__ void DynamicBlockQuantSingleRow<IN_TYPE, OUT_TYPE, ROUND_MODE>
                 AscendC::MicroAPI::Div<float, &mode>(vReg13, vReg11, vReg8, defaultMaskReg);
                 AscendC::MicroAPI::Div<float, &mode>(vReg14, vReg12, vReg8, defaultMaskReg);
 
-                AscendC::MicroAPI::And((AscendC::MicroAPI::RegTensor<uint16_t>&)vReg3, (AscendC::MicroAPI::RegTensor<uint16_t>&)vReg0,
-            (AscendC::MicroAPI::RegTensor<uint16_t>&)vRegFp16Max, inputMaskReg);
-                AscendC::MicroAPI::CompareScalar<uint16_t, CMPMODE::GE>(maskReg1, (AscendC::MicroAPI::RegTensor<uint16_t>&)vReg3, infValue_, inputMaskReg);
-                
-                AscendC::MicroAPI::MaskUnPack<AscendC::MicroAPI::HighLowPart::LOWEST>(maskReg2, maskReg1);
-                AscendC::MicroAPI::MaskUnPack<AscendC::MicroAPI::HighLowPart::HIGHEST>(maskReg3, maskReg1);
-                AscendC::MicroAPI::Select(vReg17, vReg11, vReg13, maskReg2);
-                AscendC::MicroAPI::Select(vReg18, vReg12, vReg14, maskReg3);
                 if constexpr (IsSameType<OUT_TYPE, hifloat8_t>::value) {
-                    AscendC::MicroAPI::Cast<OUT_TYPE, float, castTrait32toh8Zero>(vReg15, vReg17, defaultMaskReg);
-                    AscendC::MicroAPI::Cast<OUT_TYPE, float, castTrait32toh8Zero>(vReg16, vReg18, defaultMaskReg);
+                    AscendC::MicroAPI::Cast<OUT_TYPE, float, castTrait32toh8Zero>(vReg15, vReg13, defaultMaskReg);
+                    AscendC::MicroAPI::Cast<OUT_TYPE, float, castTrait32toh8Zero>(vReg16, vReg14, defaultMaskReg);
                 } else {
-                    AscendC::MicroAPI::Cast<OUT_TYPE, float, castTrait32tofp8>(vReg15, vReg17, defaultMaskReg);
-                    AscendC::MicroAPI::Cast<OUT_TYPE, float, castTrait32tofp8>(vReg16, vReg18, defaultMaskReg);
+                    AscendC::MicroAPI::Cast<OUT_TYPE, float, castTrait32tofp8>(vReg15, vReg13, defaultMaskReg);
+                    AscendC::MicroAPI::Cast<OUT_TYPE, float, castTrait32tofp8>(vReg16, vReg14, defaultMaskReg);
                 }
 
                 AscendC::MicroAPI::MaskUnPack<AscendC::MicroAPI::HighLowPart::LOWEST>(maskReg2, inputMaskReg);

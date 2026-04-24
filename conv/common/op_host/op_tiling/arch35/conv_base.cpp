@@ -49,8 +49,8 @@ ge::graphStatus ShapeAttrSynthesisCheck(ConvAscendcOriginShapeAttrInfo oriShapeA
     return ShapeAttrSynthesisCheckAux(oriShapeAttrInfo, context);
 }
 
-ge::graphStatus ShapeAttrSynthesisCheckAux(ConvAscendcOriginShapeAttrInfo oriShapeAttrInfo,
-                                           gert::TilingContext* context)
+ge::graphStatus ShapeAttrSynthesisCheckAux(const ConvAscendcOriginShapeAttrInfo oriShapeAttrInfo,
+                                           const gert::TilingContext* context)
 {
     // 0 means INPUT_FMAP_INDEX
     auto fmStorageFormat = static_cast<ge::Format>(GetPrimaryFormat(context->GetInputDesc(0)->GetStorageFormat()));
@@ -252,8 +252,8 @@ bool ConvBase::IsFp32InputFp32Output()
         descInfo_.weightDtype == ge::DataType::DT_FLOAT &&
         descInfo_.outDtype == ge::DataType::DT_FLOAT;
  
-    if (flagInfo_.hasBias) {
-        ret &= descInfo_.biasDtype == ge::DataType::DT_FLOAT;
+    if (flagInfo_.hasBias && ret) {
+        ret = descInfo_.biasDtype == ge::DataType::DT_FLOAT;
     }
     return ret;
 }

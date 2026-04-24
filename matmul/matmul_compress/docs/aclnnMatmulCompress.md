@@ -8,7 +8,7 @@
 | <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>     |    ×     |
 | <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term> |    ×     |
 | <term>Atlas 200I/500 A2 推理产品</term>                      |    ×     |
-| <term>Atlas 推理系列产品 </term>                             |    √     |
+| <term>Atlas 推理系列产品</term>                             |    √     |
 | <term>Atlas 训练系列产品</term>                              |    ×     |
 
 ## 功能说明
@@ -37,6 +37,7 @@ aclnnStatus aclnnMatmulCompressGetWorkspaceSize(
   uint64_t*        workspaceSize, 
   aclOpExecutor**  executor)
 ```
+
 ```cpp
 aclnnStatus aclnnMatmulCompress(
   void*          workspace, 
@@ -271,8 +272,11 @@ write2file(output, "./data/output.bin")
 # 生成bias
 bias = random.randn(n).astype(np.float32)
 write2file(bias, "./data/bias.bin")
+
 ```
+
 执行gen_data.py，假设mat1和mat2的shape入参为m=512、k=1024、n=1024。
+
 ```shell
 python3 gen_data.py 512 1024 1024
 ```

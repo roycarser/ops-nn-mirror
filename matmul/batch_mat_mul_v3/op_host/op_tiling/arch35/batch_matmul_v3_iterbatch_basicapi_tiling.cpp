@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * Copyright (c) 2025-2026 Huawei Technologies Co., Ltd.
  * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
  * CANN Open Software License Agreement Version 2.0 (the "License").
  * Please refer to the License for details. You may not use this file except in compliance with the License.
@@ -18,11 +18,48 @@
 #include "matmul/mat_mul_v3/op_host/op_tiling/arch35/matmul_tiling_registry.h"
 #include "batch_matmul_v3_tiling_key.h"
 
+namespace {
+using namespace optiling;
+using namespace optiling::matmul_v3_advanced;
+// ------------------------------ GetL0C2OutFlag -------------------------------------------//
+MatMulV3L0C2Out GetL0C2OutFlagDefault(const MatmulV3CompileInfo& /* compileInfo */, const MatMulV3Args& /* args */)
+{
+    return MatMulV3L0C2Out::ON_THE_FLY;
+}
+
+MatMulV3L0C2Out GetL0C2OutFlagDav3510(const MatmulV3CompileInfo& compileInfo, const MatMulV3Args& args)
+{
+    if (args.nValue * args.bDtypeSize > BASIC_BLOCK_SIZE_256 &&
+        args.nValue % (BASIC_BLOCK_SIZE_256 / args.bDtypeSize) != 0 &&
+        compileInfo.aivNum == (compileInfo.aicNum * NUM_TWO)) {
+        return MatMulV3L0C2Out::ND_FIXPIPE_1_2;
+    }
+    return MatMulV3L0C2Out::ON_THE_FLY;
+}
+
+using GetL0C2OutFlagFunc = MatMulV3L0C2Out (*)(const MatmulV3CompileInfo&, const MatMulV3Args&);
+
+const static std::map<NpuArch, GetL0C2OutFlagFunc> GetL0C2OutFlagFuncMap = {
+    {NpuArch::DAV_3510, GetL0C2OutFlagDav3510},
+};
+} // namespace
+
 namespace optiling {
 namespace batch_matmul_v3_advanced {
 using namespace strategy;
 using StrideIndexPairs = std::vector<std::pair<int64_t, std::pair<int64_t, int64_t>>>;
 MM_REGISTER_TILING_TEMPLATE(BatchMatMulV3, BatchMatMulV3IterBatchBasicApiTiling, DAV_3510, ITER_BATCH_BASICAPI);
+
+//supportMmadS8S4平台
+MM_REGISTER_TILING_TEMPLATE(BatchMatMulV3, BatchMatMulV3IterBatchBasicApiTiling, DAV_RESV, ITER_BATCH_BASICAPI);
+
+MatMulV3L0C2Out BatchMatMulV3IterBatchBasicApiTiling::GetL0C2OutFlag() const
+{
+    auto iter = (GetL0C2OutFlagFuncMap.find(compileInfo_.npuArch) == GetL0C2OutFlagFuncMap.end()) ?
+                    GetL0C2OutFlagDefault :
+                    GetL0C2OutFlagFuncMap.at(compileInfo_.npuArch);
+    return iter(compileInfo_, args_);
+}
 
 bool BatchMatMulV3IterBatchBasicApiTiling::IsContiguousStride(StrideIndexPairs& strideIndexPairs) const
 {
@@ -92,6 +129,10 @@ bool BatchMatMulV3IterBatchBasicApiTiling::IsMat2TransposeNonContiguous(
 
 bool BatchMatMulV3IterBatchBasicApiTiling::IsCapable()
 {
+    if (args_.aFormat == ge::FORMAT_FRACTAL_NZ || args_.bFormat == ge::FORMAT_FRACTAL_NZ) {
+        OP_LOGD(args_.opName, "[iterbatch_basicapi] The NZ format is not supported in this strategy.");
+        return false;
+    }
     if (batchInfo_->batchBias > 1UL) {
         return false;
     }
@@ -234,10 +275,8 @@ ge::graphStatus BatchMatMulV3IterBatchBasicApiTiling::DoOpTiling()
     }
 
     // enable Fixpipe optimization
-    if (args_.nValue * args_.bDtypeSize > BASIC_BLOCK_SIZE_256 &&
-        args_.nValue % (BASIC_BLOCK_SIZE_256 / args_.bDtypeSize) != 0) {
-        l0C2Out_ = MatMulV3L0C2Out::ND_FIXPIPE_1_2;
-    }
+    l0C2Out_ = GetL0C2OutFlag();
+
     OP_LOGI(
         args_.opName,
         "In IterBatchBasicApi module, temp iterBatchL0A is %lu, temp iterBatchL0B is %lu, \

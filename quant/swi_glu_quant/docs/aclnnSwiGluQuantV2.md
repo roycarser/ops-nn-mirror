@@ -6,7 +6,7 @@
 
 | 产品                                                         |  是否支持   |
 | :----------------------------------------------------------- |:-------:|
-| <term>Ascend 950PR/Ascend 950DT</term>                             |    ×     |
+| <term>Ascend 950PR/Ascend 950DT</term>                             |    √     |
 | <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>     |    √    |
 | <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term> |    √    |
 | <term>Atlas 200I/500 A2 推理产品</term>                      |    ×    |
@@ -152,7 +152,7 @@ aclnnStatus aclnnSwiGluQuantV2(
       <td>groupIndexOptional（aclTensor*）</td>
       <td>输入</td>
       <td>MoE分组需要的group_index，公式中的group_index。</td>
-      <td>shape支持[G, ]，group_index内元素要求为非递减，且最大值不得超过输入x的除最后一维之外的所有维度大小之积；G的值不得超过输入x的除最后一维之外的所有维度大小之积。</li></td>
+      <td>shape支持[G, ]，group_index内元素要求为非递减，且最大值不得超过输入x的除最后一维之外的所有维度大小之积；G的值不得超过输入x的除最后一维之外的所有维度大小之积。</td>
       <td>INT32</td>
       <td>ND</td>
       <td>-</td>

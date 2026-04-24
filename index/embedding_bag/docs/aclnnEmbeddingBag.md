@@ -11,6 +11,7 @@
 | <term>Atlas 推理系列产品</term>                             |    √     |
 | <term>Atlas 训练系列产品</term>                              |    √     |
 
+
 ## 功能说明
 
 - 接口功能：根据indices从weight中获得一组被聚合的数，然后根据offsets的偏移和mode指定的聚合模式对获取的数进行max、sum、mean聚合。其余参数则更细化了计算过程的控制。
@@ -19,42 +20,54 @@
   - <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>、<term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>、<term>Atlas 推理系列产品</term>、<term>Atlas 训练系列产品</term>：
     
     - 当mode为sum模式：
+
     ```
     output的shape为includeLastOffset ? (bagOffsets - 1, embeddingDim) : (bagOffsets, embeddingDim)
     offset2bag的shape 为 (bagIndices,)
     bagSize的shape为includeLastOffset ? (bagOffsets - 1) : (bagOffsets,)
     maxIndices的shape为includeLastOffset ? (bagOffsets - 1) : (bagOffsets,)
     ```
+
     - 当mode为mean模式：
+
     ```
     output的shape为includeLastOffset? (bagOffsets - 1, embeddingDim) : (bagOffsets, embeddingDim)
     offset2bag的shape为(bagIndices,)
     bagSize的shape为includeLastOffset ? (bagOffsets - 1) : (bagOffsets,)
     maxIndices的shape为includeLastOffset ? (bagOffsets - 1) : (bagOffsets,)
     ```
+
     - 当mode为max模式：
+
     ```
     output的shape为includeLastOffset ? (bagOffsets - 1, embeddingDim) : (bagOffsets, embeddingDim)
     offset2bag的shape为(bagIndices,)
     bagSize的shape为includeLastOffset ? (bagOffsets - 1) : (bagOffsets,)
     maxIndices的shape为includeLastOffset ? (bagOffsets - 1, embeddingDim) : (bagOffsets, embeddingDim)
     ```
+
   - <term>Ascend 950PR/Ascend 950DT</term>：
+    
     - 当mode为sum模式：
+
     ```
     output的shape为includeLastOffset ? (bagOffsets - 1, embeddingDim) : (bagOffsets, embeddingDim)
     offset2bag的shape为(bagIndices,)
     bagSize的shape为(bagOffsets,)
     maxIndices的shape为(0,)
     ```
+
     - 当mode为mean模式：
+
     ```
     output的shape为includeLastOffset? (bagOffsets - 1, embeddingDim) : (bagOffsets, embeddingDim)
     offset2bag的shape为(bagIndices,)
     bagSize的shape为bagOffsets
     maxIndices的shape为(0,)
     ```
+
     - 当mode为max模式：
+    
     ```
     output的shape为includeLastOffset ? (bagOffsets - 1, embeddingDim) : (bagOffsets, embeddingDim)
     offset2bag的shape为(bagIndices,)
@@ -183,7 +196,7 @@ aclnnStatus aclnnEmbeddingBag(
         <td>perSampleWeights</td>
         <td>输入</td>
         <td>指定样本权重。</td>
-        <td>仅在sum模式下，可以不是nullptr，其他模式必须为nullptr。</td>
+        <td> -</td>
         <td>FLOAT、FLOAT16、BFLOAT16</td>
         <td>-</td>
         <td>0-2</td>
@@ -270,8 +283,8 @@ aclnnStatus aclnnEmbeddingBag(
         <td>-</td>
       </tr>
     </tbody></table>
-
-    - <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term> indices仅支持0-1维, perSampleWeights仅支持1维 。
+  
+  - <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>、<term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>、<term>Atlas 推理系列产品</term>、<term>Atlas 训练系列产品</term>： indices仅支持0-1维，perSampleWeights仅支持1维且在除sum模式外的其他模式必须为nullptr 。
 
 - **返回值**
 

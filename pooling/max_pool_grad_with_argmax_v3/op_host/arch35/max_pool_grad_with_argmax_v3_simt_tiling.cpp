@@ -15,7 +15,7 @@
 
 #include "max_pool_grad_with_argmax_v3_simt_tiling.h"
 #include "platform/platform_info.h"
-#include "tiling_base/tiling_templates_registry.h"
+#include "op_host/tiling_templates_registry.h"
 
 namespace optiling
 {
@@ -59,7 +59,7 @@ uint64_t MaxPoolGradWithArgmaxV3SimtTiling::GetTilingKey() const
 
 ge::graphStatus MaxPoolGradWithArgmaxV3SimtTiling::DoOpTiling()
 {
-    return SimtBase->DoOpTiling(context_, GetTilingKey());
+    return SimtBase->DoOpTiling(context_);
 }
 
 ge::graphStatus MaxPoolGradWithArgmaxV3SimtTiling::PostTiling()

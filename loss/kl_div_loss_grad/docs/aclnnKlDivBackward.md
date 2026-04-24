@@ -13,10 +13,9 @@
 |  <term>Atlas 推理系列产品</term>     |     ×    |
 |  <term>Atlas 训练系列产品</term>    |     ×    |
 
-
 ## 功能说明
 
-  进行[aclnnKlDiv](https://gitcode.com/cann/ops-math/blob/master/math/kl_div_v2/docs/aclnnKlDiv.md) api的结果的反向计算。
+进行[aclnnKlDiv](https://gitcode.com/cann/ops-math/blob/master/math/kl_div_v2/docs/aclnnKlDiv.md) api的结果的反向计算。
 
 ## 函数原型
 
@@ -46,16 +45,15 @@ aclnnStatus aclnnKlDivBackward(
 
 - **参数说明：**
 
-  </style>
-  <table class="tg" style="undefined;table-layout: fixed; width: 1247px"><colgroup>
+  <table class="tg" style="undefined;table-layout: fixed; width: 1435px"><colgroup>
   <col style="width: 205px">
-  <col style="width: 87px">
-  <col style="width: 274px">
-  <col style="width: 234px">
-  <col style="width: 118px">
-  <col style="width: 113px">
-  <col style="width: 108px">
-  <col style="width: 108px">
+  <col style="width: 120px">
+  <col style="width: 300px">
+  <col style="width: 300px">
+  <col style="width: 130px">
+  <col style="width: 115px">
+  <col style="width: 120px">
+  <col style="width: 145px">
   </colgroup>
   <thead>
     <tr>
@@ -73,7 +71,7 @@ aclnnStatus aclnnKlDivBackward(
       <td class="tg-0pky">gradOutput（aclTensor*）</td>
       <td class="tg-0pky">输入</td>
       <td class="tg-0pky">梯度反向输入。</td>
-      <td class="tg-0pky">shape需要与self满足broadcast关系。</td>
+      <td class="tg-0pky">shape需要与self满足<a href="../../../docs/zh/context/broadcast关系.md" target="_blank">broadcast</a>关系。</td>
       <td class="tg-0pky">FLOAT、FLOAT16、BFLOAT16</td>
       <td class="tg-0pky">ND</td>
       <td class="tg-0pky">1-8</td>
@@ -93,7 +91,7 @@ aclnnStatus aclnnKlDivBackward(
       <td class="tg-0pky">target（aclTensor*）</td>
       <td class="tg-0pky">输入</td>
       <td class="tg-0pky">真实的标签。</td>
-      <td class="tg-0pky">shape需要与self满足broadcast关系。</td>
+      <td class="tg-0pky">shape需要与self满足<a href="../../../docs/zh/context/broadcast关系.md" target="_blank">broadcast</a>关系。</td>
       <td class="tg-0pky">FLOAT、FLOAT16、BFLOAT16</td>
       <td class="tg-0pky">ND</td>
       <td class="tg-0pky">1-8</td>
@@ -157,7 +155,6 @@ aclnnStatus aclnnKlDivBackward(
 
   第一段接口完成入参校验，出现以下场景时报错：
   
-  </style>
   <table class="tg" style="undefined;table-layout: fixed; width: 991px"><colgroup>
   <col style="width: 269px">
   <col style="width: 90px">
@@ -184,10 +181,10 @@ aclnnStatus aclnnKlDivBackward(
       <td class="tg-0pky">self、out的数据类型不一致。</td>
     </tr>
     <tr>
-      <td class="tg-0pky">gradOutput的shape不能向self或者target broadcast。</td>
+      <td class="tg-0pky">gradOutput的shape不能向self或者target做<a href="../../../docs/zh/context/broadcast关系.md" target="_blank">broadcast</a>。</td>
     </tr>
     <tr>
-      <td class="tg-0pky">target的shape和self的shape不满足broadcast关系。</td>
+      <td class="tg-0pky">target的shape和self的shape不满足<a href="../../../docs/zh/context/broadcast关系.md" target="_blank">broadcast</a>关系。</td>
     </tr>
     <tr>
       <td class="tg-0lax">self的shape与out的shape不相同。</td>
@@ -222,7 +219,7 @@ aclnnStatus aclnnKlDivBackward(
         <tr>
           <td>workspaceSize</td>
           <td>输入</td>
-          <td>在Device侧申请的workspace大小，由第一段接口aclnnBinaryCrossEntropyBackwardGetWorkspaceSize获取。</td>
+          <td>在Device侧申请的workspace大小，由第一段接口aclnnKlDivBackwardGetWorkspaceSize获取。</td>
         </tr>
         <tr>
           <td>executor</td>
@@ -242,12 +239,14 @@ aclnnStatus aclnnKlDivBackward(
   aclnnStatus：返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
 
 ## 约束说明
-- 确定性计算： 
+
+- 确定性计算：
     - aclnnKlDivBackward默认确定性实现。
 
 ## 调用示例
 
 示例代码如下，仅供参考，具体编译和执行过程请参考[编译与运行样例](../../../docs/zh/context/编译与运行样例.md)。
+
 ```Cpp
 #include <iostream>
 #include <vector>
@@ -400,4 +399,3 @@ int main() {
   return 0;
 }
 ```
-

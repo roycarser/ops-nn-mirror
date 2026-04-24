@@ -13,8 +13,8 @@
  */
 
 #include "batch_norm_grad_v3_tiling.h"
-#include "op_util.h"
-#include "tiling_base/tiling_templates_registry.h"
+#include "op_api/op_util.h"
+#include "op_host/tiling_templates_registry.h"
 
 using namespace AscendC;
 
@@ -716,15 +716,15 @@ ge::graphStatus BatchNormGradV3RARRecomputeTilingBase::GetWorkspaceSize()
 
 ge::graphStatus BatchNormGradV3RARRecomputeTilingBase::PostTiling()
 {
-    uint64_t tilingKey = GetTilingKey();
+    uint64_t curTilingKey = GetTilingKey();
     OP_TILING_CHECK(
-        tilingKey == BNG_V3_TK_DEFAULT,
+        curTilingKey == BNG_V3_TK_DEFAULT,
         VECTOR_INNER_ERR_REPORT_TILIING(context_->GetNodeName(), "failed to get tiling key."), return ge::GRAPH_FAILED);
-    context_->SetTilingKey(tilingKey);
+    context_->SetTilingKey(curTilingKey);
     context_->SetBlockDim(baseTilingData.get_blockNum());
-    size_t* workspaces = context_->GetWorkspaceSizes(1);
-    OP_CHECK_NULL_WITH_CONTEXT(context_, workspaces);
-    workspaces[0] = workspaceSize_;
+    size_t* curWorkspaces = context_->GetWorkspaceSizes(1);
+    OP_CHECK_NULL_WITH_CONTEXT(context_, curWorkspaces);
+    curWorkspaces[0] = workspaceSize_;
     tilingData.SaveToBuffer(context_->GetRawTilingData()->GetData(), context_->GetRawTilingData()->GetCapacity());
     context_->GetRawTilingData()->SetDataSize(tilingData.GetDataSize());
     return ge::GRAPH_SUCCESS;
@@ -959,12 +959,12 @@ ge::graphStatus BatchNormGradV3RARecomputeTilingBase::GetWorkspaceSize()
 
 ge::graphStatus BatchNormGradV3RARecomputeTilingBase::PostTiling()
 {
-    uint64_t tilingKey = GetTilingKey();
-    context_->SetTilingKey(tilingKey);
+    uint64_t raTilingKey = GetTilingKey();
+    context_->SetTilingKey(raTilingKey);
     context_->SetBlockDim(tilingData.get_numBlocks());
-    size_t* workspaces = context_->GetWorkspaceSizes(1);
-    OP_CHECK_NULL_WITH_CONTEXT(context_, workspaces);
-    workspaces[0] = workspaceSize_;
+    size_t* raWorkspaces = context_->GetWorkspaceSizes(1);
+    OP_CHECK_NULL_WITH_CONTEXT(context_, raWorkspaces);
+    raWorkspaces[0] = workspaceSize_;
     tilingData.SaveToBuffer(context_->GetRawTilingData()->GetData(), context_->GetRawTilingData()->GetCapacity());
     context_->GetRawTilingData()->SetDataSize(tilingData.GetDataSize());
     return ge::GRAPH_SUCCESS;

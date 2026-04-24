@@ -1,9 +1,9 @@
 # ----------------------------------------------------------------------------
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd.
-# This program is free software, you can redistribute it and/or modify it under the terms and conditions of 
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
 # CANN Open Software License Agreement Version 2.0 (the "License").
 # Please refer to the License for details. You may not use this file except in compliance with the License.
-# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED, 
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 # ----------------------------------------------------------------------------
@@ -45,6 +45,25 @@ function(kernel_src_copy)
       add_dependencies(${KNCPY_TARGET} ${OP_NAME}_src_copy)
     endif()
   endforeach()
+
+  # common install
+  if(NOT TARGET atvoss_src_copy)
+    add_custom_target(
+      atvoss_src_copy
+      COMMAND
+        ${CMAKE_COMMAND} -E make_directory ${KNCPY_DST_DIR}/common
+      COMMAND
+        bash -c "cp -r ${OPBASE_SOURCE_PATH}/pkg_inc/op_common/atvoss ${KNCPY_DST_DIR}/common"
+      COMMAND
+        bash -c "cp -r ${OPBASE_SOURCE_PATH}/pkg_inc/op_common/op_kernel ${KNCPY_DST_DIR}/common"
+      VERBATIM
+    )
+    add_dependencies(${KNCPY_TARGET} atvoss_src_copy)
+  endif()
+  if(ENABLE_PACKAGE)
+    install(DIRECTORY ${OPBASE_SOURCE_PATH}/pkg_inc/op_common/atvoss DESTINATION ${IMPL_INSTALL_DIR}/common)
+    install(DIRECTORY ${OPBASE_SOURCE_PATH}/pkg_inc/op_common/op_kernel DESTINATION ${IMPL_INSTALL_DIR}/common)
+  endif()
 endfunction()
 
 function(get_op_type_and_validate OP_DIR compute_unit op_name_var op_type_var is_valid_var)
@@ -62,13 +81,13 @@ function(get_op_type_and_validate OP_DIR compute_unit op_name_var op_type_var is
       return()
     endif()
   endif()
-  
+
   set(op_type "")
   set(is_valid FALSE)
   set(${op_type_var} "" PARENT_SCOPE)
   set(${is_valid_var} FALSE PARENT_SCOPE)
   set(binary_json ${OP_DIR}/op_host/config/${compute_unit}/${op_name}_binary.json)
-  
+
   if(EXISTS ${binary_json})
     get_op_type_from_binary_json("${binary_json}" op_type)
     message(STATUS "[INFO] On [${compute_unit}], [${op_name}] compile binary with self config.")
@@ -83,7 +102,7 @@ function(get_op_type_and_validate OP_DIR compute_unit op_name_var op_type_var is
       set(${cache_key} "" CACHE INTERNAL "")
       return()
     endif()
-    
+
     set(check_op_supported_result)
     check_op_supported("${op_name}" "${compute_unit}" check_op_supported_result)
     if(NOT check_op_supported_result)
@@ -93,7 +112,7 @@ function(get_op_type_and_validate OP_DIR compute_unit op_name_var op_type_var is
     endif()
     message(STATUS "[INFO] On [${compute_unit}], [${op_name}] compile binary with def config.")
   endif()
-  
+
   set(is_valid TRUE)
   set(${op_type_var} "${op_type}" PARENT_SCOPE)
   set(${is_valid_var} TRUE PARENT_SCOPE)
@@ -106,7 +125,7 @@ endfunction()
 # and install to packages/vendors/${VENDOR_NAME}/op_impl/ai_core/tbe/${VENDOR_NAME}_impl/dynamic
 ###################################################################################################
 function(add_ops_impl_target)
-  set(oneValueArgs TARGET OPS_INFO_DIR IMPL_DIR OUT_DIR INSTALL_DIR)
+  set(oneValueArgs TARGET OPS_INFO_DIR IMPL_DIR OUT_DIR INSTALL_DIR DEPENDS)
   cmake_parse_arguments(OPIMPL "" "${oneValueArgs}" "OPS_BATCH;OPS_ITERATE" ${ARGN})
 
   add_custom_command(OUTPUT ${OPIMPL_OUT_DIR}/.impl_timestamp
@@ -118,6 +137,7 @@ function(add_ops_impl_target)
     COMMAND rm -rf ${OPIMPL_OUT_DIR}/.impl_timestamp
     COMMAND touch ${OPIMPL_OUT_DIR}/.impl_timestamp
     DEPENDS ${CMAKE_SOURCE_DIR}/scripts/util/ascendc_impl_build.py
+            ${OPIMPL_DEPENDS}
   )
   add_custom_target(${OPIMPL_TARGET} ALL
     DEPENDS ${OPIMPL_OUT_DIR}/.impl_timestamp
@@ -189,7 +209,6 @@ function(add_ops_info_target_v1)
             ${OPINFO_OPS_INFO_DIR}/inner/aic-${OPINFO_COMPUTE_UNIT}-ops-info.ini
             ${OPINFO_OPS_INFO_DIR}/exc/aic-${OPINFO_COMPUTE_UNIT}-ops-info.ini
             ${OPINFO_OUTPUT}
-    DEPENDS opbuild_custom_gen_aclnn_all
   )
   add_custom_target(${OPINFO_TARGET} ALL
     DEPENDS ${OPINFO_OUTPUT}
@@ -218,7 +237,6 @@ function(merge_ini_files)
                             ${MGINI_OPS_INFO_DIR}/inner/aic-${MGINI_COMPUTE_UNIT}-ops-info.ini
                             ${MGINI_OPS_INFO_DIR}/exc/aic-${MGINI_COMPUTE_UNIT}-ops-info.ini
                             --output-file ${ASCEND_KERNEL_CONF_DST}/aic-${MGINI_COMPUTE_UNIT}-ops-info.ini
-                    DEPENDS opbuild_custom_gen_aclnn_all
     )
   add_custom_target(${MGINI_TARGET} ALL
                     DEPENDS ${ASCEND_KERNEL_CONF_DST}/aic-${MGINI_COMPUTE_UNIT}-ops-info.ini
@@ -353,7 +371,7 @@ function(prepare_compile_from_config)
     COMMAND ${_ASCENDC_ENV_VAR} bash ${OPS_KERNEL_BINARY_SCRIPT}/build_binary_opc.sh
             ${CONFCMP_OP_TYPE}
             ${CONFCMP_COMPUTE_UNIT}
-            ${CONFCMP_OUT_DIR}/bin ${CMAKE_BUILD_TYPE} ${ENABLE_OOM} ${ENABLE_DUMP_CCE}
+            ${CONFCMP_OUT_DIR}/bin ${CMAKE_BUILD_TYPE} ${ENABLE_OOM} ${ENABLE_DUMP_CCE} ${ENABLE_MSSANITIZER} bisheng_flags=${BISHENG_FLAGS} "kernel_template_input=\"${KERNEL_TEMPLATE_INPUT}\""
     WORKING_DIRECTORY ${OPS_KERNEL_BINARY_SCRIPT}
     DEPENDS ${ASCEND_KERNEL_CONF_DST}/aic-${CONFCMP_COMPUTE_UNIT}-ops-info.ini
             ascendc_kernel_src_copy
@@ -377,11 +395,11 @@ function(prepare_compile_from_config)
       set(subDir "")
     endif()
     install(DIRECTORY ${CONFCMP_OUT_DIR}/bin/${CONFCMP_COMPUTE_UNIT}/${CONFCMP_OP_NAME}
-      DESTINATION ${BIN_KERNEL_INSTALL_DIR}/${CONFCMP_COMPUTE_UNIT}/${subDir} OPTIONAL
+      DESTINATION ${BIN_KERNEL_INSTALL_DIR}/${CONFCMP_COMPUTE_UNIT}/${subDir} OPTIONAL FILE_PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
     )
     file(GLOB CONFCMP_OP_NAME_JSON ${CONFCMP_OUT_DIR}/bin/config/${CONFCMP_COMPUTE_UNIT}/${CONFCMP_OP_NAME}*.json)
     install(FILES ${CONFCMP_OP_NAME_JSON}
-      DESTINATION ${BIN_KERNEL_CONFIG_INSTALL_DIR}/${CONFCMP_COMPUTE_UNIT}/${subDir} OPTIONAL
+      DESTINATION ${BIN_KERNEL_CONFIG_INSTALL_DIR}/${CONFCMP_COMPUTE_UNIT}/${subDir} OPTIONAL PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
     )
   endif()
 endfunction()
@@ -416,7 +434,7 @@ function(compile_from_config)
     List(APPEND _BUILD_COMMAND export BIN_FILENAME_HASHED=1 &&)
     List(APPEND _BUILD_COMMAND export ASCEND_SLOG_PRINT_TO_STDOUT=1 &&)
     List(APPEND _BUILD_COMMAND ${_ASCENDC_ENV_VAR} stdbuf -oL bash ${OPS_KERNEL_BINARY_SCRIPT}/build_binary_op_exe_task.sh ${CONFCMP_OUT_DIR}/bin ${idx})
-    List(APPEND _BUILD_COMMAND && echo $(MAKE) &> /dev/null)
+    List(APPEND _BUILD_COMMAND && echo $(MAKE))
     add_custom_target(exe_compile_${CONFCMP_COMPUTE_UNIT}_${idx}
       COMMAND ${_BUILD_COMMAND}
       WORKING_DIRECTORY ${OPS_KERNEL_BINARY_SCRIPT}
@@ -513,10 +531,6 @@ endfunction()
 # binary compile
 function(gen_ops_info_and_python)
   gen_aclnn_with_opdef()
-  if(NOT TARGET opbuild_custom_gen_aclnn_all)
-    message(STATUS "no need build binary, for all the ops donot have any operator def")
-    return()
-  endif()
 
   kernel_src_copy(
     TARGET ascendc_kernel_src_copy
@@ -552,15 +566,7 @@ function(gen_ops_info_and_python)
     )
   endif()
 
-  add_ops_impl_target(
-    TARGET ascendc_impl_gen
-    OPS_INFO_DIR ${ASCEND_AUTOGEN_PATH}
-    IMPL_DIR ${ASCEND_KERNEL_SRC_DST}
-    OUT_DIR ${CMAKE_BINARY_DIR}/tbe
-    INSTALL_DIR ${IMPL_DYNAMIC_INSTALL_DIR}
-  )
-
-  set(ascendc_impl_gen_depends ascendc_kernel_src_copy opbuild_custom_gen_aclnn_all common_copy)
+  set(ascendc_impl_gen_depends ascendc_kernel_src_copy common_copy)
   foreach(compute_unit ${ASCEND_ALL_COMPUTE_UNIT})
     # generate aic-${compute_unit}-ops-info.json, operator infos
     if(ENABLE_CUSTOM)
@@ -583,6 +589,15 @@ function(gen_ops_info_and_python)
     )
     list(APPEND ascendc_impl_gen_depends ops_info_gen_${compute_unit})
   endforeach()
+
+  add_ops_impl_target(
+    TARGET ascendc_impl_gen
+    OPS_INFO_DIR ${ASCEND_AUTOGEN_PATH}
+    IMPL_DIR ${ASCEND_KERNEL_SRC_DST}
+    OUT_DIR ${CMAKE_BINARY_DIR}/tbe
+    INSTALL_DIR ${IMPL_DYNAMIC_INSTALL_DIR}
+    DEPENDS ${ascendc_impl_gen_depends}
+  )
   add_dependencies(ascendc_impl_gen ${ascendc_impl_gen_depends})
 
   if(ENABLE_BINARY OR ENABLE_CUSTOM)

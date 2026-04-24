@@ -18,16 +18,15 @@
 
 #include "register/op_def_registry.h"
 #include "tiling/tiling_api.h"
-#include "tiling_base/tiling_base.h"
+#include "op_host/tiling_base.h"
 #include "util/math_util.h"
 #include "op_common/op_host/util/platform_util.h"
 #include "adaptive_pool3d_tiling.h"
 #include "../op_kernel/arch35/adaptive_pool3d_tiling_struct.h"
 
+namespace optiling {
 using namespace std;
 using namespace AdaptivePool3DTiling;
-
-namespace optiling {
 using Ops::NN::Optiling::TilingBaseClass;
 
 struct ComputeInfo {
@@ -69,7 +68,6 @@ public:
     ge::graphStatus PostTiling() override;
 
 private:
-    uint64_t CalKernelMax(uint64_t inputSize, uint64_t outputSize);
     uint64_t CalOccupySize();
     void CalMaxUbSplitSize();
     void CalUbBlockFactor();

@@ -49,6 +49,8 @@ static const size_t LAST_SECOND_DIM_INDEX = 2;
 static const size_t LAST_FIRST_DIM_INDEX = 1;
 static const int NZ_STORAGE_PENULTIMATE_DIM = 16;
 static const int NZ_K0_VALUE_16 = 16;
+static const int DIM_SIZE_ONE = 1;
+static const int DIM_SIZE_TWO = 2;
 
 static inline bool CheckNotNull(AclnnAddmmTensor& addmmTensor)
 {
@@ -99,7 +101,7 @@ static inline bool CheckWeightNzDtypeValid(
     return true;
 }
 
-static inline bool CheckMatmul(const aclTensor* mat1, const aclTensor* mat2)
+static inline bool CheckMatmul(const aclTensor* self, const aclTensor* mat1, const aclTensor* mat2)
 {
     // check mat1 dims number is 2
     OP_CHECK_WRONG_DIMENSION(mat1, 2, return false);
@@ -112,13 +114,24 @@ static inline bool CheckMatmul(const aclTensor* mat1, const aclTensor* mat2)
         return false;
     }
 
+    if (self->GetStorageFormat() == Format::FORMAT_FRACTAL_NZ) {
+        OP_LOGE(ACLNN_ERR_PARAM_INVALID,
+                "The formats of self should be ND, but the actual formats are [%s]",
+                op::ToString(self->GetStorageFormat()).GetString());
+        return false;
+    }
+
     return true;
 }
 
 static inline bool CheckBroadcast(const aclTensor* self, const aclTensor* mat1, const aclTensor* mat2)
 {
-    if (self->GetViewShape().GetDimNum() != 1 && self->GetViewShape().GetDimNum() != 2) {
-        OP_LOGE(ACLNN_ERR_PARAM_INVALID, "The dim of self should be 1 or 2.");
+    if (self->GetViewShape().GetDimNum() > DIM_SIZE_TWO) {
+        OP_LOGE(ACLNN_ERR_PARAM_INVALID, "The dim of self should be less than 3.");
+        return false;
+    }
+    if (self->GetStorageShape().GetDimNum() < DIM_SIZE_ONE) {
+        OP_LOGE(ACLNN_ERR_PARAM_INVALID, "Self can not be empty.");
         return false;
     }
     op::Shape matmulShape = {(mat1->GetViewShape())[0], (mat2->GetViewShape())[1]};
@@ -160,14 +173,14 @@ static aclnnStatus CheckInputParams(AclnnAddmmTensor& addmmTensor, int8_t cubeMa
     CHECK_RET(CheckNotNull(addmmTensor), ACLNN_ERR_PARAM_NULLPTR);
 
     // 2. 检查输入的数据类型是否在API支持的数据类型范围之内，需要根据api定义校验
-    auto archRule = NpuArchMatMulRule::getInstance();
+    auto archRule = BuildRule();
     CHECK_RET(archRule != nullptr, ACLNN_ERR_PARAM_INVALID);
     CHECK_RET(
         archRule -> CheckInput(addmmTensor.mat1, addmmTensor.mat2, addmmTensor.self, addmmTensor.out, cubeMathType),
         ACLNN_ERR_PARAM_INVALID);
 
-    // 3. 检查mat1和mat2是否满足matmul条件
-    CHECK_RET(CheckMatmul(addmmTensor.mat1, addmmTensor.mat2), ACLNN_ERR_PARAM_INVALID);
+    // 3. 检查self, mat1和mat2是否满足matmul条件
+    CHECK_RET(CheckMatmul(addmmTensor.self, addmmTensor.mat1, addmmTensor.mat2), ACLNN_ERR_PARAM_INVALID);
 
     // 4. 检查self和mat1@mat2是否能broadcast
     CHECK_RET(CheckBroadcast(addmmTensor.self, addmmTensor.mat1, addmmTensor.mat2), ACLNN_ERR_PARAM_INVALID);
@@ -175,6 +188,10 @@ static aclnnStatus CheckInputParams(AclnnAddmmTensor& addmmTensor, int8_t cubeMa
     // 5. 检查out必须和mat1@mat2的shape一致
     CHECK_RET(CheckOutShape(addmmTensor.mat1, addmmTensor.mat2, addmmTensor.out), ACLNN_ERR_PARAM_INVALID);
 
+    // 6. 检查是否满足GemmV3BaseKernel条件。
+    CHECK_RET(
+        CheckCubeMathTypeForAddMm(addmmTensor.mat1, addmmTensor.mat2, addmmTensor.self, addmmTensor.out, cubeMathType),
+        ACLNN_ERR_PARAM_INVALID);
     return ACLNN_SUCCESS;
 }
 
@@ -192,9 +209,7 @@ static aclnnStatus AddmmMulEmptyProcess(
 {
     auto selfContiguous = l0op::Contiguous(self, executor);
     CHECK_RET(selfContiguous != nullptr, ACLNN_ERR_INNER_NULLPTR);
-    auto mulOut = reinterpret_cast<void*>(l0op::MulsInplace) != nullptr ?
-        l0op::MulsInplace(selfContiguous, beta->ToFloat(), executor) :
-        l0op::Muls(selfContiguous, beta->ToFloat(), executor);
+    auto mulOut = l0op::Muls(selfContiguous, beta->ToFloat(), executor);
     CHECK_RET(mulOut != nullptr, ACLNN_ERR_INNER_NULLPTR);
 
     // broadcast成和out一个shape
@@ -241,13 +256,13 @@ static const aclTensor* AddProcess(
     return addOut;
 }
 
-static const aclTensor* MulsProcess(const aclTensor* mat, const aclScalar* scalar, aclOpExecutor* executor){
+static const aclTensor* MulsProcess(const aclTensor* mat, const aclScalar* scalar, bool isMulsInplace, aclOpExecutor* executor){
     const aclTensor* mulsOut = nullptr;
     auto matContiguous = l0op::Contiguous(mat, executor);
     if (fabs(scalar->ToFloat() - 1.0f) <= numeric_limits<float>::epsilon()) {
         mulsOut = matContiguous;
     } else {
-        mulsOut = reinterpret_cast<void*>(l0op::MulsInplace) != nullptr ?
+        mulsOut = (reinterpret_cast<void*>(l0op::MulsInplace) != nullptr && isMulsInplace) ?
             l0op::MulsInplace(matContiguous, scalar->ToFloat(), executor) :
             l0op::Muls(matContiguous, scalar->ToFloat(), executor);
         CHECK_RET(mulsOut != nullptr, nullptr);
@@ -298,9 +313,7 @@ static const aclTensor* AddMatmulProcess(
     if (fabs(addmmTensor.beta->ToFloat() - 1.0f) <= numeric_limits<float>::epsilon()) {
         mulOut = selfContiguous;
     } else {
-        mulOut = reinterpret_cast<void*>(l0op::MulsInplace) != nullptr ?
-            l0op::MulsInplace(selfContiguous, addmmTensor.beta->ToFloat(), uniqueExecutor) :
-            l0op::Muls(selfContiguous, addmmTensor.beta->ToFloat(), uniqueExecutor);
+        mulOut = l0op::Muls(selfContiguous, addmmTensor.beta->ToFloat(), uniqueExecutor);
         CHECK_RET(mulOut != nullptr, nullptr);
     }
 
@@ -392,7 +405,7 @@ static inline bool CheckMatmulWeightNz(const aclTensor* mat1, const aclTensor* m
         return false;
     }
 
-    if (mat1->GetViewShape().GetDimNum() != 2 || mat2->GetViewShape().GetDimNum() != 2) {
+    if (mat1->GetViewShape().GetDimNum() != DIM_SIZE_TWO || mat2->GetViewShape().GetDimNum() != DIM_SIZE_TWO) {
         OP_LOGE(ACLNN_ERR_PARAM_INVALID, "The dim of mat1 and mat2 should be 2.");
         return false;
     }
@@ -439,7 +452,7 @@ static aclnnStatus AddmmCheckWeightNzParam(AclnnAddmmTensor& addmmTensor, int8_t
     CHECK_RET(CheckWeightNzDtypeValid(addmmTensor.self, addmmTensor.mat1, addmmTensor.mat2,
         addmmTensor.out), ACLNN_ERR_PARAM_INVALID);
 
-    auto archRule = NpuArchMatMulRule::getInstance();
+    auto archRule = BuildRule();
     CHECK_RET(archRule != nullptr, ACLNN_ERR_PARAM_INVALID);
     CHECK_RET(
         archRule->CheckInput(addmmTensor.mat1, addmmTensor.mat2, addmmTensor.self, addmmTensor.out, cubeMathType),
@@ -487,8 +500,15 @@ public:
     using MatmulGraphImpl::MatmulGraphImpl;
 
     aclnnStatus Impl() override{
+        if (CheckGemmV3WithAlphaBeta(bias, matA, matB, cubeMathType)) {
+            auto outGemmV3 = ExecGemmV3WithAlphaBetaOp(bias, matA, matB, alpha, beta, executor);
+            CHECK_RET(outGemmV3 != nullptr, ACLNN_ERR_INNER_NULLPTR);
+            convOut = outGemmV3;
+            return ACLNN_SUCCESS;
+        }
         // 执行 Muls: out1 = beta * bias
-        const aclTensor* out1 = MulsProcess(bias, beta, executor);
+        // 非inplace接口不能改变输入tensor，isMulsInplace=false
+        const aclTensor* out1 = MulsProcess(bias, beta, false, executor);
         CHECK_RET(out1 != nullptr, ACLNN_ERR_INNER_NULLPTR);
         // 执行 Matmul: out2 = mat1 @ mat2
         // 为了提升addmm的精度，如果输入是fp16或者bf16时，输出需要是fp32类型
@@ -534,7 +554,8 @@ public:
 
     aclnnStatus Impl() override{
         // 执行 Muls: out1 = beta * bias
-        const aclTensor* out1 = MulsProcess(bias, beta, executor);
+        // 非inplace接口不能改变输入tensor，isMulsInplace=false
+        const aclTensor* out1 = MulsProcess(bias, beta, false, executor);
         CHECK_RET(out1 != nullptr, ACLNN_ERR_INNER_NULLPTR);
         convOut = out1;
         return ACLNN_SUCCESS;
@@ -575,7 +596,8 @@ public:
         const aclTensor* out = MatmulProcess(matA, matB, output, cubeMathType, opInfo, executor);
         CHECK_RET(out != nullptr, ACLNN_ERR_INNER_NULLPTR);
         // 执行 Muls: out1 = alpha * out
-        const aclTensor* out1 = MulsProcess(out, alpha, executor);
+        // 对mmout多muls，为中间内存可以进行再复用，isMulsInplace=true
+        const aclTensor* out1 = MulsProcess(out, alpha, true, executor);
         CHECK_RET(out1 != nullptr, ACLNN_ERR_INNER_NULLPTR);
         convOut = out1;
         return ACLNN_SUCCESS;

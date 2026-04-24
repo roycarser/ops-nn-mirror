@@ -1,7 +1,6 @@
 # QuantBatchMatmulV4
 
-
-##  产品支持情况
+## 产品支持情况
 
 | 产品 | 是否支持 |
 | ---- | :----:|
@@ -100,13 +99,13 @@
       out_{pq} = \sum_{0}^{\left \lfloor \frac{k}{blockSize} \right \rfloor} (x1_{pr}@x2_{rq}*(x1Scale_{pr}*x2Scale_{rq}))
       $$
 
-    - x1为FLOAT8_E4M3FN，x2为FLOAT4_E2M1，x1Scale为FLOAT8_E8M0，x2Scale为FLOAT8_E8M0，无x1Offset，无x2Offset，可选参数bias的dtype为BFLOAT16，out为BFLOAT16:
+    - x1为FLOAT8_E4M3FN，x2为FLOAT4_E2M1，x1Scale为FLOAT8_E8M0，x2Scale为FLOAT8_E8M0，无x1Offset，无x2Offset，可选参数bias的dtype为BFLOAT16/FLOAT16，out为BFLOAT16/FLOAT16:
 
       $$
       out = (x1 * x1Scale)@(x2 * x2Scale) + bias
       $$
 
-    - x1为FLOAT8_E4M3FN，x2为FLOAT4_E2M1，无x1Scale，x2Scale为BFLOAT16，无x1Offset，无x2Offset，无bias, yScale为UINT64，out为BFLOAT16:
+    - x1为FLOAT8_E4M3FN，x2为FLOAT4_E2M1，无x1Scale，x2Scale为BFLOAT16/FLOAT16，无x1Offset，无x2Offset，无bias, yScale为UINT64，out为BFLOAT16/FLOAT16:
 
       $$
       out = (x1@(x2 * x2Scale)) * yScale
@@ -209,6 +208,7 @@
 - 输入和输出支持以下数据类型组合:
 
   - <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>、<term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>：
+
     | x1                        | x2                        | x1_scale     | x2_scale         | x2_offset    | y_scale   | bias         | y_offset    | y                                    |
     | ------------------------- | ------------------------- | ----------- | -----------     | ----------- | -------  | ------------ | -----------| -------------------------------------- |
     | INT8                      | INT32                     | FLOAT32     | UINT64          | nullptr        | nullptr     | nullptr         | FLOAT32    | FLOAT16/BFLOAT16                       |
@@ -224,6 +224,7 @@
     | INT4                | INT4                | FLOAT32     | FLOAT32         | FLOAT16        | nullptr     | nullptr    | nullptr       | BFLOAT16               |
   
   - <term>Ascend 950PR/Ascend 950DT</term>：
+
     | x1                        | x2                        | x1_scale     | x2_scale     | x2_offset | y_scale | bias    | y                                    |
     | ------------------------- | ------------------------- | ----------- | ----------- | -------- | -------| ------- | -------------------------------------- |
     | INT8                      | INT8                      | nullptr        | UINT64/INT64      | nullptr     | nullptr     | nullptr/INT32   | FLOAT16/BFLOAT16                       |
@@ -236,18 +237,19 @@
     | HIFLOAT8                  | HIFLOAT8                  | FLOAT32     | FLOAT32           | nullptr     | nullptr     | nullptr/FLOAT32 | FLOAT16/BFLOAT16/FLOAT32               |
     | FLOAT4_E2M1               | FLOAT4_E2M1               | FLOAT8_E8M0 | FLOAT8_E8M0       | nullptr     | nullptr     | nullptr/FLOAT32 | FLOAT16/BFLOAT16/FLOAT32               |
     | FLOAT8_E4M3FN/FLOAT8_E5M2 | FLOAT8_E4M3FN/FLOAT8_E5M2 | FLOAT8_E8M0 | FLOAT8_E8M0       | nullptr     | nullptr     | nullptr/FLOAT32 | FLOAT16/BFLOAT16/FLOAT32               |
-    | FLOAT8_E4M3FN             | FLOAT4_E2M1               | FLOAT8_E8M0 | FLOAT8_E8M0       | nullptr     | nullptr     | nullptr/BFLOAT16| BFLOAT16                               |
-    | FLOAT8_E4M3FN             | FLOAT4_E2M1               | nullptr        | BFLOAT16          | nullptr     | INT64/UINT64    | nullptr         | BFLOAT16                               |
+    | FLOAT8_E4M3FN             | FLOAT4_E2M1               | FLOAT8_E8M0 | FLOAT8_E8M0       | nullptr     | nullptr     | nullptr/BFLOAT16/FLOAT16| BFLOAT16/FLOAT16                               |
+    | FLOAT8_E4M3FN             | FLOAT4_E2M1               | nullptr        | BFLOAT16/FLOAT16 | nullptr     | INT64/UINT64    | nullptr  | BFLOAT16/FLOAT16               |
  
-
-
 ## 调用说明
+
 - <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品、Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>：
+
   | 调用方式   | 样例代码           | 说明                                         |
   | ---------------- | --------------------------- | --------------------------------------------------- |
   | aclnn接口  | [test_aclnn_quant_matmul_v5](examples/test_aclnn_quant_matmul_v5_at2_at3.cpp) | 通过<br>[aclnnQuantMatmulV5](docs/aclnnQuantMatmulV5.md)<br>等方式调用QuantBatchMatmulV4算子。 |
   
 - <term>Ascend 950PR/Ascend 950DT</term>：
+
   | 调用方式   | 样例代码           | 说明                                         |
   | ---------------- | --------------------------- | --------------------------------------------------- |
   | aclnn接口  | [test_aclnn_quant_matmul_v5](examples/arch35/test_aclnn_quant_matmul_v5_f8f4_nd.cpp) | 通过<br>[aclnnQuantMatmulV5](docs/aclnnQuantMatmulV5.md)<br>等方式调用QuantBatchMatmulV4算子。 |

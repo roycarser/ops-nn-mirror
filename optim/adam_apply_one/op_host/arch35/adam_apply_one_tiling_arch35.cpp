@@ -21,7 +21,7 @@
 #include "platform/platform_info.h"
 #include "register/op_impl_registry.h"
 #include "register/tilingdata_base.h"
-#include "tiling_base/tiling_templates_registry.h"
+#include "op_host/tiling_templates_registry.h"
 
 using namespace AscendC;
 using namespace ge;
@@ -62,7 +62,7 @@ ge::graphStatus AdamApplyOneTiling::GetShapeAttrsInfo()
         }
     }
     for (int32_t outputIdx = 0; outputIdx < OUTPUT_NUM; outputIdx++) {
-        auto outputDesc = context_->GetInputDesc(outputIdx);
+        auto outputDesc = context_->GetOutputDesc(outputIdx);
         OP_CHECK_NULL_WITH_CONTEXT(context_, outputDesc);
 
         auto curDtype = outputDesc->GetDataType();

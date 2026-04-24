@@ -16,10 +16,10 @@
 #ifndef AIR_CXX_RUNTIME_V2_OP_IMPL_SWISH_H_
 #define AIR_CXX_RUNTIME_V2_OP_IMPL_SWISH_H_
 
-#include "tiling_base/tiling_base.h"
+#include "op_host/tiling_base.h"
 
-using namespace Ops::NN::Optiling;
 namespace optiling {
+using namespace Ops::NN::Optiling;
 
 class SwishTiling
 {
@@ -38,8 +38,8 @@ private:
     uint64_t attrWork = 0;
     float attrScale = 1;
     gert::TilingContext* tilingContext;
-    ge::DataType outputDtype;
-    ge::DataType inputDtype;
+    ge::DataType outputDtype = ge::DT_UNDEFINED;
+    ge::DataType inputDtype = ge::DT_UNDEFINED;
 };
 
 struct SwishCompileInfo {

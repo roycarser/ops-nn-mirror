@@ -168,7 +168,7 @@ aclnnStatus aclnnCrossEntropyLossGrad(
         <td>gradLoss（aclTensor*）</td>
         <td>输入</td>
         <td>正向输出loss的梯度。参数与公式中grad对应。</td>
-        <td><ul><li>当reductionOptional为none时，要求为一个维度为1D的Tensor。</li><li>当reductionOptional为mean/sum时，要求为一个维度为0D的Tensor。</td>
+        <td><ul><li>当reductionOptional为none时，要求为一个维度为1D的Tensor。</li><li>当reductionOptional为mean/sum时，要求为一个维度为0D的Tensor。</li></ul></td>
         <td>FLOAT16、FLOAT、BFLOAT16</td>
         <td>ND</td>
         <td>(N,)<br>N为批处理大小</td>
@@ -218,7 +218,7 @@ aclnnStatus aclnnCrossEntropyLossGrad(
         <td>lseForZlossOptional（aclTensor*）</td>
         <td>可选输入</td>
         <td>zloss相关输入，如果lse_square_scale_for_zloss非0，正向额外输出的lse_for_zloss中间结果给反向用于计算lse。</td>
-        <td><ul><li>要求为一个维度为1D的Tensor。</li><li>当前暂不支持。</td>
+        <td><ul><li>要求为一个维度为1D的Tensor。</li><li>当前暂不支持。</li></ul></td>
         <td>FLOAT16、FLOAT、BFLOAT16</td>
         <td>ND</td>
         <td>(N,)</td>
@@ -239,7 +239,7 @@ aclnnStatus aclnnCrossEntropyLossGrad(
         <td>输入</td>
         <td>指定被忽略的标签值。</td>
         <td>-</td>
-        <td>-</td>
+        <td>INT64</td>
         <td>-</td>
         <td>-</td>
         <td>-</td>
@@ -249,7 +249,7 @@ aclnnStatus aclnnCrossEntropyLossGrad(
         <td>输入</td>
         <td>表示计算损失时的平滑量。取值范围在[0.0, 1.0]的浮点数，其中0.0表示不平滑。</td>
         <td>当前仅支持输入0.0。</td>
-        <td>-</td>
+        <td>DOUBLE</td>
         <td>-</td>
         <td>-</td>
         <td>-</td>
@@ -259,7 +259,7 @@ aclnnStatus aclnnCrossEntropyLossGrad(
         <td>输入</td>
         <td>zloss相关属性，0.0走pytorch原生分支，非0.0走zloss新分支。</td>
         <td>当前暂不支持。</td>
-        <td>-</td>
+        <td>DOUBLE</td>
         <td>-</td>
         <td>-</td>
         <td>-</td>
@@ -323,6 +323,7 @@ aclnnStatus aclnnCrossEntropyLossGrad(
       <td>ACLNN_ERR_PARAM_INVALID</td>
       <td>161002</td>
       <td>gradLoss、logProb、target、weightOptional、gradZlossOptional、lseForZlossOptional的数据类型不在支持的范围内。</td>
+      </tr>
       <tr>
       <td>ACLNN_ERR_INNER_TILING_ERROR</td>
       <td>561002</td>
@@ -481,14 +482,14 @@ int main() {
   std::vector<float> weightHostData = {1.0, 1.0, 1.0};
   std::vector<float> xGradOutHostData = {-0.0091, 0.0409, 0.0409, -0.0091, 0.0409, 0.0409};
   int64_t ignoreIndex = -100;
-  float labelSmoothing = 0.0;
-  float lseSquareScaleForZloss = 0.0;
+  double labelSmoothing = 0.0;
+  double lseSquareScaleForZloss = 0.0;
 
   // 创建gradLoss aclTensor
-  ret = CreateAclTensor(gradLossHostData, gradLossShape, &gradLossDeviceAddr, aclDataType::ACL_BF16, &gradLoss);
+  ret = CreateAclTensor(gradLossHostData, gradLossShape, &gradLossDeviceAddr, aclDataType::ACL_FLOAT, &gradLoss);
   CHECK_RET(ret == ACL_SUCCESS, return ret);
   // 创建logProb aclTensor
-  ret = CreateAclTensor(logProbHostData, logProbShape, &logProbDeviceAddr, aclDataType::ACL_BF16, &logProb);
+  ret = CreateAclTensor(logProbHostData, logProbShape, &logProbDeviceAddr, aclDataType::ACL_FLOAT, &logProb);
   CHECK_RET(ret == ACL_SUCCESS, return ret);
   // 创建target aclTensor
   ret = CreateAclTensor(targetHostData, targetShape, &targetDeviceAddr, aclDataType::ACL_INT64, &target);
@@ -497,7 +498,7 @@ int main() {
   ret = CreateAclTensor(weightHostData, weightShape, &weightDeviceAddr, aclDataType::ACL_FLOAT, &weight);
   CHECK_RET(ret == ACL_SUCCESS, return ret);
   // 创建xGradOut aclTensor
-  ret = CreateAclTensor(xGradOutHostData, xGradShape, &xGradOutDeviceAddr, aclDataType::ACL_BF16, &xGradOut);
+  ret = CreateAclTensor(xGradOutHostData, xGradShape, &xGradOutDeviceAddr, aclDataType::ACL_FLOAT, &xGradOut);
   CHECK_RET(ret == ACL_SUCCESS, return ret);
 
   uint64_t workspaceSize = 0;

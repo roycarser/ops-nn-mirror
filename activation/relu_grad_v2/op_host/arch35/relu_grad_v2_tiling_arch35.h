@@ -16,13 +16,13 @@
 #define OPS_BUILD_IN_OP_TILING_RUNTIME_RELU_GRAD_V2_TILING_H
 
 #include "register/tilingdata_base.h"
-#include "tiling_base/tiling_base.h"
+#include "op_host/tiling_base.h"
 #include "atvoss/elewise/elewise_tiling.h"
 
+namespace optiling {
 using Ops::NN::Optiling::TilingBaseClass;
 using namespace Ops::Base;
 
-namespace optiling {
 struct ReluGradV2CompileInfo {
     uint64_t coreNum;
     uint64_t ubSize;
@@ -41,8 +41,8 @@ private:
     uint64_t dType = 0;
     uint64_t schMode = 0;
     gert::TilingContext* tilingContext;
-    ge::DataType outputDtype;
-    ge::DataType inputDtype;
+    ge::DataType outputDtype = ge::DT_UNDEFINED;
+    ge::DataType inputDtype = ge::DT_UNDEFINED;
 };
 } // namespace optiling
 #endif // OPS_BUILD_IN_OP_TILING_RUNTIME_RELU_GRAD_V2_TILING_H

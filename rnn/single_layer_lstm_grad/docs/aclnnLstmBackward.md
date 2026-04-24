@@ -13,10 +13,11 @@
 
 ## 功能说明
 
-- 算子功能：LSTM的反向传播，计算正向输入input、权重params、初始状态hx的梯度。
+- 接口功能：LSTM的反向传播，计算正向输入input、权重params、初始状态hx的梯度。
 - 计算公式：
 
   <details>
+
     <summary> 单层LSTM反向传播计算公式</summary>
 
     | 组件 | 公式 |
@@ -153,6 +154,7 @@
     </details>
 
   <details>
+
     <summary> 梯度计算原理</summary>
 
     - **细胞状态梯度推导**
@@ -194,6 +196,7 @@
   </details>
 
   <details>
+
     <summary> 多层LSTMBackward反向传播</summary>
     在多层LSTM网络中，层与层之间的梯度传播仅关注隐藏状态的传递（忽略单层内部细节，如门控机制或单元状态）。设：
 
@@ -265,15 +268,15 @@ aclnnStatus aclnnLstmBackward(
 
 - **参数说明：**
 
-  <table style="undefined;table-layout: fixed; width: 1478px"><colgroup>
+  <table style="undefined;table-layout: fixed; width: 1565px"><colgroup>
   <col style="width: 149px">
   <col style="width: 121px">
-  <col style="width: 264px">
-  <col style="width: 253px">
-  <col style="width: 262px">
-  <col style="width: 148px">
-  <col style="width: 135px">
-  <col style="width: 146px">
+  <col style="width: 280px">
+  <col style="width: 340px">
+  <col style="width: 140px">
+  <col style="width: 120px">
+  <col style="width: 270px">
+  <col style="width: 145px">
   </colgroup>
   <thead>
     <tr>
@@ -291,10 +294,22 @@ aclnnStatus aclnnLstmBackward(
       <td>input</td>
       <td>输入</td>
       <td>LSTM的定长输入序列，对应公式中的x。</td>
-      <td><ul><li>batch_size表示序列组数；time_step表示时间维度；input_size表示输入的特征数量。</li></td>
+      <td>batch_size表示序列组数；time_step表示时间维度；input_size表示输入的特征数量。</td>
       <td>FLOAT32、FLOAT16</td>
       <td>ND</td>
-      <td>[time_step, batch_size, input_size] 或 [batch_size, time_step, input_size]</td>
+      <td><ul>
+      <li>若传入有效batchSizesOptional，为[time_step * batch_size, input_size]</li>
+      <li>若传入空指针batchSizesOptional，为[time_step, batch_size, input_size] 或 [batch_size, time_step, input_size]</li></ul></td>
+      <td>√</td>
+    </tr>
+    <tr>
+      <td>hx</td>
+      <td>输入</td>
+      <td>LSTM每层的初始hidden和cell状态。对应0时刻的h(t-1)与c(t-1)。</td>
+      <td><ul><li>列表长度为2，包含h_0和c_0。</li><li>多层双向时每个tensor数据沿第0维按先双向后逐层排布。</li><li>数据类型与input一致。</li></ul></td>
+      <td>FLOAT32、FLOAT16</td>
+      <td>ND</td>
+      <td>列表内每个tensor shape为[D * num_layers, batch_size, hidden_size]</td>
       <td>√</td>
     </tr>
     <tr>
@@ -302,37 +317,29 @@ aclnnStatus aclnnLstmBackward(
       <td>输入</td>
       <td>LSTM每层的权重和偏置张量列表，对应公式中的w与b。</td>
       <td><ul><li>bidirection为True时 `D = 2`，否则 `D = 1`，hasBiases为True时 `B = 2`，否则 `B = 1`。列表长度为 D * B * num_layers。</li><li>当bidirection和hasBias均为True时排布为：[weight_ih_0, weight_hh_0, bias_ih_0, bias_hh_0, weight_ih_reverse_0, weight_hh_reverse_0, bias_ih_reverse_0, bias_hh_reverse_0]。</li>
-      <li>hasBias为False时无bias项；bidirection为False时无reverse项。</li><li>多层时逐层排布。</li><li>数据类型与input一致。</li></td>
+      <li>hasBias为False时无bias项；bidirection为False时无reverse项。</li><li>多层时逐层排布。</li><li>数据类型与input一致。</li></ul></td>
       <td>FLOAT32、FLOAT16</td>
       <td>ND</td>
-      <td>weight_ih: [4*hidden_size, cur_input_size]<br>weight_hh: [4*hidden_size, hidden_size]<br>bias: [4*hidden_size]</td>
-      <td>√</td>
-    </tr>
-    <tr>
-      <td>hx</td>
-      <td>输入</td>
-      <td>LSTM每层的初始hidden和cell状态。对应0时刻的h(t-1)与c(t-1)。</td>
-      <td><ul><li>列表长度为2，包含h_0和c_0。</li><li>多层双向时每个tensor数据沿第0维按先双向后逐层排布。<li>数据类型与input一致。</td>
-      <td>FLOAT32、FLOAT16</td>
-      <td>ND</td>
-      <td>列表内每个tensor shape为[D * num_layers, batch_size, hidden_size]</td>
+      <td><ul><li>weight_ih：[4*hidden_size, cur_input_size]</li><li>weight_hh：[4*hidden_size, hidden_size]</li><li>bias_ih：[4*hidden_size]</li><li>bias_hh：[4*hidden_size]</li></ul></td>
       <td>√</td>
     </tr>
     <tr>
       <td>dy</td>
       <td>输入</td>
       <td>LSTM正向最后一层输出hidden的梯度。对应公式中的∂L/∂h^(l)。</td>
-      <td><ul><li>双向时数据沿最后一维按前后向排布。</li><li>数据类型与input一致。</td>
+      <td><ul><li>双向时数据沿最后一维按前后向排布。</li><li>数据类型与input一致。</li></ul></td>
       <td>FLOAT32、FLOAT16</td>
       <td>ND</td>
-      <td>[time_step, batch_size, hidden_size * D] 或 [batch_size, time_step, hidden_size * D]</td>
+      <td><ul>
+      <li>若传入有效batchSizesOptional，为[time_step * batch_size, hidden_size * D]</li>
+      <li>若传入空指针batchSizesOptional，为[time_step, batch_size, hidden_size * D] 或 [batch_size, time_step, hidden_size * D]</li></ul></td>
       <td>√</td>
     </tr>
     <tr>
       <td>dh</td>
       <td>输入</td>
       <td>LSTM正向每层输出hidden在T时刻从下一个时间步传来的梯度。对应δh_next。</td>
-      <td><ul><li>多层双向时数据沿第0维按先双向后逐层排布。</li><li>数据类型与input一致。</td>
+      <td><ul><li>多层双向时数据沿第0维按先双向后逐层排布。</li><li>数据类型与input一致。</li></ul></td>
       <td>FLOAT32、FLOAT16</td>
       <td>ND</td>
       <td>[numLayers * D, batch_size, hidden_size]</td>
@@ -342,7 +349,7 @@ aclnnStatus aclnnLstmBackward(
       <td>dc</td>
       <td>输入</td>
       <td>LSTM每层输出cell在T时刻从下一个时间步传来的梯度。对应δc_next。</td>
-      <td><ul><li>多层双向时数据沿第0维按先双向后逐层排布。</li><li>数据类型与input一致。</td>
+      <td><ul><li>多层双向时数据沿第0维按先双向后逐层排布。</li><li>数据类型与input一致。</li></ul></td>
       <td>FLOAT32、FLOAT16</td>
       <td>ND</td>
       <td>[numLayers * D, batch_size, hidden_size]</td>
@@ -352,7 +359,7 @@ aclnnStatus aclnnLstmBackward(
     <td>i</td>
       <td>输入</td>
       <td>LSTM正向中每层输出的输入门的激活值。对应公式中的i。</td>
-      <td><ul><li>列表长度为 D * num_layers。</li><li>多层双向时tensor间按先双向后多层排布。</li><li>数据类型与input一致。</td>
+      <td><ul><li>列表长度为 D * num_layers。</li><li>多层双向时tensor间按先双向后多层排布。</li><li>数据类型与input一致。</li></ul></td>
       <td>FLOAT32、FLOAT16</td>
       <td>ND</td>
       <td>[time_step, batch_size, hidden_size]</td>
@@ -362,7 +369,7 @@ aclnnStatus aclnnLstmBackward(
       <td>g</td>
       <td>输入</td>
       <td>LSTM正向中每层输出的候选cell状态的激活值。对应公式中的g。</td>
-      <td><ul><li>列表长度为 D * num_layers。</li><li>多层双向时tensor间按先双向后多层排布。</li><li>数据类型与input一致。</td>
+      <td><ul><li>列表长度为 D * num_layers。</li><li>多层双向时tensor间按先双向后多层排布。</li><li>数据类型与input一致。</li></ul></td>
       <td>FLOAT32、FLOAT16</td>
       <td>ND</td>
       <td>[time_step, batch_size, hidden_size]</td>
@@ -372,7 +379,7 @@ aclnnStatus aclnnLstmBackward(
       <td>f</td>
       <td>输入</td>
       <td>LSTM正向中每层遗忘门的激活值。对应公式中的f。</td>
-      <td><ul><li>列表长度为 D * num_layers。</li><li>多层双向时tensor间按先双向后多层排布。</li><li>数据类型与input一致。</td>
+      <td><ul><li>列表长度为 D * num_layers。</li><li>多层双向时tensor间按先双向后多层排布。</li><li>数据类型与input一致。</li></ul></td>
       <td>FLOAT32、FLOAT16</td>
       <td>ND</td>
       <td>[time_step, batch_size, hidden_size]</td>
@@ -381,8 +388,8 @@ aclnnStatus aclnnLstmBackward(
     <tr>
       <td>o</td>
       <td>输入</td>
-      <td>LSTM政协中每层输出门的激活值。对于公式中的o。</td>
-      <td><ul><li>列表长度为 D * num_layers。</li><li>多层双向时tensor间按先双向后多层排布。</li><li>数据类型与input一致。</td>
+      <td>LSTM正向中每层输出门的激活值。对于公式中的o。</td>
+      <td><ul><li>列表长度为 D * num_layers。</li><li>多层双向时tensor间按先双向后多层排布。</li><li>数据类型与input一致。</li></ul></td>
       <td>FLOAT32、FLOAT16</td>
       <td>ND</td>
       <td>[time_step, batch_size, hidden_size]</td>
@@ -392,7 +399,7 @@ aclnnStatus aclnnLstmBackward(
       <td>h</td>
       <td>输入</td>
       <td>LSTM正向中每层的隐藏hidden状态。对应公式中的h。</td>
-      <td><ul><li>列表长度为 D * num_layers。</li><li>多层双向时tensor间按先双向后多层排布。</li><li>数据类型与input一致。</td>
+      <td><ul><li>列表长度为 D * num_layers。</li><li>多层双向时tensor间按先双向后多层排布。</li><li>数据类型与input一致。</li></ul></td>
       <td>FLOAT32、FLOAT16</td>
       <td>ND</td>
       <td>[time_step, batch_size, hidden_size]</td>
@@ -402,7 +409,7 @@ aclnnStatus aclnnLstmBackward(
       <td>c</td>
       <td>输入</td>
       <td>LSTM正向中每层的最终cell状态。对应公式中的c。</td>
-      <td><ul><li>列表长度为 D * num_layers。</li><li>多层双向时tensor间按先双向后多层排布。</li><li>数据类型与input一致。</td>
+      <td><ul><li>列表长度为 D * num_layers。</li><li>多层双向时tensor间按先双向后多层排布。</li><li>数据类型与input一致。</li></ul></td>
       <td>FLOAT32、FLOAT16</td>
       <td>ND</td>
       <td>[time_step, batch_size, hidden_size]</td>
@@ -412,7 +419,7 @@ aclnnStatus aclnnLstmBackward(
       <td>tanhc</td>
       <td>输入</td>
       <td>LSTM正向中每层最终cell状态经过tanh激活函数后的输出。对应tanh(c)。</td>
-      <td><ul><li>列表长度为 D * num_layers。</li><li>多层双向时tensor间按先双向后多层排布。</li><li>数据类型与input一致。</td>
+      <td><ul><li>列表长度为 D * num_layers。</li><li>多层双向时tensor间按先双向后多层排布。</li><li>数据类型与input一致。</li></ul></td>
       <td>FLOAT32、FLOAT16</td>
       <td>ND</td>
       <td>[time_step, batch_size, hidden_size]</td>
@@ -422,7 +429,7 @@ aclnnStatus aclnnLstmBackward(
       <td>batchSizesOptional</td>
       <td>输入</td>
       <td>变长LSTM输入序列各个时刻的有效序列batch数。</td>
-      <td><ul><li>变长序列时支持。</td>
+      <td>变长序列时支持。</td>
       <td>INT64</td>
       <td>ND</td>
       <td>[time_step]</td>
@@ -442,7 +449,7 @@ aclnnStatus aclnnLstmBackward(
       <td>numLayers</td>
       <td>输入</td>
       <td>表示LSTM层数。</td>
-      <td><ul><li>值大于0。</td>
+      <td>值大于0。</td>
       <td>INT64</td>
       <td>-</td>
       <td>-</td>
@@ -482,7 +489,7 @@ aclnnStatus aclnnLstmBackward(
       <td>outputMask</td>
       <td>输入</td>
       <td>表示是否计算四个梯度。</td>
-      <td><ul><li>数组长度为4，暂未支持。</td>
+      <td>数组长度为4，暂未支持。</td>
       <td>ACL_BOOL_ARRAY</td>
       <td>-</td>
       <td>-</td>
@@ -492,17 +499,17 @@ aclnnStatus aclnnLstmBackward(
       <td>dxOut</td>
       <td>输出</td>
       <td>输入input上的梯度，对应公式中的δx。</td>
-      <td><ul><li>shape与input一致。</li><li>数据类型与input一致。</td>
+      <td><ul><li>shape与input一致。</li><li>数据类型与input一致。</li></ul></td>
       <td>FLOAT32、FLOAT16</td>
       <td>ND</td>
-      <td>[time_step, batch_size, input_size] 或 [batch_size, time_step, input_size]</td>
+      <td>-</td>
       <td>√</td>
     </tr>
     <tr>
       <td>dhPrevOut</td>
       <td>输出</td>
       <td>LSTM每层初始hidden的梯度，对应t=0时的δh_prev。</td>
-      <td><ul><li>多层双向时数据沿第0维按先双向后逐层排布。</li><li>数据类型与input一致。</td>
+      <td><ul><li>多层双向时数据沿第0维按先双向后逐层排布。</li><li>数据类型与input一致。</li></ul></td>
       <td>FLOAT32、FLOAT16</td>
       <td>ND</td>
       <td>[D * num_layers, batch_size, hidden_size]</td>
@@ -512,7 +519,7 @@ aclnnStatus aclnnLstmBackward(
       <td>dcPrevOut</td>
       <td>输出</td>
       <td>LSTM每层初始cell的梯度，对应t=0时的δc_prev。</td>
-      <td><ul><li>多层双向时数据沿第0维按先双向后逐层排布。</li><li>数据类型与input一致。</td>
+      <td><ul><li>多层双向时数据沿第0维按先双向后逐层排布。</li><li>数据类型与input一致。</li></ul></td>
       <td>FLOAT32、FLOAT16</td>
       <td>ND</td>
       <td>[D * num_layers, batch_size, hidden_size]</td>
@@ -522,18 +529,18 @@ aclnnStatus aclnnLstmBackward(
       <td>dparamsOut</td>
       <td>输出</td>
       <td>权重和偏置的梯度张量列表。对应公式中的δw和δb。</td>
-      <td><ul><li>列表长度为 D * B * num_layers。</li><li>排布与输入params一致。</li><li>数据类型与input一致。</td>
+      <td><ul><li>列表长度为 D * B * num_layers。</li><li>排布与输入params一致。</li><li>数据类型与input一致。</li></ul></td>
       <td>FLOAT32、FLOAT16</td>
       <td>ND</td>
-      <td>dweight_ih: [4*hidden_size, cur_input_size]<br>dweight_hh: [4*hidden_size, hidden_size]<br>dbias: [4*hidden_size]</td>
+      <td><ul><li>dweight_ih：[4*hidden_size, cur_input_size]</li><li>dweight_hh：[4*hidden_size, hidden_size]</li><li>dbias：[4*hidden_size]</li></ul></td>
       <td>√</td>
     </tr>
     <tr>
       <td>workspaceSize</td>
       <td>输出</td>
       <td>返回需要在Device侧申请的workspace大小。</td>
-      <td>Host侧出参。</td>
-      <td>UINT64</td>
+      <td>-</td>
+      <td>-</td>
       <td>-</td>
       <td>-</td>
       <td>-</td>
@@ -542,13 +549,14 @@ aclnnStatus aclnnLstmBackward(
       <td>executor</td>
       <td>输出</td>
       <td>返回op执行器，包含了算子计算流程。</td>
-      <td>Host侧出参。</td>
+      <td>-</td>
       <td>-</td>
       <td>-</td>
       <td>-</td>
       <td>-</td>
     </tr>
   </tbody></table>
+
 - **返回值：**
 
   aclnnStatus: 返回状态码，具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。
@@ -569,7 +577,7 @@ aclnnStatus aclnnLstmBackward(
     <tr>
       <td>ACLNN_ERR_PARAM_NULLPTR</td>
       <td>161001</td>
-      <td>如果传入参数为aclTensor或aclTensorList，是空指针。</td>
+      <td>如果传入参数为aclTensor或aclTensorList且非batchSizesOptional，是空指针。</td>
     </tr>
     <tr>
       <td rowspan="12">ACLNN_ERR_PARAM_INVALID</td>
@@ -682,7 +690,7 @@ int Init(int32_t deviceId, aclrtStream* stream) {
 
 template <typename T>
 int CreateAclTensor(const std::vector<T>& hostData, const std::vector<int64_t>& shape, void** deviceAddr,
-                    aclDataType dataType, aclTensor** tensor) {
+                    aclDataType dataType, aclTensor** tensor, aclFormat format=aclFormat::ACL_FORMAT_ND) {
   auto size = GetShapeSize(shape) * sizeof(T);
   // 调用aclrtMalloc申请device侧内存
   auto ret = aclrtMalloc(deviceAddr, size, ACL_MEM_MALLOC_HUGE_FIRST);
@@ -698,7 +706,7 @@ int CreateAclTensor(const std::vector<T>& hostData, const std::vector<int64_t>& 
   }
 
   // 调用aclCreateTensor接口创建aclTensor
-  *tensor = aclCreateTensor(shape.data(), shape.size(), dataType, strides.data(), 0, aclFormat::ACL_FORMAT_ND,
+  *tensor = aclCreateTensor(shape.data(), shape.size(), dataType, strides.data(), 0, format,
                             shape.data(), shape.size(), *deviceAddr);
   return 0;
 }
@@ -836,7 +844,7 @@ int main() {
 
 
   // 创建 x aclTensor
-  ret = CreateAclTensor(xHostData, xShape, &xDeviceAddr, aclDataType::ACL_FLOAT, &x);
+  ret = CreateAclTensor(xHostData, xShape, &xDeviceAddr, aclDataType::ACL_FLOAT, &x, aclFormat::ACL_FORMAT_NCL);
   CHECK_RET(ret == ACL_SUCCESS, return ret);
 
   // 创建 params aclTensorList
@@ -856,65 +864,65 @@ int main() {
   CHECK_RET(ret == ACL_SUCCESS, return ret);
 
   // 创建 initH aclTensor
-  ret = CreateAclTensor(initHHostData, initHShape, &initHDeviceAddr, aclDataType::ACL_FLOAT, &initH);
+  ret = CreateAclTensor(initHHostData, initHShape, &initHDeviceAddr, aclDataType::ACL_FLOAT, &initH, aclFormat::ACL_FORMAT_NCL);
   CHECK_RET(ret == ACL_SUCCESS, return ret);
 
   // 创建 initC aclTensor
-  ret = CreateAclTensor(initCHostData, initCShape, &initCDeviceAddr, aclDataType::ACL_FLOAT, &initC);
+  ret = CreateAclTensor(initCHostData, initCShape, &initCDeviceAddr, aclDataType::ACL_FLOAT, &initC, aclFormat::ACL_FORMAT_NCL);
   CHECK_RET(ret == ACL_SUCCESS, return ret);
   aclTensor* initHcArray[] = {initH, initC};
   auto initHcList = aclCreateTensorList(initHcArray, 2);
 
   // 创建 h aclTensor
-  ret = CreateAclTensor(hHostData, hShape, &hDeviceAddr, aclDataType::ACL_FLOAT, &h);
+  ret = CreateAclTensor(hHostData, hShape, &hDeviceAddr, aclDataType::ACL_FLOAT, &h, aclFormat::ACL_FORMAT_NCL);
   CHECK_RET(ret == ACL_SUCCESS, return ret);
   aclTensor* hArray[] = {h};
   auto hList = aclCreateTensorList(hArray, 1);
 
   // 创建 c aclTensor
-  ret = CreateAclTensor(cHostData, cShape, &cDeviceAddr, aclDataType::ACL_FLOAT, &c);
+  ret = CreateAclTensor(cHostData, cShape, &cDeviceAddr, aclDataType::ACL_FLOAT, &c, aclFormat::ACL_FORMAT_NCL);
   CHECK_RET(ret == ACL_SUCCESS, return ret);
   aclTensor* cArray[] = {c};
   auto cList = aclCreateTensorList(cArray, 1);
 
   // 创建 dy aclTensor
-  ret = CreateAclTensor(dyHostData, dyShape, &dyDeviceAddr, aclDataType::ACL_FLOAT, &dy);
+  ret = CreateAclTensor(dyHostData, dyShape, &dyDeviceAddr, aclDataType::ACL_FLOAT, &dy, aclFormat::ACL_FORMAT_NCL);
   CHECK_RET(ret == ACL_SUCCESS, return ret);
 
   // 创建 dh aclTensor
-  ret = CreateAclTensor(dhHostData, dhShape, &dhDeviceAddr, aclDataType::ACL_FLOAT, &dh);
+  ret = CreateAclTensor(dhHostData, dhShape, &dhDeviceAddr, aclDataType::ACL_FLOAT, &dh, aclFormat::ACL_FORMAT_NCL);
   CHECK_RET(ret == ACL_SUCCESS, return ret);
 
   // 创建 dc aclTensor
-  ret = CreateAclTensor(dcHostData, dcShape, &dcDeviceAddr, aclDataType::ACL_FLOAT, &dc);
+  ret = CreateAclTensor(dcHostData, dcShape, &dcDeviceAddr, aclDataType::ACL_FLOAT, &dc, aclFormat::ACL_FORMAT_NCL);
   CHECK_RET(ret == ACL_SUCCESS, return ret);
 
   // 创建 i aclTensor
-  ret = CreateAclTensor(iHostData, iShape, &iDeviceAddr, aclDataType::ACL_FLOAT, &i);
+  ret = CreateAclTensor(iHostData, iShape, &iDeviceAddr, aclDataType::ACL_FLOAT, &i, aclFormat::ACL_FORMAT_NCL);
   CHECK_RET(ret == ACL_SUCCESS, return ret);
   aclTensor* iArray[] = {i};
   auto iList = aclCreateTensorList(iArray, 1);
 
   // 创建 j aclTensor
-  ret = CreateAclTensor(jHostData, jShape, &jDeviceAddr, aclDataType::ACL_FLOAT, &j);
+  ret = CreateAclTensor(jHostData, jShape, &jDeviceAddr, aclDataType::ACL_FLOAT, &j, aclFormat::ACL_FORMAT_NCL);
   CHECK_RET(ret == ACL_SUCCESS, return ret);
   aclTensor* jArray[] = {j};
   auto jList = aclCreateTensorList(jArray, 1);
 
   // 创建 f aclTensor
-  ret = CreateAclTensor(fHostData, fShape, &fDeviceAddr, aclDataType::ACL_FLOAT, &f);
+  ret = CreateAclTensor(fHostData, fShape, &fDeviceAddr, aclDataType::ACL_FLOAT, &f, aclFormat::ACL_FORMAT_NCL);
   CHECK_RET(ret == ACL_SUCCESS, return ret);
   aclTensor* fArray[] = {f};
   auto fList = aclCreateTensorList(fArray, 1);
 
   // 创建 o aclTensor
-  ret = CreateAclTensor(oHostData, oShape, &oDeviceAddr, aclDataType::ACL_FLOAT, &o);
+  ret = CreateAclTensor(oHostData, oShape, &oDeviceAddr, aclDataType::ACL_FLOAT, &o, aclFormat::ACL_FORMAT_NCL);
   CHECK_RET(ret == ACL_SUCCESS, return ret);
   aclTensor* oArray[] = {o};
   auto oList = aclCreateTensorList(oArray, 1);
 
   // 创建 tanhCt aclTensor
-  ret = CreateAclTensor(tanhCtHostData, tanhCtShape, &tanhCtDeviceAddr, aclDataType::ACL_FLOAT, &tanhCt);
+  ret = CreateAclTensor(tanhCtHostData, tanhCtShape, &tanhCtDeviceAddr, aclDataType::ACL_FLOAT, &tanhCt, aclFormat::ACL_FORMAT_NCL);
   CHECK_RET(ret == ACL_SUCCESS, return ret);
   aclTensor* tanhCtArray[] = {tanhCt};
   auto tanhCtList = aclCreateTensorList(tanhCtArray, 1);
@@ -922,15 +930,15 @@ int main() {
   // 创建反向传播输出张量
 
   // 创建 dx aclTensor
-  ret = CreateAclTensor(dxHostData, dxShape, &dxDeviceAddr, aclDataType::ACL_FLOAT, &dx);
+  ret = CreateAclTensor(dxHostData, dxShape, &dxDeviceAddr, aclDataType::ACL_FLOAT, &dx, aclFormat::ACL_FORMAT_NCL);
   CHECK_RET(ret == ACL_SUCCESS, return ret);
 
   // 创建 dhPrev aclTensor
-  ret = CreateAclTensor(dhPrevHostData, dhPrevShape, &dhPrevDeviceAddr, aclDataType::ACL_FLOAT, &dhPrev);
+  ret = CreateAclTensor(dhPrevHostData, dhPrevShape, &dhPrevDeviceAddr, aclDataType::ACL_FLOAT, &dhPrev, aclFormat::ACL_FORMAT_NCL);
   CHECK_RET(ret == ACL_SUCCESS, return ret);
 
   // 创建 dcPrev aclTensor
-  ret = CreateAclTensor(dcPrevHostData, dcPrevShape, &dcPrevDeviceAddr, aclDataType::ACL_FLOAT, &dcPrev);
+  ret = CreateAclTensor(dcPrevHostData, dcPrevShape, &dcPrevDeviceAddr, aclDataType::ACL_FLOAT, &dcPrev, aclFormat::ACL_FORMAT_NCL);
   CHECK_RET(ret == ACL_SUCCESS, return ret);
 
   // 创建 dparams aclTensorList
