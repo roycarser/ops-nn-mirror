@@ -38,6 +38,43 @@ struct TileBox {
     CSlice c;
 };
 
+namespace WinoTransformDetail {
+
+template <uint32_t STRIDE, uint32_t WINDOW_SIZE>
+inline uint32_t __aicore__ CalColUnfoldBufWidth(uint32_t tw)
+{
+    uint32_t srcW = SlideWindows<STRIDE, WINDOW_SIZE>::Tiles2SrcLength(tw);
+    //宽为偶数要补一个pad到奇数
+    return srcW | TILE_BUF_BANK_CONFLICT_PADDING;
+}
+
+inline uint32_t __aicore__ Cal16TileHWBufWidth(uint32_t tileHW)
+{
+    //宽为偶数要补一个pad到奇数
+    return tileHW | TILE_BUF_BANK_CONFLICT_PADDING;
+}
+
+//列变换空间大小[th4,srcW]
+template <uint32_t STRIDE, uint32_t WINDOW_SIZE>
+inline uint32_t __aicore__ CalColUnfoldBufSize(uint32_t th, uint32_t tw)
+{
+    return TileUnfoldSize(th) * CalColUnfoldBufWidth<STRIDE, WINDOW_SIZE>(tw);
+}
+
+//将每个滑窗内16个点拖到外轴后占用的空间[16,TileHW]
+inline uint32_t __aicore__ Cal16TileHWBufSize(uint32_t tileHW)
+{
+    return F23_TRANSFORM_TILE_ELEMENTS_16 * Cal16TileHWBufWidth(tileHW);
+}
+}
+
+template <typename T>
+inline uint32_t __aicore__ SingleShapeTileBufSize(uint32_t c, uint32_t tileHW)
+{
+    return WinoTransformDetail::Cal16TileHWBufSize(tileHW) * Ops::Base::CeilAlign(c, C0<T>());
+}
+
+namespace WinoTransformDetail {
 template <typename T, typename Impl>
 struct UnfoldIntf {
     using UnfoldColParamsT = typename Impl::UnfoldColParamsT;
@@ -48,21 +85,23 @@ struct UnfoldIntf {
         return Impl::InitUnfoldParams(box);
     }
 
-    static __simd_callee__ inline void UnfoldColsFromSrcBufVf(
-        __ubuf__ T* __restrict__ tileBuf,
-        __ubuf__ T* __restrict__ srcBuf,
+    static __simd_callee__ inline void UnfoldColsVf(
+        __ubuf__ T* unfoldColBuf,
+        __ubuf__ T* srcBuf,
         const UnfoldColParamsT& params)
     {
-        Impl::UnfoldColsFromSrcBufVf(tileBuf, srcBuf, params);
+        Impl::UnfoldColsVf(unfoldColBuf, srcBuf, params);
     }
 
     static __simd_callee__ inline void UnfoldRowsVf(
-        __ubuf__ T* buf,
+        __ubuf__ T* outBuf,
+        __ubuf__ T* srcBuf,
         const UnfoldRowParamsT& params)
     {
-        Impl::UnfoldRowsVf(buf, params);
+        Impl::UnfoldRowsVf(outBuf, srcBuf, params);
     }
 };
+}
 
 template <typename T,
     uint32_t STRIDE,
@@ -72,7 +111,7 @@ template <typename T,
 class WinoTransformer {
 public:
     using SlideWin = SlideWindows<STRIDE, WINDOW_SIZE>;
-    using UnfoldPolicy = UnfoldIntf<T, UnfoldImpl>;
+    using UnfoldPolicy = WinoTransformDetail::UnfoldIntf<T, UnfoldImpl>;
 
     __aicore__ inline WinoTransformer(
         __gm__ T* in,
@@ -88,27 +127,28 @@ public:
         gm_.SetGlobalBuffer(in);
     }
 
-    __aicore__ static inline uint32_t CalculateTransposeBufC0Length(
-        uint32_t tileH, uint32_t tileW)
+    __aicore__ static inline uint32_t CalculateTmpBufLength(uint32_t tileH, uint32_t tileW)
     {
-        //额外申请[c0,align16(hw)]的空间给c0hw转置
-        uint32_t h = SlideWin::Tiles2SrcLength(tileH);
-        uint32_t w = SlideWin::Tiles2SrcLength(tileW);
+        uint32_t s0 = CalculateTransposeBufC0SafeElements(tileH, tileW);
+        uint32_t s1 = WinoTransformDetail::CalColUnfoldBufSize<STRIDE, WINDOW_SIZE>(
+                          tileH, tileW) * C0<T>();
+        return s0 + s1;
+    }
 
-        uint32_t safeElements;
-        if constexpr (hasInputPadding) {
-            //transposeBuf中会做H方向pad的清0
-            //令src中数据为h,w
-            //那么需要 pad_top*w+ align16(h*w) <= buf_length
-            //所以这里要额外+15防止转置指令写入的数据溢出
-            //防止pad_top=3,h=1,w=4,这种情况
-            //会写入的空间为3*4+16=28超过16
-            //但如果不存在输入pad_top其实可以不做保护
-            safeElements = Ops::Base::CeilAlign(h * w + 15, HW_SRC_ALIGNED_16);
-        } else {
-            safeElements = Ops::Base::CeilAlign(h * w, HW_SRC_ALIGNED_16);
-        }
-        return safeElements * C0<T>();
+    __aicore__ static inline void assignSubTmpBuf(
+        uint32_t tileH, uint32_t tileW,
+        LocalTensor<T>& tmpBuf,
+        LocalTensor<T>& transposeBufOut,
+        LocalTensor<T>& colTransBufOut)
+    {
+        uint32_t s0 = CalculateTransposeBufC0SafeElements(tileH, tileW);
+        transposeBufOut = tmpBuf[0];
+        transposeBufOut.SetSize(s0);
+
+        uint32_t s1 = WinoTransformDetail::CalColUnfoldBufSize<STRIDE, WINDOW_SIZE>(
+                         tileH, tileW) * C0<T>();
+        colTransBufOut = tmpBuf[s0];
+        colTransBufOut.SetSize(s1);
     }
 
     __aicore__ inline TileBox CalculateSrcBox(const HWBox& tile, uint32_t cIdx, uint32_t cLength) const
@@ -176,25 +216,25 @@ public:
 
     __aicore__ inline void Compute(
         AscendC::LocalTensor<T>& mainBuf,
-        AscendC::LocalTensor<T>& transposeBuf,
+        AscendC::LocalTensor<T>& tmpBuf,
         const TileBox& box) const
     {
         uint16_t c1 = box.c.c1;
-        uint32_t tileBufW = TileUnfoldSize(box.tile.wLength) + TILE_BUF_BANK_CONFLICT_PADDING;
-        uint32_t tileBufH = TileUnfoldSize(box.tile.hLength);
-        uint32_t tileBufHW = tileBufW * tileBufH;
 
         if (const HWBox& src = box.src; src.elements != 0) {
             uint32_t fmapHWAligned16 = Ops::Base::CeilAlign(src.elements, HW_SRC_ALIGNED_16);
 
             uint32_t padTopOffset = box.pad.hTop * src.wLength * C0<T>();
             uint32_t srcC1Stride = fmapHWAligned16 * C0<T>();
-            uint32_t tileUnfoldC1Stride = tileBufHW * C0<T>();
+            uint32_t tileUnfoldC1Stride = SingleShapeTileBufSize<T>(C0<T>(), box.tile.elements);
 
             const auto params = UnfoldPolicy::InitUnfoldParams(box);
             const typename UnfoldPolicy::UnfoldColParamsT& ucp = AscendC::Std::get<0>(params);
             const typename UnfoldPolicy::UnfoldRowParamsT& urp = AscendC::Std::get<1>(params);
 
+            LocalTensor<T> transposeBuf;
+            LocalTensor<T> colTranBuf;
+            assignSubTmpBuf(box.tile.hLength, box.tile.wLength, tmpBuf, transposeBuf, colTranBuf);
             for (uint16_t i = 0; i < c1; i++) {
                 //从末端开始处理，由于mainBuf的头部搬入了整块fmap
                 //如果顺序处理,那可能在变换第一个c1的fmap时,污染了第二个c1的fmap
@@ -207,9 +247,10 @@ public:
                     fmapHWAligned16);
 
                 //TODO 处理pad
-                AscendC::LocalTensor<T> tileBuf = mainBuf[c1Idx * tileUnfoldC1Stride];
-                UnfoldFromSrcBufVf(
-                    reinterpret_cast<__ubuf__ T*>(tileBuf.GetPhyAddr()),
+                AscendC::LocalTensor<T> outBuf = mainBuf[c1Idx * tileUnfoldC1Stride];
+                UnfoldVf(
+                    reinterpret_cast<__ubuf__ T*>(outBuf.GetPhyAddr()),
+                    reinterpret_cast<__ubuf__ T*>(colTranBuf.GetPhyAddr()),
                     reinterpret_cast<__ubuf__ T*>(transposeBuf.GetPhyAddr()),
                     ucp, urp);
             }
@@ -218,7 +259,7 @@ public:
             AscendC::Duplicate(
                 mainBuf,
                 static_cast<T>(0),
-                tileBufHW * c1 * C0<T>());
+                SingleShapeTileBufSize<T>(c1 * C0<T>(), box.tile.elements));
         }
     }
 
@@ -229,10 +270,10 @@ public:
         uint32_t batchIdx,
         uint32_t k1Idx) const
     {
-        nk1c1k0c0.CopyK0H4W4Out(
+        nk1c1k0c0.CopyK0Out(
             mainBuf,
             box.tile,
-            TILE_BUF_BANK_CONFLICT_PADDING,
+            WinoTransformDetail::Cal16TileHWBufWidth(box.tile.elements),
             batchIdx,
             k1Idx,
             box.c.idx / C0<T>(),
@@ -240,19 +281,53 @@ public:
     }
 
 private:
-    __simd_vf__ static inline void UnfoldFromSrcBufVf(
-        __ubuf__ T* __restrict__ tileBuf,
-        __ubuf__ T* __restrict__ srcBuf,
+    struct Format16TileHWParams {
+        uint32_t srcTileBufWidth;
+        uint32_t dstTileBufWidthBlocks;
+        uint16_t tileH;
+        uint16_t tileW;
+        uint16_t wRepeatTimes;
+    };
+
+    __simd_vf__ static inline void UnfoldVf(
+        __ubuf__ T* outBuf,
+        __ubuf__ T* colUnfoldBuf,
+        __ubuf__ T* transposeBuf,
         const typename UnfoldPolicy::UnfoldColParamsT ucp,
         const typename UnfoldPolicy::UnfoldRowParamsT urp)
     {
-        UnfoldPolicy::UnfoldColsFromSrcBufVf(tileBuf, srcBuf, ucp);
+        //将workspace中的原始数据变换到tileBuf中
+        UnfoldPolicy::UnfoldColsVf(colUnfoldBuf, transposeBuf, ucp);
 
         AscendC::MicroAPI::LocalMemBar<
-            AscendC::MicroAPI::MemType::VEC_LOAD,
-            AscendC::MicroAPI::MemType::VEC_STORE>();
+            AscendC::MicroAPI::MemType::VEC_STORE,
+            AscendC::MicroAPI::MemType::VEC_LOAD>();
 
-        UnfoldPolicy::UnfoldRowsVf(tileBuf, urp);
+        //将workspace的列变换结果在变换到tileBuf中
+        UnfoldPolicy::UnfoldRowsVf(outBuf, colUnfoldBuf, urp);
+    }
+
+    __aicore__ static inline uint32_t CalculateTransposeBufC0SafeElements(
+        uint32_t tileH, uint32_t tileW)
+    {
+        //需要[c0,align16(hw)]的空间给c0hw转置
+        uint32_t h = SlideWin::Tiles2SrcLength(tileH);
+        uint32_t w = SlideWin::Tiles2SrcLength(tileW);
+
+        uint32_t safeElements;
+        if constexpr (hasInputPadding) {
+            //transposeBuf中会做H方向pad的清0
+            //假设tileH,tileW都为1,那么fmap下算出来h,w都为4
+            //假设存在pad_top为3,那么实际的h为1
+            //由于转置指令TransDataTo5HD所需的空间是向上对齐到16的,那么实际转置需要的空间为align16(1*4)=16
+            //那么需要 pad_top*4+align16(1*4) =12+16=28超过16
+            //所以这里要额外+15防止转置指令写入的数据溢出
+            //但如果不存在输入pad_top其实可以不做保护
+            safeElements = Ops::Base::CeilAlign(h * w + 15, HW_SRC_ALIGNED_16);
+        } else {
+            safeElements = Ops::Base::CeilAlign(h * w, HW_SRC_ALIGNED_16);
+        }
+        return safeElements * C0<T>();
     }
 
     __aicore__ static inline void TransposeCHW2C1HWC0(
@@ -302,47 +377,51 @@ private:
     const uint16_t padW_;
 };
 
-namespace UnfoldImpl {
-using namespace AscendC::MicroAPI;
+namespace WinoTransformDetail {
+constexpr uint32_t F23_FMAP_STRIDE = 2;
+constexpr uint32_t F23_FMAP_WINDOWS = 4;
+constexpr uint32_t F23_DY_STRIDE = 2;
+constexpr uint32_t F23_DY_WINDOWS = 2;
 
-struct DefaultUnfoldRowParams {
-    uint32_t hValidElements;
-    uint32_t wLoadOffset;
-    uint32_t tileBufWidthBlocks;
-    uint16_t hRepeatTimes;
-    uint16_t tileW;
-};
+
+using namespace AscendC::MicroAPI;
 
 struct DefaultUnfoldColParams {
     uint32_t wValidElements;
-    uint32_t wStoreOffset;
+    uint32_t wPadLeftOffset;
     uint32_t tileBufWidth;
     uint16_t wRepeatTimes;
     uint16_t tileH;
 };
 
-template <typename T>
+struct DefaultUnfoldRowParams {
+    uint32_t hValidElements;
+    uint32_t wLoadOffset;
+    uint32_t srcTileBufWidthBlocks;
+    uint32_t dstTileBufWidthBlocks;
+    uint16_t hRepeatTimes;
+    uint16_t tileW;
+    uint16_t tileH;
+};
+
+template <typename T, uint32_t STRIDE, uint32_t WINDOW>
 static inline __aicore__ void InitDefaultUnfoldParams(
     const TileBox& box,
     DefaultUnfoldColParams& ucp,
     DefaultUnfoldRowParams& urp)
 {
-    uint32_t tileWSize = TileUnfoldSize(box.tile.wLength);
-    uint32_t tileBufWidthBlocks = tileWSize + TILE_BUF_BANK_CONFLICT_PADDING;
-
     ucp.wValidElements = box.src.wLength * C0<T>();
-    ucp.tileBufWidth = tileBufWidthBlocks * C0<T>();
-    //行展开后放在tileBuf的右侧,
-    ucp.wStoreOffset = (tileWSize - box.src.wLength - box.pad.wRight) * C0<T>();
+    ucp.tileBufWidth = CalColUnfoldBufWidth<STRIDE, WINDOW>(box.tile.wLength) * C0<T>();
+    ucp.wPadLeftOffset = box.pad.wLeft * C0<T>();
     ucp.wRepeatTimes = Ops::Base::CeilDiv(ucp.wValidElements, VL<T>());
     ucp.tileH = box.tile.hLength;
 
     urp.hValidElements = TileUnfoldSize(box.tile.hLength) * C0<T>();
-    urp.tileBufWidthBlocks = tileBufWidthBlocks;
-    //读取的起始位置,在行展开的写入位置在往前走padLeft的大小
-    urp.wLoadOffset = ucp.wStoreOffset - box.pad.wLeft * C0<T>();
+    urp.srcTileBufWidthBlocks = ucp.tileBufWidth;
+    urp.dstTileBufWidthBlocks = Cal16TileHWBufWidth(box.tile.elements);
     urp.hRepeatTimes = Ops::Base::CeilDiv(urp.hValidElements, VL<T>());
     urp.tileW = box.tile.wLength;
+    urp.tileH = box.tile.hLength;
 }
 
 template <typename T>
@@ -357,23 +436,23 @@ struct Dy {
         DefaultUnfoldRowParams urp = {};
         DefaultUnfoldColParams ucp = {};
 
-        InitDefaultUnfoldParams<T>(box, ucp, urp);
+        InitDefaultUnfoldParams<T, F23_DY_STRIDE, F23_DY_WINDOWS>(box, ucp, urp);
 
         return AscendC::Std::make_tuple(ucp, urp);
     }
 
-    static __simd_callee__ inline void UnfoldColsFromSrcBufVf(
-        __ubuf__ T* __restrict__ tileBuf,
-        __ubuf__ T* __restrict__ dyBuf,
+    static __simd_callee__ inline void UnfoldColsVf(
+        __ubuf__ T* tileBuf,
+        __ubuf__ T* dyBuf,
         const DefaultUnfoldColParams& params)
     {
         const uint32_t wValidElements = params.wValidElements;
-        const uint32_t wStoreOffset = params.wStoreOffset;
+        const uint32_t wPadLeftOffset = params.wPadLeftOffset;
         const uint32_t tileBufWidth = params.tileBufWidth;
         const uint16_t wRepeatTimes = params.wRepeatTimes;
         const uint16_t tileH = params.tileH;
 
-        __ubuf__ T* dst0 = tileBuf + wStoreOffset;
+        __ubuf__ T* dst0 = tileBuf + wPadLeftOffset;
         uint32_t maskValue = wValidElements;
         for (uint16_t i = 0; i < wRepeatTimes; i++) {
             MaskReg mask = UpdateMask<T>(maskValue);
@@ -404,49 +483,61 @@ struct Dy {
     }
 
     static __simd_callee__ inline void UnfoldRowsVf(
+        __ubuf__ T* out,
         __ubuf__ T* buf,
         const DefaultUnfoldRowParams& params)
     {
-        const uint32_t tileBufWidthBlocks = params.tileBufWidthBlocks;
+        const uint32_t dstTileBufWidthBlocks = params.dstTileBufWidthBlocks;
+        const uint32_t srcTileBufWidthBlocks = params.srcTileBufWidthBlocks;
         const uint32_t hValidElements = params.hValidElements;
-        const uint32_t wLoadOffset = params.wLoadOffset;
         const uint16_t hRepeatTimes = params.hRepeatTimes;
         const uint16_t tileW = params.tileW;
-
-        __ubuf__ T* src0 = buf + wLoadOffset;
+        const uint16_t tileH = params.tileH;
 
         uint32_t maskValue = hValidElements;
+        uint32_t storeMaskValue = tileH * VL<T>();
+        __ubuf__ T* dst0 = out;
+        __ubuf__ T* dst1 = out + dstTileBufWidthBlocks * C0<T>() * F23_TRANSFORM_TILE_SIZE_4 * 2;
+
         for (uint16_t i = 0; i < hRepeatTimes; i++) {
-            RegTensor<T> s0;
-            RegTensor<T> s1;
-
-            RegTensor<T> d0;
-            RegTensor<T> d1;
-            RegTensor<T> d2;
-            RegTensor<T> d3;
-
             MaskReg mask = UpdateMask<T>(maskValue);
-            const uint32_t hOffset = tileBufWidthBlocks * i * VL<T>();
+            MaskReg storeMask0 = UpdateMask<T>(storeMaskValue);
+            MaskReg storeMask1 = UpdateMask<T>(storeMaskValue);
 
-            __ubuf__ T* src = src0 + hOffset;
-            __ubuf__ T* dst = buf + hOffset;
+            const uint32_t hOffset = srcTileBufWidthBlocks * i * VL<T>();
+
+            __ubuf__ T* src = buf + hOffset;
 
             for (uint16_t th = 0; th < tileW; th++) {
-                LoadAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-                    s0, src, tileBufWidthBlocks, 1, mask);
-                LoadAlign<T, DataCopyMode::DATA_BLOCK_COPY>(
-                    s1, src, tileBufWidthBlocks, mask);
+                RegTensor<T> s0;
+                RegTensor<T> s1;
 
+                LoadAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+                    s0, src, srcTileBufWidthBlocks, 1, mask);
+                LoadAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+                    s1, src, srcTileBufWidthBlocks, 1, mask);
+
+                RegTensor<T> d0;
+                RegTensor<T> d1;
+                RegTensor<T> d2;
                 TransformVf(s0, s1, d0, d1, d2, mask);
 
+                RegTensor<T> t0;
+                RegTensor<T> t1;
+                RegTensor<T> t2;
+                RegTensor<T> t3;
+                Interleave(t0, t2, s0, d0);
+                Interleave(t1, t3, d1, d2);
+
                 StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-                    dst, s0, tileBufWidthBlocks, 1, mask);
+                    dst0, t0, dstTileBufWidthBlocks, 1, storeMask0);
                 StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-                    dst, d0, tileBufWidthBlocks, 1, mask);
+                    dst1, t1, dstTileBufWidthBlocks, 1, storeMask0);
+
                 StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-                    dst, d1, tileBufWidthBlocks, 1, mask);
-                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY>(
-                    dst, d2, tileBufWidthBlocks, mask);
+                    dst0, t2, dstTileBufWidthBlocks, 1, storeMask1);
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+                    dst1, t3, dstTileBufWidthBlocks, 1, storeMask1);
             }
         }
     }
@@ -485,7 +576,7 @@ struct Fmap {
         UnfoldFmapColParams ucp = {};
         UnfoldFmapRowParams urp = {};
 
-        InitDefaultUnfoldParams<T>(box, ucp, urp);
+        InitDefaultUnfoldParams<T, F23_FMAP_STRIDE, F23_FMAP_WINDOWS>(box, ucp, urp);
 
         ucp.tileHMainRepeatTimes = ucp.tileH >> 1;
         ucp.tileHTailRepeatTimes = ucp.tileH & 1;
@@ -496,19 +587,19 @@ struct Fmap {
         return AscendC::Std::make_tuple(ucp, urp);
     }
 
-    static __simd_callee__ inline void UnfoldColsFromSrcBufVf(
-        __ubuf__ T* __restrict__ tileBuf,
-        __ubuf__ T* __restrict__ fmapBuf,
+    static __simd_callee__ inline void UnfoldColsVf(
+        __ubuf__ T* tileBuf,
+        __ubuf__ T* fmapBuf,
         const UnfoldFmapColParams& params)
     {
         const uint32_t wValidElements = params.wValidElements;
-        const uint32_t wStoreOffset = params.wStoreOffset;
+        const uint32_t wPadLeftOffset = params.wPadLeftOffset;
         const uint32_t tileBufWidth = params.tileBufWidth;
         const uint16_t wRepeatTimes = params.wRepeatTimes;
         const uint16_t tileHMainRepeatTimes = params.tileHMainRepeatTimes;
         const uint16_t tileHTailRepeatTimes = params.tileHTailRepeatTimes;
 
-        __ubuf__ T* dst0 = tileBuf + wStoreOffset;
+        __ubuf__ T* dst0 = tileBuf + wPadLeftOffset;
 
         uint32_t maskValue = wValidElements;
         for (uint16_t i = 0; i < wRepeatTimes; i++) {
@@ -576,20 +667,23 @@ struct Fmap {
     }
 
     static __simd_callee__ inline void UnfoldRowsVf(
+        __ubuf__ T* out,
         __ubuf__ T* buf,
         const UnfoldFmapRowParams& params)
     {
-        const uint32_t tileBufWidthBlocks = params.tileBufWidthBlocks;
-        const uint32_t wLoadOffset = params.wLoadOffset;
+        const uint32_t dstTileBufWidthBlocks = params.dstTileBufWidthBlocks;
+        const uint32_t srcTileBufWidthBlocks = params.srcTileBufWidthBlocks;
         const uint32_t hValidElements = params.hValidElements;
         const uint16_t hRepeatTimes = params.hRepeatTimes;
         const uint16_t tileWMainRepeatTimes = params.tileWMainRepeatTimes;
         const uint16_t tileWTailRepeatTimes = params.tileWTailRepeatTimes;
-
-        //fmap靠在整块buf的右侧,所以读取时需要加个左边的偏移
-        __ubuf__ T* src0 = buf + wLoadOffset;
+        const uint16_t tileH = params.tileH;
 
         uint32_t maskValue = hValidElements;
+        uint32_t storeMaskValue = tileH * VL<T>();
+        __ubuf__ T* dst0 = out;
+        __ubuf__ T* dst1 = out + dstTileBufWidthBlocks * C0<T>() * F23_TRANSFORM_TILE_SIZE_4 * 2;
+
         for (uint16_t i = 0; i < hRepeatTimes; i++) {
             RegTensor<T> s0;
             RegTensor<T> s1;
@@ -601,87 +695,86 @@ struct Fmap {
             RegTensor<T> d2;
             RegTensor<T> d3;
 
+            RegTensor<T> t0;
+            RegTensor<T> t1;
+            RegTensor<T> t2;
+            RegTensor<T> t3;
+
             MaskReg mask = UpdateMask<T>(maskValue);
-            const uint32_t hOffset = tileBufWidthBlocks * i * VL<T>();
+            MaskReg storeMask0 = UpdateMask<T>(storeMaskValue);
+            MaskReg storeMask1 = UpdateMask<T>(storeMaskValue);
 
-            __ubuf__ T* src = src0 + hOffset;
+            const uint32_t hOffset = srcTileBufWidthBlocks * i * VL<T>();
 
-            LoadAlign<T, DataCopyMode::DATA_BLOCK_COPY,
-                PostLiteral::POST_MODE_UPDATE>(
-                s0, src, tileBufWidthBlocks, 1, mask);
-            LoadAlign<T, DataCopyMode::DATA_BLOCK_COPY,
-                PostLiteral::POST_MODE_UPDATE>(
-                s1, src, tileBufWidthBlocks, 1, mask);
+            __ubuf__ T* src = buf + hOffset;
 
-            __ubuf__ T* dst = buf + hOffset;
+            LoadAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+                s0, src, srcTileBufWidthBlocks, 1, mask);
+            LoadAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+                s1, src, srcTileBufWidthBlocks, 1, mask);
 
             for (uint16_t tw = 0; tw < tileWMainRepeatTimes; tw++) {
-                LoadAlign<T, DataCopyMode::DATA_BLOCK_COPY,
-                    PostLiteral::POST_MODE_UPDATE>(
-                    s2, src, tileBufWidthBlocks, 1, mask);
-                LoadAlign<T, DataCopyMode::DATA_BLOCK_COPY,
-                    PostLiteral::POST_MODE_UPDATE>(
-                    s3, src, tileBufWidthBlocks, 1, mask);
+                LoadAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+                    s2, src, srcTileBufWidthBlocks, 1, mask);
+                LoadAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+                    s3, src, srcTileBufWidthBlocks, 1, mask);
 
                 TransformVf(s0, s1, s2, s3, d0, d1, d2, d3, mask);
 
-                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY,
-                    PostLiteral::POST_MODE_UPDATE>(
-                    dst, d0, tileBufWidthBlocks, 1, mask);
-                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY,
-                    PostLiteral::POST_MODE_UPDATE>(
-                    dst, d1, tileBufWidthBlocks, 1, mask);
-                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY,
-                    PostLiteral::POST_MODE_UPDATE>(
-                    dst, d2, tileBufWidthBlocks, 1, mask);
-                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY,
-                    PostLiteral::POST_MODE_UPDATE>(
-                    dst, d3, tileBufWidthBlocks, 1, mask);
+                Interleave(t0, t2, d0, d1);
+                Interleave(t1, t3, d2, d3);
 
-                LoadAlign<T, DataCopyMode::DATA_BLOCK_COPY,
-                    PostLiteral::POST_MODE_UPDATE>(
-                    s0, src, tileBufWidthBlocks, 1, mask);
-                LoadAlign<T, DataCopyMode::DATA_BLOCK_COPY,
-                    PostLiteral::POST_MODE_UPDATE>(
-                    s1, src, tileBufWidthBlocks, 1, mask);
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+                    dst0, t0, dstTileBufWidthBlocks, 1, storeMask0);
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+                    dst1, t1, dstTileBufWidthBlocks, 1, storeMask0);
+
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+                    dst0, t2, dstTileBufWidthBlocks, 1, storeMask1);
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+                    dst1, t3, dstTileBufWidthBlocks, 1, storeMask1);
+
+                LoadAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+                    s0, src, srcTileBufWidthBlocks, 1, mask);
+                LoadAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+                    s1, src, srcTileBufWidthBlocks, 1, mask);
 
                 TransformVf(s2, s3, s0, s1, d0, d1, d2, d3, mask);
-                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY,
-                    PostLiteral::POST_MODE_UPDATE>(
-                    dst, d0, tileBufWidthBlocks, 1, mask);
-                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY,
-                    PostLiteral::POST_MODE_UPDATE>(
-                    dst, d1, tileBufWidthBlocks, 1, mask);
-                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY,
-                    PostLiteral::POST_MODE_UPDATE>(
-                    dst, d2, tileBufWidthBlocks, 1, mask);
-                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY,
-                    PostLiteral::POST_MODE_UPDATE>(
-                    dst, d3, tileBufWidthBlocks, 1, mask);
+
+                Interleave(t0, t2, d0, d1);
+                Interleave(t1, t3, d2, d3);
+
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+                    dst0, t0, dstTileBufWidthBlocks, 1, storeMask0);
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+                    dst1, t1, dstTileBufWidthBlocks, 1, storeMask0);
+
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+                    dst0, t2, dstTileBufWidthBlocks, 1, storeMask1);
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+                    dst1, t3, dstTileBufWidthBlocks, 1, storeMask1);
             }
 
             for (uint16_t th = 0; th < tileWTailRepeatTimes; th++) {
-                LoadAlign<T, DataCopyMode::DATA_BLOCK_COPY,
-                    PostLiteral::POST_MODE_UPDATE>(
-                    s2, src, tileBufWidthBlocks, 1, mask);
-                LoadAlign<T, DataCopyMode::DATA_BLOCK_COPY,
-                    PostLiteral::POST_MODE_UPDATE>(
-                    s3, src, tileBufWidthBlocks, 1, mask);
+                LoadAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+                    s2, src, srcTileBufWidthBlocks, 1, mask);
+                LoadAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+                    s3, src, srcTileBufWidthBlocks, 1, mask);
 
                 TransformVf(s0, s1, s2, s3, d0, d1, d2, d3, mask);
 
-                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY,
-                    PostLiteral::POST_MODE_UPDATE>(
-                    dst, d0, tileBufWidthBlocks, 1, mask);
-                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY,
-                    PostLiteral::POST_MODE_UPDATE>(
-                    dst, d1, tileBufWidthBlocks, 1, mask);
-                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY,
-                    PostLiteral::POST_MODE_UPDATE>(
-                    dst, d2, tileBufWidthBlocks, 1, mask);
-                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY,
-                    PostLiteral::POST_MODE_UPDATE>(
-                    dst, d3, tileBufWidthBlocks, 1, mask);
+                Interleave(t0, t2, d0, d1);
+                Interleave(t1, t3, d2, d3);
+
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+                    dst0, t0, dstTileBufWidthBlocks, 1, storeMask0);
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+                    dst1, t1, dstTileBufWidthBlocks, 1, storeMask0);
+
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+                    dst0, t2, dstTileBufWidthBlocks, 1, storeMask1);
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+                    dst1, t3, dstTileBufWidthBlocks, 1, storeMask1);
             }
         }
     }
@@ -701,9 +794,15 @@ struct Fmap {
 
 
 template <typename T>
-using WinoFmapTransformer = WinoTransformer<T, 2, 4, UnfoldImpl::Fmap<T>, true>;
+using WinoFmapTransformer = WinoTransformer<T,
+    WinoTransformDetail::F23_FMAP_STRIDE,
+    WinoTransformDetail::F23_FMAP_WINDOWS,
+    WinoTransformDetail::Fmap<T>, true>;
 
 template <typename T>
-using WinoDyTransformer = WinoTransformer<T, 2, 2, UnfoldImpl::Dy<T>, false>;
+using WinoDyTransformer = WinoTransformer<T,
+    WinoTransformDetail::F23_DY_STRIDE,
+    WinoTransformDetail::F23_DY_WINDOWS,
+    WinoTransformDetail::Dy<T>, false>;
 
 #endif //CONV_BP_WINO_TRANSFORM_H

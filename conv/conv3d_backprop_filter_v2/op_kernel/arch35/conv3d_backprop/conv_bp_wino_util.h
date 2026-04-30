@@ -127,7 +127,6 @@ public:
         return tiles == 0 ? 0 : (tiles - 1) * STRIDE + WINDOW_SIZE;
     }
 
-
     static __aicore__ inline uint32_t Tiles2Elements(const uint32_t tiles)
     {
         //tile里的元素个数
@@ -155,8 +154,7 @@ static constexpr __aicore__ inline uint32_t TileUnfoldSize(uint32_t tiles)
 }
 
 
-//正变换后在gm上的排布[N,TileHW/SingleShapeTileHW(k1),C1,SingleShapeTileHW(k0),C0]
-//k0按照[singleShapeTileHW,16]排布
+//正变换后在gm上的排布[N,k1(TileH/SingleShapeTileH * TileW/SingleShapeTileW),C1,k0(16,SingleShapeTileHW),C0]
 template <typename T>
 class NK1C1K0C0 {
 public:
@@ -169,95 +167,72 @@ public:
         uint32_t singleShapeTileW)
         : k1_(Ops::Base::CeilDiv(tileH, singleShapeTileH) * Ops::Base::CeilDiv(tileW, singleShapeTileW)),
           c1_(Ops::Base::CeilDiv(c, C0<T>())),
-          k0_(singleShapeTileH * singleShapeTileW)
+          k0_(singleShapeTileH * singleShapeTileW*F23_TRANSFORM_TILE_ELEMENTS_16)
     {
         gm_.SetGlobalBuffer(gm);
     }
 
-    //将一块按照[tileH4,tileW4]排布的k0搬出
-    __aicore__ inline void CopyK0H4W4Out(
-        const AscendC::LocalTensor<T>& c1th4tw4c0,
-        const HWBox& tiles,
-        uint32_t tw4Gap,
-        uint32_t batchIdx,
-        uint32_t k1Idx,
-        uint32_t c1Idx,
-        uint32_t c1Length) const
-    {
-        ascendc_assert(k0_>=tiles.elements, "can only move one k0 out");
-        //这个接口只能搬一块k0出去
+     __aicore__ inline void CopyK0Out(
+         const AscendC::LocalTensor<T>& k0,
+         const HWBox& tiles,
+         uint32_t srcBufWidthBlockStride,
+         uint32_t batchIdx,
+         uint32_t k1Idx,
+         uint32_t c1Idx,
+         uint32_t c1Length) const
+     {
+         ascendc_assert(k0_>= F23_TRANSFORM_TILE_ELEMENTS_16 * tiles.elements, "can only move one k0 out");
 
-        constexpr uint32_t c0Bytes = C0<T>() * sizeof(T);
-        uint64_t gmOffset = GetOffset(batchIdx, k1Idx, c1Idx);
-        uint32_t tileHSize = TileUnfoldSize(tiles.hLength);
-        uint32_t tileWSize = TileUnfoldSize(tiles.wLength);
+         uint64_t gmOffset = GetOffset(batchIdx, k1Idx, c1Idx);
 
-        AscendC::DataCopyParams params;
-        //tile的顺序会变,从列优先变成行优先了,h方向变成内轴
-        //但反正都是累加轴其实顺序没什么影响,而且可以提升单次搬运的量
-        params.blockCount = tileHSize;
-        params.blockLen = F23_TRANSFORM_TILE_SIZE_4;
-        params.srcGap = tileWSize + tw4Gap - F23_TRANSFORM_TILE_SIZE_4;
-        params.dstGap = 0;
+         AscendC::DataCopyParams params;
+         params.blockCount = F23_TRANSFORM_TILE_ELEMENTS_16;
+         params.blockLen = tiles.elements;
+         params.srcGap = srcBufWidthBlockStride - tiles.elements;
+         params.dstGap = 0;
 
-        AscendC::LoopModeParams loop;
-        loop.loop1Size = tiles.wLength;
-        loop.loop1SrcStride = F23_TRANSFORM_TILE_SIZE_4 * c0Bytes;
-        loop.loop1DstStride = params.blockCount * params.blockLen * c0Bytes;
-        loop.loop2Size = c1Length;
-        loop.loop2SrcStride = tileHSize * (tileWSize + tw4Gap) * c0Bytes;
-        loop.loop2DstStride = k0_ * F23_TRANSFORM_TILE_ELEMENTS_16 * c0Bytes;
+         constexpr uint8_t c0Byte = c0_ * sizeof(T);
+         AscendC::LoopModeParams loop;
+         loop.loop1Size = c1Length;
+         loop.loop1SrcStride = F23_TRANSFORM_TILE_ELEMENTS_16 * srcBufWidthBlockStride * c0Byte;
+         loop.loop1DstStride = k0_ * c0Byte;
+         loop.loop2Size = 1;
 
-        SetLoopModePara(loop, AscendC::DataCopyMVType::UB_TO_OUT);
+         AscendC::SetLoopModePara(loop, AscendC::DataCopyMVType::UB_TO_OUT);
+         AscendC::DataCopy(gm_[gmOffset], k0, params);
+         AscendC::ResetLoopModePara(AscendC::DataCopyMVType::UB_TO_OUT);
+     }
 
-        AscendC::DataCopy(gm_[gmOffset], c1th4tw4c0, params);
+     __aicore__ inline void CopyK0In(
+         const AscendC::LocalTensor<T>& buf,
+         const HWBox& tiles,
+         uint32_t batchIdx,
+         uint32_t k1Idx,
+         uint32_t c1Idx,
+         uint32_t c1Length) const
+     {
+         ascendc_assert(k0_>= F23_TRANSFORM_TILE_ELEMENTS_16 * tiles.elements, "can only move one k0 out");
+         uint64_t gmOffset = GetOffset(batchIdx, k1Idx, c1Idx);
 
-        AscendC::ResetLoopModePara(AscendC::DataCopyMVType::UB_TO_OUT);
-    }
+         AscendC::DataCopyParams params;
+         params.blockCount = c1Length;
+         params.blockLen = tiles.elements * F23_TRANSFORM_TILE_ELEMENTS_16;
+         params.srcGap = k0_ - params.blockLen;
+         params.dstGap = 0;
 
-
-    __aicore__ inline void CopyK0TileIn(
-        const AscendC::LocalTensor<T>& buf,
-        const HWBox& tile,
-        uint32_t batchIdx,
-        uint32_t k1Idx,
-        uint32_t c1Idx,
-        uint32_t c1Length) const
-    {
-        ascendc_assert(k0_>=tile.elements, "can only move one k0 in");
-        //这个接口只能搬一块k0进来
-
-        uint64_t gmOffset = GetOffset(batchIdx, k1Idx, c1Idx);
-
-        uint32_t tiles16 = tile.elements * F23_TRANSFORM_TILE_ELEMENTS_16;
-        bool tailK = tile.elements < k0_;
-
-        AscendC::DataCopyParams params;
-        params.dstGap = 0;
-        if (tailK) {
-            params.blockCount = c1Length;
-            params.blockLen = tiles16;
-            params.srcGap = k0_ * F23_TRANSFORM_TILE_ELEMENTS_16 - tiles16;
-        } else {
-            params.blockCount = 1;
-            params.blockLen = c1Length * tiles16;
-            params.srcGap = 0;
-        }
-
-        AscendC::DataCopy(buf, gm_[gmOffset], params);
-    }
-
+         AscendC::DataCopy(buf, gm_[gmOffset], params);
+     }
 
     __aicore__ inline uint64_t GetOffset(
         uint32_t nIdx,
         uint32_t k1Idx,
         uint32_t c1Idx) const
     {
-        uint64_t k016c0 = static_cast<uint64_t>(k0_) * F23_TRANSFORM_TILE_ELEMENTS_16 * c0_;
-        uint64_t c1k016c0 = static_cast<uint64_t>(c1_) * k016c0;
-        uint64_t k1c1k016c0 = static_cast<uint64_t>(k1_) * c1k016c0;
+        uint64_t k0c0 = static_cast<uint64_t>(k0_)  * c0_;
+        uint64_t c1k0c0 = static_cast<uint64_t>(c1_) * k0c0;
+        uint64_t k1c1k0c0 = static_cast<uint64_t>(k1_) * c1k0c0;
 
-        return nIdx * k1c1k016c0 + k1Idx * c1k016c0 + c1Idx * k016c0;
+        return nIdx * k1c1k0c0 + k1Idx * c1k0c0 + c1Idx * k0c0;
     }
 
 private:
