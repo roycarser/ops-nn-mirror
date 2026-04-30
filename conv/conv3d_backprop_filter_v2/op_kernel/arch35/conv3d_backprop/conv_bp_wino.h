@@ -66,16 +66,13 @@ public:
         TPipe* pipe = GetTPipePtr();
 
         if ASCEND_IS_AIV {
-            uint32_t fmapTSize =
-                fmap_.CalculateTransposeBufC0Length(singleShapeTilesH_, singleShapeTilesW_);
-            uint32_t dyTSize =
-                dy_.CalculateTransposeBufC0Length(singleShapeTilesH_, singleShapeTilesW_);
-            uint32_t transformBufSize = SingleShapeTileBufSize(
+            uint32_t fmapTmpSize = fmap_.CalculateTmpBufLength(singleShapeTilesH_, singleShapeTilesW_);
+            uint32_t dyTmpSize = dy_.CalculateTmpBufLength(singleShapeTilesH_, singleShapeTilesW_);
+            uint32_t transformBufSize = SingleShapeTileBufSize<T>(
                 singleShapeTransformC_,
-                singleShapeTilesH_,
-                singleShapeTilesW_);
+                singleShapeTilesH_ * singleShapeTilesW_);
 
-            pipe->InitBuffer(transposeBuf_, Std::max(fmapTSize, dyTSize) * sizeof(T));
+            pipe->InitBuffer(transformTmpBuf_, Std::max(fmapTmpSize, dyTmpSize) * sizeof(T));
             pipe->InitBuffer(transformBuf_[0], transformBufSize * sizeof(T));
             pipe->InitBuffer(transformBuf_[1], transformBufSize * sizeof(T));
 
@@ -223,7 +220,8 @@ private:
         if (iter.More()) {
             //winograd每个点位需要执行16次独立的mad计算
             //由于dav上cube的issue queue大小为16,算上wait flag
-            //一次最多塞入8条mad指令后就会阻塞,进而block住整个scalar
+            //如果一次最多塞入8条mad指令后就会阻塞,进而block住整个scalar
+            //即便按批一次处理4个点，那么加上一个wait flag,也最多处理12个点就block住
             //让下一轮的mte2无法执行,导致整体串行化
             //所以这里用预取下一轮的数据的方式来解决
             //
@@ -327,7 +325,7 @@ private:
         uint64_t srcBatchOffsetFmap = batchIdx * cin_ * fmap_.SrcH() * fmap_.SrcW();
 
         LocalTensor<T> transformVBuf[2] = {transformBuf_[0].Get<T>(), transformBuf_[1].Get<T>()};
-        LocalTensor<T> transposeVBuf = transposeBuf_.Get<T>();
+        LocalTensor<T> tmpVBuf = transformTmpBuf_.Get<T>();
 
         TileKIterator iter(*this);
         while (iter.More()) {
@@ -355,7 +353,7 @@ private:
                         Std::min(singleShapeTransformC_, coutIdx + coutLength - coutStart),
                         iter.kIdx(),
                         transformVBuf[transformPingPongFlag_],
-                        transposeVBuf,
+                        tmpVBuf,
                         transformEventFlags_[transformPingPongFlag_]);
                 } else {
                     uint32_t fmapTaskId = taskId - dyTaskCnt;
@@ -371,7 +369,7 @@ private:
                         Std::min(singleShapeTransformC_, cinIdx + cinLength - cinStart),
                         iter.kIdx(),
                         transformVBuf[transformPingPongFlag_],
-                        transposeVBuf,
+                        tmpVBuf,
                         transformEventFlags_[transformPingPongFlag_]);
                 }
 
@@ -403,7 +401,7 @@ private:
         uint32_t cLength,
         uint32_t k1Idx,
         LocalTensor<T>& transformVBuf,
-        LocalTensor<T>& transposeVBuf,
+        LocalTensor<T>& tmpVBuf,
         TransformVFlag& eventFlags)
     {
         TileBox box = transformer.CalculateSrcBox(tile, cIdx, cLength);
@@ -413,7 +411,7 @@ private:
         SetFlag<HardEvent::MTE2_V>(eventFlags.mte2v);
 
         WaitFlag<HardEvent::MTE2_V>(eventFlags.mte2v);
-        transformer.Compute(transformVBuf, transposeVBuf, box);
+        transformer.Compute(transformVBuf, tmpVBuf, box);
         SetFlag<HardEvent::V_MTE3>(eventFlags.v2mte3);
 
         WaitFlag<HardEvent::V_MTE3>(eventFlags.v2mte3);
@@ -599,18 +597,12 @@ private:
         uint8_t freeSlot = FREE_SLOTS;
     };
 
-    static inline uint32_t __aicore__ SingleShapeTileBufSize(uint32_t c, uint32_t th, uint32_t tw)
-    {
-        uint32_t hw = TileUnfoldSize(th) * (TileUnfoldSize(tw) + TILE_BUF_BANK_CONFLICT_PADDING);
-        return hw * Ops::Base::CeilAlign(c, C0<T>());
-    }
-
     static constexpr uint8_t kCROSS_CORE_AIV_SYNC_FLAG = 0;
     static constexpr uint8_t kCROSS_CORE_AIV2AIC_SEND_FLAG = 1;
     static constexpr uint8_t kCROSS_CORE_AIC2AIV_RECV_FLAG = 2;
 
 
-    TBuf<TPosition::VECIN> transposeBuf_;
+    TBuf<TPosition::VECIN> transformTmpBuf_;
     TBuf<TPosition::VECIN> transformBuf_[2];
     TransformVFlag transformEventFlags_[2];
     bool transformPingPongFlag_ = true;
