@@ -120,6 +120,23 @@ public:
         mad.k = tiles.elements;
         mad.cmatrixInitVal = firstK;
 
+        LoadData2DParamsV2 load2d;
+        load2d.mStartPosition = 0;
+        load2d.kStartPosition = 0;
+        load2d.ifTranspose = true;
+        load2d.srcStride = static_cast<int32_t>(tiles.elements);
+
+        // 数据按照 [C1,16,tile.elements,C0]排布,使用load2d一次搬运一个point,即[C1,tile.elements,C0]的数据进L0
+        //
+        //                          C0             C0
+        //                         ----      /----
+        // tile.elements(point0)    ..      /  ..
+        //                         ----    /  ----
+        //     ...                 ----   /   ----
+        //                         ----  /    ----
+        // tile.elements(point15)   ..  /      ..
+        //                         ----/      ----
+
         uint32_t l0aMStep;
         uint32_t l0aKStep;
         uint32_t l0bMStep;
@@ -137,8 +154,8 @@ public:
             l0bKStep = Ops::Base::CeilAlign(cinC1, 2u);
         }
 
-        uint32_t l0aPointBytes = l0aMStep * l0aKStep * AscendC::BYTE_PER_FRACTAL;
-        uint32_t l0bPointBytes = l0bMStep * l0bKStep * AscendC::BYTE_PER_FRACTAL;
+        uint32_t l0aPointElements = l0aMStep * l0aKStep * (AscendC::BYTE_PER_FRACTAL / sizeof(T));
+        uint32_t l0bPointElements = l0bMStep * l0bKStep * (AscendC::BYTE_PER_FRACTAL / sizeof(T));
 
         //不需要baseK循环,L1上左右Tensor在PingPong后最多一共占用256kb
         //除以16后单个点最多16kb,L0上一定能全载,除非singleShapeHW传进来为1
@@ -160,12 +177,6 @@ public:
                 uint32_t pointIdx = pointGroupOffset + i;
                 uint32_t offsetL1 = pointIdx * tiles.elements * C0<T>();
 
-                LoadData2DParamsV2 load2d;
-                load2d.mStartPosition = 0;
-                load2d.kStartPosition = 0;
-                load2d.ifTranspose = true;
-                load2d.srcStride = static_cast<int32_t>(tiles.elements);
-
                 load2d.mStep = l0aMStep;
                 load2d.kStep = l0aKStep;
                 if constexpr (sizeof(T) == 4) {
@@ -174,7 +185,7 @@ public:
                     load2d.dstStride = static_cast<int32_t>(l0aKStep);
                 }
 
-                LoadData(l0a[i * l0aPointBytes], l1a[offsetL1], load2d);
+                LoadData(l0a[i * l0aPointElements], l1a[offsetL1], load2d);
 
                 load2d.mStep = l0bMStep;
                 load2d.kStep = l0bKStep;
@@ -184,7 +195,7 @@ public:
                     load2d.dstStride = static_cast<int32_t>(l0bKStep);
                 }
 
-                LoadData(l0b[i * l0bPointBytes], l1b[offsetL1], load2d);
+                LoadData(l0b[i * l0bPointElements], l1b[offsetL1], load2d);
             }
 
             SetFlag<HardEvent::MTE1_M>(mte1madFlag.src2dst);
@@ -195,8 +206,8 @@ public:
                 uint32_t pointIdx = pointGroupOffset + i;
 
                 uint32_t offsetC = pointIdx * l0cBufSize;
-                uint32_t offsetA = i * l0aPointBytes;
-                uint32_t offsetB = i * l0bPointBytes;
+                uint32_t offsetA = i * l0aPointElements;
+                uint32_t offsetB = i * l0bPointElements;
 
                 AscendC::Mmad(l0c[offsetC], l0a[offsetA], l0b[offsetB], mad);
             }
@@ -254,8 +265,8 @@ private:
 
         outGroup = F23_TRANSFORM_TILE_ELEMENTS_16 / pointsPerGroup;
         outPointPerGroup = pointsPerGroup;
-        outL0aSize = outGroup * singlePointL0ASize;
-        outL0bSize = outGroup * singlePointL0BSize;
+        outL0aSize = outPointPerGroup * singlePointL0ASize;
+        outL0bSize = outPointPerGroup * singlePointL0BSize;
     }
 
     struct EventFlag {
