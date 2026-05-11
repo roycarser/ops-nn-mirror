@@ -261,21 +261,17 @@ public:
         }
     }
 
-    __aicore__ inline void CopyOut(
+
+    __aicore__  inline void SetNK1C1K0C0CopyParams(
+        NK1C1K0C0::CopyK0Params<T>& copyParams,
         AscendC::LocalTensor<T>& mainBuf,
-        const NK1C1K0C0<T>& nk1c1k0c0,
-        const TileBox& box,
-        uint32_t batchIdx,
-        uint32_t k1Idx) const
+        const TileBox& box) const
     {
-        nk1c1k0c0.CopyK0Out(
-            mainBuf,
-            box.tile,
-            WinoTransformDetail::Cal16TileHWBufWidth(box.tile.elements),
-            batchIdx,
-            k1Idx,
-            box.c.idx / C0<T>(),
-            box.c.c1);
+        copyParams.tiles = box.tile.elements;
+        copyParams.srcBufWidthBlockStride = WinoTransformDetail::Cal16TileHWBufWidth(box.tile.elements);
+        copyParams.c1Idx = box.c.idx / C0<T>();
+        copyParams.c1Length = box.c.c1;
+        copyParams.ub = mainBuf;
     }
 
 private:
