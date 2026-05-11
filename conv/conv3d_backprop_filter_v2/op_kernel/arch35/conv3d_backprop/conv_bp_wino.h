@@ -28,8 +28,8 @@ public:
     __aicore__ inline ConvBackpropFilterWinograd(
         const WinoFmapTransformer<T>& fmap,
         const WinoDyTransformer<T>& dy,
-        const NK1C1K0C0<T>& nk1c1k0c0Fmap,
-        const NK1C1K0C0<T>& nk1c1k0c0Dy,
+        __gm__ T* nk1c1k0c0FmapGm,
+        __gm__ T* nk1c1k0c0DyGm,
         WinoMMAD<T>& winoMmad,
         uint32_t cin,
         uint32_t cout,
@@ -44,8 +44,8 @@ public:
         uint16_t singleShapeTilesW)
         : fmap_(fmap),
           dy_(dy),
-          nk1c1k0t16c0Fmap_(nk1c1k0c0Fmap),
-          nk1c1k0t16c0Dy_(nk1c1k0c0Dy),
+          nk1c1k0c0Fmap_(cin, tilesH, tilesW, singleShapeTilesH, singleShapeTilesW),
+          nk1c1k0c0Dy_(cout, tilesH, tilesW, singleShapeTilesH, singleShapeTilesW),
           winoMmad_(winoMmad),
           tilesH_(tilesH),
           tilesW_(tilesW),
@@ -59,6 +59,8 @@ public:
           blockNumCin_(blockNumCin),
           blockNumCout_(blockNumCout)
     {
+        nk1c1k0c0FmapGm_.SetGlobalBuffer(nk1c1k0c0FmapGm);
+        nk1c1k0c0DyGm_.SetGlobalBuffer(nk1c1k0c0DyGm);
     }
 
     inline void __aicore__ Init()
@@ -84,9 +86,7 @@ public:
             SetFlag<HardEvent::MTE3_MTE2>(transformEventFlags_[1].mte32mte2);
         }
 
-        if ASCEND_IS_AIC {
-            winoMmad_.Init(singleShapeCout_, singleShapeCin_, singleShapeTilesH_ * singleShapeTilesW_);
-        }
+        winoMmad_.Init(singleShapeCout_, singleShapeCin_, singleShapeTilesH_ * singleShapeTilesW_);
     }
 
     inline void __aicore__ End()
@@ -250,9 +250,6 @@ private:
                 tiles, batchIdx, kIdx,
                 coutC1Idx, coutC1Length, cinC1Idx, cinC1Length,
                 loadPingPong);
-            //优先让第一次LoadL1执行完在执行后续的搬运
-            //防止后续紧跟着的搬运抢资源拖慢第一次搬运耗时,延迟mad启动
-            PipeBarrier<PIPE_MTE2>();
 
             loadPingPong = !loadPingPong;
 
@@ -298,10 +295,25 @@ private:
         //尾轮时虽然空跑但是队列信号还得照发
 
         if constexpr (NotIdle) {
+            NK1C1K0C0::CopyK0Params<T> copyDyParams;
+            copyDyParams.tiles = tiles.elements;
+            copyDyParams.batchIdx = batchIdx;
+            copyDyParams.k1Idx = k1Idx;
+            copyDyParams.c1Idx = coutC1Idx;
+            copyDyParams.c1Length = coutC1Length;
+            copyDyParams.gm = nk1c1k0c0DyGm_;
+
+            NK1C1K0C0::CopyK0Params<T> copyFmapParams;
+            copyFmapParams.tiles = tiles.elements;
+            copyFmapParams.batchIdx = batchIdx;
+            copyFmapParams.k1Idx = k1Idx;
+            copyFmapParams.c1Idx = cinC1Idx;
+            copyFmapParams.c1Length = cinC1Length;
+            copyFmapParams.gm = nk1c1k0c0FmapGm_;
+
             winoMmad_.LoadL1(
-                tiles, batchIdx, k1Idx,
-                nk1c1k0t16c0Dy_, coutC1Idx, coutC1Length,
-                nk1c1k0t16c0Fmap_, cinC1Idx, cinC1Length,
+                nk1c1k0c0Dy_, copyDyParams,
+                nk1c1k0c0Fmap_, copyFmapParams,
                 l1PingPongFlag);
         }
 
@@ -336,6 +348,11 @@ private:
             //变换任务每轮从前一批空闲的v核开始拉取任务
             //假设每轮只有18个任务,那么第一轮0-17核拉取到任务,第二轮就是18-35核拉取到任务
             //这样可以尽量并行
+            NK1C1K0C0::CopyK0Params<T> copyK0Params;
+            copyK0Params.batchIdx = batchIdx;
+            copyK0Params.k1Idx = iter.kIdx();
+
+
             for (uint32_t taskId = (GetBlockIdx() + blockNumAiv - aivTaskOffset) % blockNumAiv;
                  taskId < totalTaskCnt;
                  taskId += blockNumAiv) {
@@ -343,31 +360,30 @@ private:
                     uint32_t dyTaskId = taskId;
                     uint32_t coutStart = coutIdx + dyTaskId * singleShapeTransformC_;
 
+                    copyK0Params.gm = nk1c1k0c0DyGm_;
                     ExecuteTransform(
                         dy_,
                         tile,
-                        nk1c1k0t16c0Dy_,
-                        batchIdx,
+                        nk1c1k0c0Dy_,
+                        copyK0Params,
                         srcBatchOffsetDy,
                         coutStart,
                         Std::min(singleShapeTransformC_, coutIdx + coutLength - coutStart),
-                        iter.kIdx(),
                         transformVBuf[transformPingPongFlag_],
                         tmpVBuf,
                         transformEventFlags_[transformPingPongFlag_]);
                 } else {
                     uint32_t fmapTaskId = taskId - dyTaskCnt;
                     uint32_t cinStart = cinIdx + fmapTaskId * singleShapeTransformC_;
-
+                    copyK0Params.gm = nk1c1k0c0FmapGm_;
                     ExecuteTransform(
                         fmap_,
                         tile,
-                        nk1c1k0t16c0Fmap_,
-                        batchIdx,
+                        nk1c1k0c0Fmap_,
+                        copyK0Params,
                         srcBatchOffsetFmap,
                         cinStart,
                         Std::min(singleShapeTransformC_, cinIdx + cinLength - cinStart),
-                        iter.kIdx(),
                         transformVBuf[transformPingPongFlag_],
                         tmpVBuf,
                         transformEventFlags_[transformPingPongFlag_]);
@@ -394,12 +410,11 @@ private:
     static inline __aicore__ void ExecuteTransform(
         const WinoTransformer<t0, t1, t2, t3, t4>& transformer,
         const HWBox& tile,
-        const NK1C1K0C0<T>& nk1c1k0c0,
-        uint32_t batchIdx,
+        const NK1C1K0C0::Shape<T>& nk1c1k0c0,
+        NK1C1K0C0::CopyK0Params<T>& copyK0Params,
         uint64_t srcBatchOffset,
         uint32_t cIdx,
         uint32_t cLength,
-        uint32_t k1Idx,
         LocalTensor<T>& transformVBuf,
         LocalTensor<T>& tmpVBuf,
         TransformVFlag& eventFlags)
@@ -415,7 +430,11 @@ private:
         SetFlag<HardEvent::V_MTE3>(eventFlags.v2mte3);
 
         WaitFlag<HardEvent::V_MTE3>(eventFlags.v2mte3);
-        transformer.CopyOut(transformVBuf, nk1c1k0c0, box, batchIdx, k1Idx);
+        transformer.SetNK1C1K0C0CopyParams(
+            copyK0Params,
+            transformVBuf,
+            box);
+        NK1C1K0C0::CopyK0UB2GM(copyK0Params, nk1c1k0c0);
         SetFlag<HardEvent::MTE3_MTE2>(eventFlags.mte32mte2);
     }
 
@@ -485,8 +504,8 @@ private:
                 currentAicBlockHOffset_ = GetBlockIdx() / blockW_;
                 currentAicBlockWOffset_ = GetBlockIdx() % blockW_;
             } else {
-                currentAicBlockHOffset_ = 0;
-                currentAicBlockWOffset_ = 0;
+                currentAicBlockHOffset_ = GetBlockIdx() / GetSubBlockNum() / blockW_;
+                currentAicBlockWOffset_ = GetBlockIdx() / GetSubBlockNum() % blockW_;
             }
         }
 
@@ -497,14 +516,11 @@ private:
 
         inline __aicore__ bool GetCurrentAicHWIdx(uint32_t& hIdx, uint32_t& wIdx)
         {
-            if ASCEND_IS_AIC {
-                return GetHWIdx(
-                    currentAicBlockHOffset_,
-                    currentAicBlockWOffset_,
-                    hIdx,
-                    wIdx);
-            }
-            return false;
+            return GetHWIdx(
+                currentAicBlockHOffset_,
+                currentAicBlockWOffset_,
+                hIdx,
+                wIdx);
         }
 
         inline __aicore__ bool GetHWIdx(
@@ -518,7 +534,7 @@ private:
 
             uint32_t flattenWIdx = loopIdx_ * blockW_ + blockWOffset;
 
-            //不在hCnt和wCnt有效范围内也要设置
+            //不在hCnt和wCnt有效范围内也设置
             uint32_t q = flattenWIdx / wCnt_;
             outputWIdx = flattenWIdx - q * wCnt_;
             outputHIdx = q * blockH_ + blockHOffset;
@@ -564,7 +580,7 @@ private:
     public:
         __aicore__ inline void WaitSlot()
         {
-            if (freeSlot == 0) {
+            if (freeSlots_ == 0) {
                 CrossCoreWaitFlag<2, SRC_PIPE>(POP_FLAG);
             }
         }
@@ -572,8 +588,8 @@ private:
         __aicore__ inline void Push()
         {
             CrossCoreSetFlag<2, SRC_PIPE>(PUSH_FLAG);
-            if (freeSlot > 0) {
-                freeSlot--;
+            if (freeSlots_ > 0) {
+                freeSlots_--;
             }
         }
 
@@ -594,7 +610,7 @@ private:
         }
 
     private:
-        uint8_t freeSlot = FREE_SLOTS;
+        uint8_t freeSlots_ = FREE_SLOTS;
     };
 
     static constexpr uint8_t kCROSS_CORE_AIV_SYNC_FLAG = 0;
@@ -613,8 +629,10 @@ private:
 
     const WinoFmapTransformer<T>& fmap_;
     const WinoDyTransformer<T>& dy_;
-    const NK1C1K0C0<T>& nk1c1k0t16c0Fmap_;
-    const NK1C1K0C0<T>& nk1c1k0t16c0Dy_;
+    const NK1C1K0C0::Shape<T> nk1c1k0c0Fmap_;
+    const NK1C1K0C0::Shape<T> nk1c1k0c0Dy_;
+    GlobalTensor<T> nk1c1k0c0FmapGm_;
+    GlobalTensor<T> nk1c1k0c0DyGm_;
     WinoMMAD<T>& winoMmad_;
 
     const uint32_t tilesH_;
