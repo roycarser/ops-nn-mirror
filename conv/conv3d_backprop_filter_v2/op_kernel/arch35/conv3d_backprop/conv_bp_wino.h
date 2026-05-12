@@ -74,9 +74,16 @@ public:
                 singleShapeTransformC_,
                 singleShapeTilesH_ * singleShapeTilesW_);
 
-            pipe->InitBuffer(transformTmpBuf_, Std::max(fmapTmpSize, dyTmpSize) * sizeof(T));
-            pipe->InitBuffer(transformBuf_[0], transformBufSize * sizeof(T));
-            pipe->InitBuffer(transformBuf_[1], transformBufSize * sizeof(T));
+            TBuf<TPosition::VECIN> transformTmpBuf;
+            TBuf<TPosition::VECIN> transformBuf[2];
+
+            pipe->InitBuffer(transformTmpBuf, Std::max(fmapTmpSize, dyTmpSize) * sizeof(T));
+            pipe->InitBuffer(transformBuf[0], transformBufSize * sizeof(T));
+            pipe->InitBuffer(transformBuf[1], transformBufSize * sizeof(T));
+
+            tmpVBuf_ = transformTmpBuf.Get<T>();
+            transformVBuf_[0] = transformBuf[0].Get<T>();
+            transformVBuf_[1] = transformBuf[1].Get<T>();
 
             TransformVFlag::AllocEventId(pipe, transformEventFlags_[0]);
             TransformVFlag::AllocEventId(pipe, transformEventFlags_[1]);
@@ -87,6 +94,13 @@ public:
         }
 
         winoMmad_.Init(singleShapeCout_, singleShapeCin_, singleShapeTilesH_ * singleShapeTilesW_);
+
+
+        auto l1BufPing =  winoMmad_.GetL1Buf(true);
+        auto l1BufPong =  winoMmad_.GetL1Buf(false);
+
+        LocalTensor<T> l1DyBuf[2] = {Std::get<0>(l1BufPing), Std::get<0>(l1BufPong)};
+        dyUB2L1_.Init(l1DyBuf);
     }
 
     inline void __aicore__ End()
@@ -97,11 +111,9 @@ public:
             WaitFlag<HardEvent::MTE3_MTE2>(transformEventFlags_[1].mte32mte2);
         }
 
-        if ASCEND_IS_AIC {
-            winoMmad_.End();
-        }
-
-        aivMTE3ToAicMTE2SyncQue_.PipeBarrierAllEnd();
+        fmapGM2L1_.End();
+        dyUB2L1_.End();
+        winoMmad_.End();
     }
 
     inline void __aicore__ IterateAll(
@@ -161,39 +173,31 @@ public:
             }
 
             if ASCEND_IS_AIV {
-                uint32_t buttonRightCoutBlockIdx = 0;
-                uint32_t buttonRightCinBlockIdx = 0;
+                uint32_t transformCoutEnd;
+                uint32_t transformCinEnd;
 
-                blockIterator.GetHWIdx(
-                    blockNumCout_ - 1, blockNumCin_ - 1,
-                    buttonRightCoutBlockIdx, buttonRightCinBlockIdx);
+                GetTransformRange(
+                    blockIterator,
+                    transformWatermarkCout,
+                    transformWatermarkCin,
+                    transformCoutEnd,
+                    transformCinEnd);
 
-                uint32_t topLeftCoutBlockIdx = 0;
-                uint32_t topLeftCinBlockIdx = 0;
+                uint32_t currentAicCoutBlockIdx;
+                uint32_t currentAicCinBlockIdx;
+                bool valid = blockIterator.GetCurrentAicHWIdx(currentAicCoutBlockIdx, currentAicCinBlockIdx);
 
-                blockIterator.GetHWIdx(
-                    0, 0,
-                    topLeftCoutBlockIdx, topLeftCinBlockIdx);
-
-                uint32_t transformCoutEndIdx = Std::min(cout_, (buttonRightCoutBlockIdx + 1) * singleShapeCout_);
-                uint32_t transformCinEndIdx;
-                if (buttonRightCoutBlockIdx - topLeftCoutBlockIdx + 1 > blockNumCout_) {
-                    // 滑窗产生换行,说明整个cin被滑完,必须转换完整个cin轴
-                    transformCinEndIdx = cin_;
-                } else {
-                    transformCinEndIdx = Std::min(cin_, (buttonRightCinBlockIdx + 1) * singleShapeCin_);
-                }
-
-                //这一轮迭代cube需要的正变换cout/cin范围
-                uint32_t transformCoutEnd = Std::max(transformCoutEndIdx, transformWatermarkCout);
-                uint32_t transformCinEnd = Std::max(transformCinEndIdx, transformWatermarkCin);
+                //dy只处理当前aiv对应的aic基本块
+                uint32_t coutIdx = valid ? currentAicCoutBlockIdx * singleShapeCout_ : 0;
+                uint32_t coutLength = valid ? Std::min(cout_ - coutIdx, singleShapeCout_) : 0;
 
                 Transform(
                     batchIdx,
-                    transformWatermarkCout,
+                    coutIdx,
                     transformWatermarkCin,
-                    transformCoutEnd - transformWatermarkCout,
+                    coutLength,
                     transformCinEnd - transformWatermarkCin);
+
                 transformWatermarkCin = transformCinEnd;
                 transformWatermarkCout = transformCoutEnd;
             }
@@ -208,7 +212,6 @@ private:
     inline __aicore__ void Mmad(uint32_t batchIdx, uint32_t coutIdx, uint32_t cinIdx)
     {
         uint32_t coutLength = Std::min(cout_ - coutIdx, singleShapeCout_);
-        uint32_t coutC1Idx = coutIdx / C0<T>();
         uint32_t coutC1Length = Ops::Base::CeilDiv(coutLength, C0<T>());
 
         uint32_t cinLength = Std::min(cin_ - cinIdx, singleShapeCin_);
@@ -246,12 +249,9 @@ private:
             HWBox tiles = iter.TileBox();
             uint32_t kIdx = iter.kIdx();
 
-            MmadLoadL1<NotIdle>(
-                tiles, batchIdx, kIdx,
-                coutC1Idx, coutC1Length, cinC1Idx, cinC1Length,
+            MmadLoadGMFmap<NotIdle>(
+                tiles, batchIdx, kIdx, cinC1Idx, cinC1Length,
                 loadPingPong);
-
-            loadPingPong = !loadPingPong;
 
             iter.Next();
 
@@ -259,50 +259,31 @@ private:
                 HWBox nextTiles = iter.TileBox();
                 uint32_t nextKIdx = iter.kIdx();
 
-                MmadLoadL1<NotIdle>(
+                MmadLoadGMFmap<NotIdle>(
                     nextTiles, batchIdx, nextKIdx,
-                    coutC1Idx, coutC1Length, cinC1Idx, cinC1Length,
+                    cinC1Idx, cinC1Length,
                     loadPingPong);
 
-                loadPingPong = !loadPingPong;
-
-                if constexpr (NotIdle) {
-                    winoMmad_.Compute(tiles, coutC1Length, cinC1Length, kIdx == 0, computePingPong);
-                }
+                MmadCompute<NotIdle>(tiles, coutC1Length, cinC1Length, kIdx, computePingPong);
 
                 tiles = nextTiles;
                 kIdx = nextKIdx;
 
-                computePingPong = !computePingPong;
-
                 iter.Next();
             }
-
-            if constexpr (NotIdle) {
-                winoMmad_.Compute(tiles, coutC1Length, cinC1Length, kIdx == 0, computePingPong);
-            }
+            MmadCompute<NotIdle>(tiles, coutC1Length, cinC1Length, kIdx, computePingPong);
         }
     }
 
     template <bool NotIdle>
-    inline __aicore__ void MmadLoadL1(
+    inline __aicore__ void MmadLoadGMFmap(
         const HWBox& tiles, uint32_t batchIdx, uint32_t k1Idx,
-        uint32_t coutC1Idx, uint32_t coutC1Length,
-        uint32_t cinC1Idx, uint32_t cinC1Length,
-        bool l1PingPongFlag)
+        uint32_t cinC1Idx, uint32_t cinC1Length, bool& l1PingPongFlag)
     {
-        aivMTE3ToAicMTE2SyncQue_.WaitData();
+        fmapGM2L1_.WaitData();
+
         //尾轮时虽然空跑但是队列信号还得照发
-
         if constexpr (NotIdle) {
-            NK1C1K0C0::CopyK0Params<T> copyDyParams;
-            copyDyParams.tiles = tiles.elements;
-            copyDyParams.batchIdx = batchIdx;
-            copyDyParams.k1Idx = k1Idx;
-            copyDyParams.c1Idx = coutC1Idx;
-            copyDyParams.c1Length = coutC1Length;
-            copyDyParams.gm = nk1c1k0c0DyGm_;
-
             NK1C1K0C0::CopyK0Params<T> copyFmapParams;
             copyFmapParams.tiles = tiles.elements;
             copyFmapParams.batchIdx = batchIdx;
@@ -311,13 +292,60 @@ private:
             copyFmapParams.c1Length = cinC1Length;
             copyFmapParams.gm = nk1c1k0c0FmapGm_;
 
-            winoMmad_.LoadL1(
-                nk1c1k0c0Dy_, copyDyParams,
-                nk1c1k0c0Fmap_, copyFmapParams,
-                l1PingPongFlag);
+            winoMmad_.LoadL1Fmap(nk1c1k0c0Fmap_, copyFmapParams, l1PingPongFlag);
+            l1PingPongFlag = !l1PingPongFlag;
         }
 
-        aivMTE3ToAicMTE2SyncQue_.Pop();
+        fmapGM2L1_.DeQue();
+    }
+
+    template <bool NotIdle>
+    inline __aicore__ void MmadCompute(
+        const HWBox& tiles, uint32_t coutC1, uint32_t cinC1, uint32_t kIdx, bool& l1PingPongFlag)
+    {
+        dyUB2L1_.WaitData();
+        if constexpr (NotIdle) {
+            winoMmad_.Compute(tiles, coutC1, cinC1, kIdx == 0, l1PingPongFlag);
+            l1PingPongFlag = !l1PingPongFlag;
+        }
+
+        dyUB2L1_.DeQue();
+    }
+
+    class BlockIterator;
+
+    inline void __aicore__ GetTransformRange(
+        BlockIterator& blockIterator,
+        uint32_t transformWatermarkCout,
+        uint32_t transformWatermarkCin,
+        uint32_t& transformCoutEndOut, uint32_t& transformCinEndOut)
+    {
+        uint32_t buttonRightCoutBlockIdx = 0;
+        uint32_t buttonRightCinBlockIdx = 0;
+
+        blockIterator.GetHWIdx(
+            blockNumCout_ - 1, blockNumCin_ - 1,
+            buttonRightCoutBlockIdx, buttonRightCinBlockIdx);
+
+        uint32_t topLeftCoutBlockIdx = 0;
+        uint32_t topLeftCinBlockIdx = 0;
+
+        blockIterator.GetHWIdx(
+            0, 0,
+            topLeftCoutBlockIdx, topLeftCinBlockIdx);
+
+        uint32_t transformCoutEndIdx = Std::min(cout_, (buttonRightCoutBlockIdx + 1) * singleShapeCout_);
+        uint32_t transformCinEndIdx;
+        if (buttonRightCoutBlockIdx - topLeftCoutBlockIdx + 1 > blockNumCout_) {
+            // 滑窗产生换行,说明整个cin被滑完,必须转换完整个cin轴
+            transformCinEndIdx = cin_;
+        } else {
+            transformCinEndIdx = Std::min(cin_, (buttonRightCinBlockIdx + 1) * singleShapeCin_);
+        }
+
+        //这一轮迭代cube需要的正变换cout/cin范围
+        transformCoutEndOut = Std::max(transformCoutEndIdx, transformWatermarkCout);
+        transformCinEndOut = Std::max(transformCinEndIdx, transformWatermarkCin);
     }
 
     inline __aicore__ void Transform(
@@ -325,25 +353,29 @@ private:
         uint32_t coutIdx, uint32_t cinIdx,
         uint32_t coutLength, uint32_t cinLength)
     {
-        uint32_t aivTaskOffset = 0;
         uint32_t dyTaskCnt = Ops::Base::CeilDiv(coutLength, static_cast<uint32_t>(singleShapeTransformC_));
         uint32_t fmapTaskCnt = Ops::Base::CeilDiv(cinLength, static_cast<uint32_t>(singleShapeTransformC_));
 
-        uint32_t totalTaskCnt = dyTaskCnt + fmapTaskCnt;
-        uint32_t blockNumAiv = GetBlockNum() * GetSubBlockNum();
+        //dy每次由单个Block内的aiv处理
+        uint32_t dyStride = GetSubBlockNum();
+        uint32_t dyCoreId = GetSubBlockIdx();
+
+        //fmap分发到所有核上
+        uint32_t fmapStride = GetSubBlockNum() * GetBlockNum();
+        uint32_t fmapCoreId = GetBlockIdx() * GetSubBlockNum() + GetSubBlockIdx();
 
         //only NCHW
         uint64_t srcBatchOffsetDy = batchIdx * cout_ * dy_.SrcH() * dy_.SrcW();
         uint64_t srcBatchOffsetFmap = batchIdx * cin_ * fmap_.SrcH() * fmap_.SrcW();
 
-        LocalTensor<T> transformVBuf[2] = {transformBuf_[0].Get<T>(), transformBuf_[1].Get<T>()};
-        LocalTensor<T> tmpVBuf = transformTmpBuf_.Get<T>();
+        uint32_t dyTaskOffset = 0;
+        uint32_t fmapTaskOffset = 0;
 
         TileKIterator iter(*this);
         while (iter.More()) {
             HWBox tile = iter.TileBox();
 
-            aivMTE3ToAicMTE2SyncQue_.WaitSlot();
+            // aivMTE3ToAicMTE2SyncQue_.WaitSlot();
 
             //变换任务每轮从前一批空闲的v核开始拉取任务
             //假设每轮只有18个任务,那么第一轮0-17核拉取到任务,第二轮就是18-35核拉取到任务
@@ -351,63 +383,61 @@ private:
             NK1C1K0C0::CopyK0Params<T> copyK0Params;
             copyK0Params.batchIdx = batchIdx;
             copyK0Params.k1Idx = iter.kIdx();
+            copyK0Params.gm = nk1c1k0c0FmapGm_;
 
+            fmapGM2L1_.WaitSlot();
+            for (uint32_t fmapTaskId = (fmapCoreId + fmapStride - fmapTaskOffset) % fmapStride;
+                 fmapTaskId < fmapTaskCnt;
+                 fmapTaskId += fmapStride) {
+                uint32_t cinStart = cinIdx + fmapTaskId * singleShapeTransformC_;
 
-            for (uint32_t taskId = (GetBlockIdx() + blockNumAiv - aivTaskOffset) % blockNumAiv;
-                 taskId < totalTaskCnt;
-                 taskId += blockNumAiv) {
-                if (taskId < dyTaskCnt) {
-                    uint32_t dyTaskId = taskId;
-                    uint32_t coutStart = coutIdx + dyTaskId * singleShapeTransformC_;
-
-                    copyK0Params.gm = nk1c1k0c0DyGm_;
-                    ExecuteTransform(
-                        dy_,
-                        tile,
-                        nk1c1k0c0Dy_,
-                        copyK0Params,
-                        srcBatchOffsetDy,
-                        coutStart,
-                        Std::min(singleShapeTransformC_, coutIdx + coutLength - coutStart),
-                        transformVBuf[transformPingPongFlag_],
-                        tmpVBuf,
-                        transformEventFlags_[transformPingPongFlag_]);
-                } else {
-                    uint32_t fmapTaskId = taskId - dyTaskCnt;
-                    uint32_t cinStart = cinIdx + fmapTaskId * singleShapeTransformC_;
-                    copyK0Params.gm = nk1c1k0c0FmapGm_;
-                    ExecuteTransform(
-                        fmap_,
-                        tile,
-                        nk1c1k0c0Fmap_,
-                        copyK0Params,
-                        srcBatchOffsetFmap,
-                        cinStart,
-                        Std::min(singleShapeTransformC_, cinIdx + cinLength - cinStart),
-                        transformVBuf[transformPingPongFlag_],
-                        tmpVBuf,
-                        transformEventFlags_[transformPingPongFlag_]);
-                }
-
-                transformPingPongFlag_ = !transformPingPongFlag_;
+                ExecuteTransform<false>(
+                    fmap_,
+                    tile,
+                    nk1c1k0c0Fmap_,
+                    copyK0Params,
+                    srcBatchOffsetFmap,
+                    cinStart,
+                    Std::min(singleShapeTransformC_, cinIdx + cinLength - cinStart),
+                    0);
             }
+            //TODO fmap的任务控制block尽量小
+            fmapGM2L1_.EnQue();
 
-            aivTaskOffset = (aivTaskOffset + totalTaskCnt) % blockNumAiv;
-            //同步等待所有aiv的mte3完成
-            CrossCoreSetFlag<0, PIPE_MTE3>(kCROSS_CORE_AIV_SYNC_FLAG);
-            CrossCoreWaitFlag<0, PIPE_MTE3>(kCROSS_CORE_AIV_SYNC_FLAG);
+            copyK0Params.gm = nk1c1k0c0DyGm_;
+            dyUB2L1_.WaitSlot();
+            uint32_t dyUB2L1Offset = tile.elements * F23_TRANSFORM_TILE_ELEMENTS_16 * singleShapeTransformC_;
 
-            //所有v核mte结束后通知cube消费正变换数据
-            aivMTE3ToAicMTE2SyncQue_.Push();
+            for (uint32_t dyTaskId = (dyCoreId + dyStride - dyTaskOffset) % dyStride;
+                 dyTaskId < dyTaskCnt;
+                 dyTaskId += dyStride) {
+                uint32_t coutStart = coutIdx + dyTaskId * singleShapeTransformC_;
+                uint32_t l1Offset = dyTaskId * dyUB2L1Offset;
+
+                ExecuteTransform<true>(
+                    dy_,
+                    tile,
+                    nk1c1k0c0Dy_,
+                    copyK0Params,
+                    srcBatchOffsetDy,
+                    coutStart,
+                    Std::min(singleShapeTransformC_, coutIdx + coutLength - coutStart),
+                    l1Offset);
+            }
+            dyUB2L1_.EnQue();
+
+            dyTaskOffset = (dyTaskOffset + dyTaskCnt) % dyStride;
+            fmapTaskOffset = (fmapTaskOffset + fmapTaskCnt) % fmapStride;
 
             iter.Next();
         }
     }
 
+
     struct TransformVFlag;
 
-    template <typename t0, auto t1, auto t2, typename t3, auto t4>
-    static inline __aicore__ void ExecuteTransform(
+    template <bool dy, typename t0, auto t1, auto t2, typename t3, auto t4>
+    inline __aicore__ void ExecuteTransform(
         const WinoTransformer<t0, t1, t2, t3, t4>& transformer,
         const HWBox& tile,
         const NK1C1K0C0::Shape<T>& nk1c1k0c0,
@@ -415,18 +445,18 @@ private:
         uint64_t srcBatchOffset,
         uint32_t cIdx,
         uint32_t cLength,
-        LocalTensor<T>& transformVBuf,
-        LocalTensor<T>& tmpVBuf,
-        TransformVFlag& eventFlags)
+        uint32_t ub2l1Offset)
     {
         TileBox box = transformer.CalculateSrcBox(tile, cIdx, cLength);
+        LocalTensor<T>& transformVBuf = transformVBuf_[transformPingPongFlag_];
+        TransformVFlag& eventFlags = transformEventFlags_[transformPingPongFlag_];
 
         WaitFlag<HardEvent::MTE3_MTE2>(eventFlags.mte32mte2);
         transformer.CopyIn(transformVBuf, box, srcBatchOffset);
         SetFlag<HardEvent::MTE2_V>(eventFlags.mte2v);
 
         WaitFlag<HardEvent::MTE2_V>(eventFlags.mte2v);
-        transformer.Compute(transformVBuf, tmpVBuf, box);
+        transformer.Compute(transformVBuf, tmpVBuf_, box);
         SetFlag<HardEvent::V_MTE3>(eventFlags.v2mte3);
 
         WaitFlag<HardEvent::V_MTE3>(eventFlags.v2mte3);
@@ -434,8 +464,15 @@ private:
             copyK0Params,
             transformVBuf,
             box);
-        NK1C1K0C0::CopyK0UB2GM(copyK0Params, nk1c1k0c0);
+
+        if constexpr (dy) {
+            dyUB2L1_.Write(copyK0Params, ub2l1Offset);
+        } else {
+            fmapGM2L1_.Write(copyK0Params, nk1c1k0c0);
+        }
+
         SetFlag<HardEvent::MTE3_MTE2>(eventFlags.mte32mte2);
+        transformPingPongFlag_ = !transformPingPongFlag_;
     }
 
     class TileKIterator {
@@ -571,61 +608,26 @@ private:
         }
     };
 
-    template <pipe_t SRC_PIPE, pipe_t DST_PIPE, uint8_t PUSH_FLAG, uint8_t POP_FLAG>
-    class CVSyncQue {
-        //CrossCoreSetFlag内计数器上限不能超过15
-        //这里设置连续push12次就要等待pop通知，防止计数器超限
-        static constexpr uint8_t FREE_SLOTS = 12;
 
-    public:
-        __aicore__ inline void WaitSlot()
-        {
-            if (freeSlots_ == 0) {
-                CrossCoreWaitFlag<2, SRC_PIPE>(POP_FLAG);
-            }
-        }
+    static constexpr uint8_t CROSS_CORE_AIC_SYNC_FLAG = 0;
+    static constexpr uint8_t CROSS_CORE_AIV2AIC_SEND_UB2GM_FLAG = 1;
+    static constexpr uint8_t CROSS_CORE_AIC2AIV_RECV_GM2L1_FLAG = 2;
+    static constexpr uint8_t CROSS_CORE_AIV2AIC_SEND_UB2L1_FLAG = 3;
+    static constexpr uint8_t CROSS_CORE_AIC2AIV_RECV_UB2L1_FLAG = 4;
 
-        __aicore__ inline void Push()
-        {
-            CrossCoreSetFlag<2, SRC_PIPE>(PUSH_FLAG);
-            if (freeSlots_ > 0) {
-                freeSlots_--;
-            }
-        }
-
-        __aicore__ inline void WaitData()
-        {
-            CrossCoreWaitFlag<2, DST_PIPE>(PUSH_FLAG);
-        }
-
-        __aicore__ inline void Pop()
-        {
-            CrossCoreSetFlag<2, DST_PIPE>(POP_FLAG);
-        }
-
-        __aicore__ inline void PipeBarrierAllEnd()
-        {
-            //如果CrossCoreSetFlag是最后的指令可能因为一执行就核就退出导致没能成功set,整个核结束前加个全量等待
-            PipeBarrier<PIPE_ALL>();
-        }
-
-    private:
-        uint8_t freeSlots_ = FREE_SLOTS;
-    };
-
-    static constexpr uint8_t kCROSS_CORE_AIV_SYNC_FLAG = 0;
-    static constexpr uint8_t kCROSS_CORE_AIV2AIC_SEND_FLAG = 1;
-    static constexpr uint8_t kCROSS_CORE_AIC2AIV_RECV_FLAG = 2;
-
-
-    TBuf<TPosition::VECIN> transformTmpBuf_;
-    TBuf<TPosition::VECIN> transformBuf_[2];
+    LocalTensor<T> tmpVBuf_;
+    LocalTensor<T> transformVBuf_[2];
     TransformVFlag transformEventFlags_[2];
     bool transformPingPongFlag_ = true;
 
-    CVSyncQue<PIPE_MTE3, PIPE_MTE2,
-        kCROSS_CORE_AIV2AIC_SEND_FLAG,
-        kCROSS_CORE_AIC2AIV_RECV_FLAG> aivMTE3ToAicMTE2SyncQue_;
+    GM2L1Queue<T,
+        CROSS_CORE_AIV2AIC_SEND_UB2GM_FLAG,
+        CROSS_CORE_AIC2AIV_RECV_GM2L1_FLAG,
+        CROSS_CORE_AIC_SYNC_FLAG> fmapGM2L1_;
+
+    UB2L1Queue<T,
+        CROSS_CORE_AIV2AIC_SEND_UB2L1_FLAG,
+        CROSS_CORE_AIC2AIV_RECV_UB2L1_FLAG> dyUB2L1_;
 
     const WinoFmapTransformer<T>& fmap_;
     const WinoDyTransformer<T>& dy_;

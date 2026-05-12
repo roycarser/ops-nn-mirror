@@ -16,7 +16,7 @@
 #ifndef CONV_BP_WINO_MMAD_H
 #define CONV_BP_WINO_MMAD_H
 
-#include "conv_bp_wino_util.h"
+#include "conv_bp_wino_data_queue.h"
 
 using namespace AscendC;
 
@@ -30,14 +30,18 @@ public:
 
     __aicore__ inline void Init(uint32_t singleShapeCout, uint32_t singleShapeCin, uint32_t singleShapeTilesHW)
     {
+        //TODO L1 要留一个(16-tile.elements%16)的空间
+        // 让load2d取最后一个点的最后一个分形时凑满512字节
+
+        //L1在aiv下也要初始化,提供给UB2L1这条路径使用
         TPipe* pipe = GetTPipePtr();
         pipe->InitBuffer(l1Buf_, TOTAL_L1_SIZE);
 
-        if ASCEND_IS_AIC {
-            uint32_t tile16Size = singleShapeTilesHW * F23_TRANSFORM_TILE_ELEMENTS_16;
-            l1aLength_ = singleShapeCout * tile16Size;
-            l1bLength_ = singleShapeCin * tile16Size;
+        uint32_t tile16Size = singleShapeTilesHW * F23_TRANSFORM_TILE_ELEMENTS_16;
+        l1aLength_ = singleShapeCout * tile16Size;
+        l1bLength_ = singleShapeCin * tile16Size;
 
+        if ASCEND_IS_AIC {
             uint32_t l0aBufSize;
             uint32_t l0bBufSize;
 
@@ -72,16 +76,16 @@ public:
 
     __aicore__ inline void End()
     {
-        SetHF32Mode(false);
-        WaitFlag<HardEvent::MTE1_MTE2>(mte2mte1Flag_[0].dst2src);
-        WaitFlag<HardEvent::MTE1_MTE2>(mte2mte1Flag_[1].dst2src);
-        WaitFlag<HardEvent::M_MTE1>(mte1madFlag_[0].dst2src);
-        WaitFlag<HardEvent::M_MTE1>(mte1madFlag_[1].dst2src);
+        if ASCEND_IS_AIC {
+            SetHF32Mode(false);
+            WaitFlag<HardEvent::MTE1_MTE2>(mte2mte1Flag_[0].dst2src);
+            WaitFlag<HardEvent::MTE1_MTE2>(mte2mte1Flag_[1].dst2src);
+            WaitFlag<HardEvent::M_MTE1>(mte1madFlag_[0].dst2src);
+            WaitFlag<HardEvent::M_MTE1>(mte1madFlag_[1].dst2src);
+        }
     }
 
-    __aicore__ inline void LoadL1(
-        const NK1C1K0C0::Shape<T>& nk1c1k0c0Dy,
-        NK1C1K0C0::CopyK0Params<T>& copyDyParams,
+    __aicore__ inline void LoadL1Fmap(
         const NK1C1K0C0::Shape<T>& nk1c1k0c0Fmap,
         NK1C1K0C0::CopyK0Params<T>& copyFmapParams,
         bool l1PingPongFlag)
@@ -93,98 +97,12 @@ public:
         // 让load2d取最后一个点的最后一个分形时凑满512字节
         auto l1Buf = GetL1Buf(l1PingPongFlag);
 
-        LocalTensor<T>& l1a = Std::get<0>(l1Buf);
-        copyDyParams.l1 = l1a;
-        NK1C1K0C0::CopyK0GM2L1(copyDyParams, nk1c1k0c0Dy);
-
         LocalTensor<T>& l1b = Std::get<1>(l1Buf);
         copyFmapParams.l1 = l1b;
         NK1C1K0C0::CopyK0GM2L1(copyFmapParams, nk1c1k0c0Fmap);
 
         SetFlag<HardEvent::MTE2_MTE1>(mte2mte1.src2dst);
     }
-
-    // __aicore__ inline void CopyGMDyToL1(
-    //     const NK1C1K0C0::Shape<T>& nk1c1k0c0Dy,
-    //     NK1C1K0C0::CopyK0Params<T>& copyDyParams,
-    //     bool l1PingPongFlag)
-    // {
-    //     if ASCEND_IS_AIC {
-    //         EventFlag& mte2mte1 = mte2mte1Flag_[l1PingPongFlag];
-    //         WaitFlag<HardEvent::MTE1_MTE2>(mte2mte1.dst2src);
-    //
-    //         //TODO L1 要留一个(16-tile.elements%16)的空间
-    //         // 让load2d取最后一个点的最后一个分形时凑满512字节
-    //         auto l1Buf = GetL1Buf(l1PingPongFlag);
-    //
-    //         LocalTensor<T>& l1a = Std::get<0>(l1Buf);
-    //         copyDyParams.l1 = l1a;
-    //         NK1C1K0C0::CopyK0GM2L1(copyDyParams, nk1c1k0c0Dy);
-    //
-    //         SetFlag<HardEvent::MTE2_MTE1>(mte2mte1.src2dst);
-    //     }
-    // }
-    //
-    // __aicore__ inline void CopyGMFmapToL1(
-    //     const NK1C1K0C0::Shape<T>& nk1c1k0c0Fmap,
-    //     NK1C1K0C0::CopyK0Params<T>& copyFmapParams,
-    //     bool l1PingPongFlag)
-    // {
-    //     if ASCEND_IS_AIC {
-    //         EventFlag& mte2mte1 = mte2mte1Flag_[l1PingPongFlag];
-    //         WaitFlag<HardEvent::MTE1_MTE2>(mte2mte1.dst2src);
-    //
-    //         //TODO L1 要留一个(16-tile.elements%16)的空间
-    //         // 让load2d取最后一个点的最后一个分形时凑满512字节
-    //         auto l1Buf = GetL1Buf(l1PingPongFlag);
-    //
-    //         LocalTensor<T>& l1b = Std::get<1>(l1Buf);
-    //         copyFmapParams.l1 = l1b;
-    //         NK1C1K0C0::CopyK0GM2L1(copyFmapParams, nk1c1k0c0Fmap);
-    //
-    //         SetFlag<HardEvent::MTE2_MTE1>(mte2mte1.src2dst);
-    //     }
-    // }
-    //
-    // __aicore__ inline void CopyUBDyToL1(
-    //     NK1C1K0C0::CopyK0Params<T>& copyDyParams,
-    //     bool l1PingPongFlag)
-    // {
-    //     if ASCEND_IS_AIV {
-    //         auto l1Buf = GetL1Buf(l1PingPongFlag);
-    //         LocalTensor<T>& l1a = Std::get<0>(l1Buf);
-    //
-    //         copyDyParams.l1 = l1a;
-    //         NK1C1K0C0::CopyK0UB2L1(copyDyParams);
-    //     }
-    // }
-    //
-    // __aicore__ inline void CopyUBFmapToL1(
-    //     NK1C1K0C0::CopyK0Params<T>& copyDyParams,
-    //     bool l1PingPongFlag)
-    // {
-    //     if ASCEND_IS_AIV {
-    //         auto l1Buf = GetL1Buf(l1PingPongFlag);
-    //         LocalTensor<T>& l1b = Std::get<1>(l1Buf);
-    //
-    //         copyDyParams.l1 = l1b;
-    //         NK1C1K0C0::CopyK0UB2L1(copyDyParams);
-    //     }
-    // }
-
-    // __aicore__ inline void SetAivPushFlag()
-    // {
-    //     if ASCEND_IS_AIV {
-    //         aivMTE3ToAicMTE1SyncQue.Push();
-    //     }
-    // }
-    //
-    // __aicore__ inline void WaitAicPopFlag()
-    // {
-    //     if ASCEND_IS_AIV {
-    //         aivMTE3ToAicMTE1SyncQue.WaitSlot();
-    //     }
-    // }
 
 
     __aicore__ inline void Compute(
@@ -308,7 +226,6 @@ public:
         SetFlag<HardEvent::MTE1_MTE2>(mte2mte1Flag.dst2src);
     }
 
-private:
     __aicore__ inline Std::tuple<LocalTensor<T>, LocalTensor<T> > GetL1Buf(bool flagPingPong)
     {
         //PingPong按L1/2为界
@@ -322,6 +239,8 @@ private:
 
         return Std::make_tuple(l1a, l1b);
     }
+
+private:
 
     static __aicore__ inline void CalcWinoPointL0Group(
         uint32_t singleShapeCout,
