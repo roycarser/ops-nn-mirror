@@ -95,9 +95,8 @@ public:
 
         winoMmad_.Init(singleShapeCout_, singleShapeCin_, singleShapeTilesH_ * singleShapeTilesW_);
 
-
-        auto l1BufPing =  winoMmad_.GetL1Buf(true);
-        auto l1BufPong =  winoMmad_.GetL1Buf(false);
+        auto l1BufPing = winoMmad_.GetL1Buf(false);
+        auto l1BufPong = winoMmad_.GetL1Buf(true);
 
         LocalTensor<T> l1DyBuf[2] = {Std::get<0>(l1BufPing), Std::get<0>(l1BufPong)};
         dyUB2L1_.Init(l1DyBuf);
@@ -159,16 +158,26 @@ public:
         uint32_t transformWatermarkCin = 0;
         uint32_t transformWatermarkCout = 0;
 
+        //TODO 让blockNumCout为1，Cin为Core，让fmap尽快变换完成减少cube全核同步开销
         BlockIterator blockIterator(coutCnt, cinCnt, blockNumCout_, blockNumCin_);
         while (blockIterator.More()) {
             if ASCEND_IS_AIC {
                 uint32_t coutBlockIdx;
                 uint32_t cinBlockIdx;
 
+                uint32_t core0CoutBlockIdx;
+                uint32_t core0CinBlockIdx;
+                blockIterator.GetHWIdx(0, 0, core0CoutBlockIdx, core0CinBlockIdx);
+                //整个cin滑完一轮代表fmap已经完成所有正变换
+                bool fmapTransformFinished = core0CoutBlockIdx > 0;
+
                 if (blockIterator.GetCurrentAicHWIdx(coutBlockIdx, cinBlockIdx)) {
-                    Mmad<true>(batchIdx, coutBlockIdx * singleShapeCout_, cinBlockIdx * singleShapeCin_);
+                    Mmad<true>(
+                        batchIdx, coutBlockIdx * singleShapeCout_,
+                        cinBlockIdx * singleShapeCin_,
+                        fmapTransformFinished);
                 } else {
-                    Mmad<false>(0, 0, 0);
+                    Mmad<false>(0, 0, 0, fmapTransformFinished);
                 }
             }
 
@@ -185,7 +194,9 @@ public:
 
                 uint32_t currentAicCoutBlockIdx;
                 uint32_t currentAicCinBlockIdx;
-                bool valid = blockIterator.GetCurrentAicHWIdx(currentAicCoutBlockIdx, currentAicCinBlockIdx);
+                bool valid = blockIterator.GetCurrentAicHWIdx(
+                    currentAicCoutBlockIdx,
+                    currentAicCinBlockIdx);
 
                 //dy只处理当前aiv对应的aic基本块
                 uint32_t coutIdx = valid ? currentAicCoutBlockIdx * singleShapeCout_ : 0;
@@ -209,7 +220,7 @@ public:
 
 private:
     template <bool NotIdle>
-    inline __aicore__ void Mmad(uint32_t batchIdx, uint32_t coutIdx, uint32_t cinIdx)
+    inline __aicore__ void Mmad(uint32_t batchIdx, uint32_t coutIdx, uint32_t cinIdx, bool fmapTransformFinished)
     {
         uint32_t coutLength = Std::min(cout_ - coutIdx, singleShapeCout_);
         uint32_t coutC1Length = Ops::Base::CeilDiv(coutLength, C0<T>());
@@ -251,7 +262,7 @@ private:
 
             MmadLoadGMFmap<NotIdle>(
                 tiles, batchIdx, kIdx, cinC1Idx, cinC1Length,
-                loadPingPong);
+                fmapTransformFinished, loadPingPong);
 
             iter.Next();
 
@@ -262,7 +273,7 @@ private:
                 MmadLoadGMFmap<NotIdle>(
                     nextTiles, batchIdx, nextKIdx,
                     cinC1Idx, cinC1Length,
-                    loadPingPong);
+                    fmapTransformFinished, loadPingPong);
 
                 MmadCompute<NotIdle>(tiles, coutC1Length, cinC1Length, kIdx, computePingPong);
 
@@ -278,9 +289,9 @@ private:
     template <bool NotIdle>
     inline __aicore__ void MmadLoadGMFmap(
         const HWBox& tiles, uint32_t batchIdx, uint32_t k1Idx,
-        uint32_t cinC1Idx, uint32_t cinC1Length, bool& l1PingPongFlag)
+        uint32_t cinC1Idx, uint32_t cinC1Length, bool fmapTransformFinished, bool& l1PingPongFlag)
     {
-        fmapGM2L1_.WaitData();
+        fmapGM2L1_.WaitData(fmapTransformFinished);
 
         //尾轮时虽然空跑但是队列信号还得照发
         if constexpr (NotIdle) {
