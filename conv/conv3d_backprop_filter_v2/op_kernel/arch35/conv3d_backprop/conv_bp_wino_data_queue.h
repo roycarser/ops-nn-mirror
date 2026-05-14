@@ -131,13 +131,13 @@ public:
     __aicore__ inline void WaitSlot()
     {
         if (freeSlots_ == 0) {
-            AscendC::CrossCoreWaitFlag<2, SRC_PIPE>(POP_FLAG);
+            AscendC::CrossCoreWaitFlag<4, SRC_PIPE>(POP_FLAG);
         }
     }
 
     __aicore__ inline void EnQue()
     {
-        AscendC::CrossCoreSetFlag<2, SRC_PIPE>(PUSH_FLAG);
+        AscendC::CrossCoreSetFlag<4, SRC_PIPE>(PUSH_FLAG);
         if (freeSlots_ > 0) {
             freeSlots_--;
         }
@@ -145,12 +145,16 @@ public:
 
     __aicore__ inline void WaitData()
     {
-        AscendC::CrossCoreWaitFlag<2, DST_PIPE>(PUSH_FLAG);
+        //整个队列时按模式2实现的，但是模式2跑仿真v->c时貌似有bug,会产生多余的set
+        //先用模式4模拟模式2
+        AscendC::CrossCoreWaitFlag<4, DST_PIPE>(PUSH_FLAG);
+        AscendC::CrossCoreWaitFlag<4, DST_PIPE>(PUSH_FLAG + 16);
     }
 
     __aicore__ inline void DeQue()
     {
-        AscendC::CrossCoreSetFlag<2, DST_PIPE>(POP_FLAG);
+        AscendC::CrossCoreSetFlag<4, DST_PIPE>(POP_FLAG);
+        AscendC::CrossCoreSetFlag<4, DST_PIPE>(POP_FLAG + 16);
     }
 
     __aicore__ inline void PipeBarrierAllEnd()
@@ -261,12 +265,17 @@ public:
         }
     }
 
-    __aicore__ inline void WaitData()
+    __aicore__ inline void WaitData(bool transformFinished)
     {
-        GM2L1Queue::BaseT::WaitData();
-        //所有cube核接收到aiv发送的通知后才表示这一轮数据都准备好了
-        AscendC::CrossCoreSetFlag<0, PIPE_MTE2>(AIC_MTE2_SYNC_FLAG);
-        AscendC::CrossCoreWaitFlag<0, PIPE_MTE2>(AIC_MTE2_SYNC_FLAG);
+        if ASCEND_IS_AIC {
+            GM2L1Queue::BaseT::WaitData();
+            if (transformFinished) {
+                //所有cube核接收到aiv发送的通知后才表示这一轮数据都准备好了
+                //但整个矩阵都变换完后就不需要在额外等通知
+                AscendC::CrossCoreSetFlag<0, PIPE_MTE2>(AIC_MTE2_SYNC_FLAG);
+                AscendC::CrossCoreWaitFlag<0, PIPE_MTE2>(AIC_MTE2_SYNC_FLAG);
+            }
+        }
     }
 
 };
