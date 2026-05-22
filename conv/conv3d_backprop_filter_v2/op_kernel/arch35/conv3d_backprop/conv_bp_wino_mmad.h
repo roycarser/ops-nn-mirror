@@ -35,7 +35,9 @@ public:
 
         //L1在aiv下也要初始化,提供给UB2L1这条路径使用
         TPipe* pipe = GetTPipePtr();
-        pipe->InitBuffer(l1Buf_, TOTAL_L1_SIZE);
+        TBuf<TPosition::A1> l1TBuf;
+        pipe->InitBuffer(l1TBuf, TOTAL_L1_SIZE);
+        l1Buf_ = l1TBuf.Get<T>();
 
         uint32_t tile16Size = singleShapeTilesHW * F23_TRANSFORM_TILE_ELEMENTS_16;
         l1aLength_ = singleShapeCout * tile16Size;
@@ -55,21 +57,36 @@ public:
                 l0aBufSize,
                 l0bBufSize);
 
-            pipe->InitBuffer(l0aBuf_[0], l0aBufSize);
-            pipe->InitBuffer(l0aBuf_[1], l0aBufSize);
-            pipe->InitBuffer(l0bBuf_[0], l0bBufSize);
-            pipe->InitBuffer(l0bBuf_[1], l0bBufSize);
-            pipe->InitBuffer(l0cBuf_, TOTAL_L0C_SIZE);
+            TBuf<TPosition::A2> l0aTBuf[2];
+            TBuf<TPosition::B2> l0bTBuf[2];
+
+            pipe->InitBuffer(l0aTBuf[0], l0aBufSize);
+            pipe->InitBuffer(l0aTBuf[1], l0aBufSize);
+            pipe->InitBuffer(l0bTBuf[0], l0bBufSize);
+            pipe->InitBuffer(l0bTBuf[1], l0bBufSize);
+
+            l0aBuf_[0] = l0aTBuf[0].Get<T>();
+            l0aBuf_[1] = l0aTBuf[1].Get<T>();
+            l0bBuf_[0] = l0bTBuf[0].Get<T>();
+            l0bBuf_[1] = l0bTBuf[1].Get<T>();
 
             EventFlag::template Alloc<HardEvent::MTE2_MTE1, HardEvent::MTE1_MTE2>(pipe, mte2mte1Flag_[0]);
             EventFlag::template Alloc<HardEvent::MTE2_MTE1, HardEvent::MTE1_MTE2>(pipe, mte2mte1Flag_[1]);
             EventFlag::template Alloc<HardEvent::MTE1_M, HardEvent::M_MTE1>(pipe, mte1madFlag_[0]);
             EventFlag::template Alloc<HardEvent::MTE1_M, HardEvent::M_MTE1>(pipe, mte1madFlag_[1]);
+#pragma unroll
+            for (uint8_t n = 0; n != L0C_POINT_FIXPIPE_GROUP; n++) {
+                EventFlag::template Alloc<HardEvent::M_FIX, HardEvent::FIX_M>(pipe, mad2fixpipeFlag_[n]);
+            }
 
             SetFlag<HardEvent::MTE1_MTE2>(mte2mte1Flag_[0].dst2src);
             SetFlag<HardEvent::MTE1_MTE2>(mte2mte1Flag_[1].dst2src);
             SetFlag<HardEvent::M_MTE1>(mte1madFlag_[0].dst2src);
             SetFlag<HardEvent::M_MTE1>(mte1madFlag_[1].dst2src);
+#pragma unroll
+            for (uint8_t n = 0; n != L0C_POINT_FIXPIPE_GROUP; n++) {
+                SetFlag<HardEvent::FIX_M>(mad2fixpipeFlag_[n].dst2src);
+            }
             SetHF32Mode(hf32Flag_);
         }
     }
@@ -77,11 +94,15 @@ public:
     __aicore__ inline void End()
     {
         if ASCEND_IS_AIC {
-            SetHF32Mode(false);
             WaitFlag<HardEvent::MTE1_MTE2>(mte2mte1Flag_[0].dst2src);
             WaitFlag<HardEvent::MTE1_MTE2>(mte2mte1Flag_[1].dst2src);
             WaitFlag<HardEvent::M_MTE1>(mte1madFlag_[0].dst2src);
             WaitFlag<HardEvent::M_MTE1>(mte1madFlag_[1].dst2src);
+#pragma unroll
+            for (uint8_t n = 0; n != L0C_POINT_FIXPIPE_GROUP; n++) {
+                WaitFlag<HardEvent::FIX_M>(mad2fixpipeFlag_[n].dst2src);
+            }
+            SetHF32Mode(false);
         }
     }
 
@@ -104,27 +125,18 @@ public:
         SetFlag<HardEvent::MTE2_MTE1>(mte2mte1.src2dst);
     }
 
-
+    template <bool FixpipeInLastK>
     __aicore__ inline void Compute(
-        const HWBox& tiles, uint32_t coutC1, uint32_t cinC1,
-        bool firstK, bool l1PingPongFlag)
+        const HWBox& tiles, uint32_t cout, uint32_t coutC1, uint32_t cin, uint32_t cinC1,
+        bool firstK, bool l1PingPongFlag, LocalTensor<float>& outputTransformVBuf)
     {
-        EventFlag& mte2mte1Flag = mte2mte1Flag_[l1PingPongFlag];
-        WaitFlag<HardEvent::MTE2_MTE1>(mte2mte1Flag.src2dst);
-
-        //l0c均分16片给每个点使用
-        constexpr uint32_t l0cBufSize = TOTAL_L0C_SIZE / F23_TRANSFORM_TILE_ELEMENTS_16 / sizeof(float);
-        LocalTensor<float> l0c = l0cBuf_.Get<float>();
-        LocalTensor<T> l0aBuf[2] = {l0aBuf_[0].Get<T>(), l0aBuf_[1].Get<T>()};
-        LocalTensor<T> l0bBuf[2] = {l0bBuf_[0].Get<T>(), l0bBuf_[1].Get<T>()};
-
         auto l1Buf = GetL1Buf(l1PingPongFlag);
         LocalTensor<T>& l1a = Std::get<0>(l1Buf);
         LocalTensor<T>& l1b = Std::get<1>(l1Buf);
 
         MmadParams mad;
-        mad.m = coutC1 * C0<T>();
-        mad.n = cinC1 * C0<T>();
+        mad.m = cout;
+        mad.n = cin;
         mad.k = tiles.elements;
         mad.cmatrixInitVal = firstK;
 
@@ -169,20 +181,29 @@ public:
         //除以16后单个点最多16kb,L0上一定能全载,除非singleShapeHW传进来为1
         //然后l0上对齐放大到16这类异常情况,但tiling阶段应该防止这种情况
 
+        EventFlag mte2mte1Flag = mte2mte1Flag_[l1PingPongFlag];
+        WaitFlag<HardEvent::MTE2_MTE1>(mte2mte1Flag.src2dst);
+        if (firstK) {
+#pragma unroll
+            for (uint8_t n = 0; n != L0C_POINT_FIXPIPE_GROUP; n++) {
+                WaitFlag<HardEvent::FIX_M>(mad2fixpipeFlag_[n].dst2src);
+            }
+        }
+
         for (uint8_t g = 0; g < l0PointGroup_; g++) {
             //通过奇偶性判断l0PingPong
             const int l0pingFlag = g & 1;
 
-            EventFlag& mte1madFlag = mte1madFlag_[l0pingFlag];
+            EventFlag mte1madFlag = mte1madFlag_[l0pingFlag];
             WaitFlag<HardEvent::M_MTE1>(mte1madFlag.dst2src);
 
             uint8_t pointGroupOffset = g * l0PointPerGroup_;
 
-            LocalTensor<T>& l0a = l0aBuf[l0pingFlag];
-            LocalTensor<T>& l0b = l0bBuf[l0pingFlag];
+            LocalTensor<T> l0a = l0aBuf_[l0pingFlag];
+            LocalTensor<T> l0b = l0bBuf_[l0pingFlag];
 
             for (uint8_t i = 0; i < l0PointPerGroup_; i++) {
-                uint32_t pointIdx = pointGroupOffset + i;
+                uint8_t pointIdx = pointGroupOffset + i;
                 uint32_t offsetL1 = pointIdx * tiles.elements * C0<T>();
 
                 load2d.mStep = l0aMStep;
@@ -211,13 +232,24 @@ public:
 
             //通过将一批点位放一起执行，减少mad断流导致的PI缓起开销和头开销
             for (uint8_t i = 0; i < l0PointPerGroup_; i++) {
-                uint32_t pointIdx = pointGroupOffset + i;
+                uint8_t pointIdx = pointGroupOffset + i;
 
-                uint32_t offsetC = pointIdx * l0cBufSize;
+                LocalTensor<float> l0cBuf = GetL0CPointBuf(pointIdx);
                 uint32_t offsetA = i * l0aPointElements;
                 uint32_t offsetB = i * l0bPointElements;
 
-                AscendC::Mmad(l0c[offsetC], l0a[offsetA], l0b[offsetB], mad);
+                AscendC::Mmad(l0cBuf, l0a[offsetA], l0b[offsetB], mad);
+
+                if constexpr (FixpipeInLastK) {
+                    if ((pointIdx + 1) % L0C_POINT_PER_FIXPIPE_GROUP==0) {
+                        uint8_t fixpipeGroupIdx = pointIdx / L0C_POINT_PER_FIXPIPE_GROUP;
+                        EventFlag m2f = mad2fixpipeFlag_[fixpipeGroupIdx];
+                        SetFlag<HardEvent::M_FIX>(m2f.src2dst);
+                        WaitFlag<HardEvent::M_FIX>(m2f.src2dst);
+                        fixpipe2UB(fixpipeGroupIdx, cout, cin,outputTransformVBuf);
+                        SetFlag<HardEvent::FIX_M>(m2f.dst2src);
+                    }
+                }
             }
 
             SetFlag<HardEvent::M_MTE1>(mte1madFlag.dst2src);
@@ -232,15 +264,40 @@ public:
         //整个L1被均分为2个bank,PingPong以L1SIZE/2为界分配到2个bank上
         //确保PingBuf上执行mte1/mte2时不会和PongBuf上的mte1/mte2产生bank冲突
 
-        constexpr uint32_t offsetPingPong = TOTAL_L1_SIZE / 2;
+        constexpr uint32_t offsetPingPong = TOTAL_L1_SIZE / 2 / sizeof(T);
         uint32_t initOffset = offsetPingPong * flagPingPong;
-        LocalTensor<T> l1a = l1Buf_.GetWithOffset<T>(l1aLength_, initOffset);
-        LocalTensor<T> l1b = l1Buf_.GetWithOffset<T>(l1bLength_, initOffset + l1aLength_ * sizeof(T));
-
+        LocalTensor<T> l1a = l1Buf_[initOffset];
+        l1a.SetSize(l1aLength_);
+        LocalTensor<T> l1b = l1Buf_[initOffset + l1aLength_];
+        l1b.SetSize(l1bLength_);
         return Std::make_tuple(l1a, l1b);
     }
 
 private:
+    __aicore__ static inline void fixpipe2UB(
+        uint8_t fixpipeGroupIdx,
+        uint32_t cout,
+        uint32_t cin,
+        const LocalTensor<float>& outputTransformVBuf)
+    {
+        AscendC::FixpipeParamsC310 fp;
+        //mSize对齐到2用于ub均分,由于实际计算分形一定是16的倍数，所以这么操作应当不会导致地址溢出
+        //假设cout为16，那么对齐后还是16，如果是17那就会变成18，实际计算分形则是32，不存在溢出
+        //TODO 判断尾块非C0对齐有没有问题
+        fp.mSize = GetSubBlockNum() == 2 ? cout + (cout & 1) : cout;
+        fp.nSize = cin;
+        fp.srcStride = Ops::Base::CeilAlign(cout, static_cast<uint32_t>(BLOCK_CUBE));
+        fp.dstStride = cin;
+        fp.params.ndNum = L0C_POINT_PER_FIXPIPE_GROUP;
+        fp.params.srcNdStride = L0C_SINGLE_POINT_BUF_BYTES / (BLOCK_CUBE * sizeof(float));
+        //到UB上按C0对齐
+        fp.params.dstNdStride = AivPartitioner::Get2DAlignBufLength<float>(cout, cin);
+        fp.dualDstCtl = 1;
+
+        LocalTensor<float> l0c = GetL0CPointBuf(fixpipeGroupIdx * L0C_POINT_PER_FIXPIPE_GROUP);
+        static constexpr FixpipeConfig cfg = {CO2Layout::ROW_MAJOR, true};
+        Fixpipe<float, float, cfg>(outputTransformVBuf, l0c, fp);
+    }
 
     static __aicore__ inline void CalcWinoPointL0Group(
         uint32_t singleShapeCout,
@@ -278,9 +335,19 @@ private:
         outL0bSize = outPointPerGroup * singlePointL0BSize;
     }
 
+    static __aicore__ inline LocalTensor<float> GetL0CPointBuf(uint8_t pointIdx)
+    {
+        //l0c均分16片给每个点使用
+        auto buf = LocalTensor<float>(
+            TPosition::CO1,
+            L0C_SINGLE_POINT_BUF_BYTES * pointIdx,
+            L0C_SINGLE_POINT_BUF_BYTES);
+        return buf;
+    }
+
     struct EventFlag {
-        TEventID src2dst;
-        TEventID dst2src;
+        TEventID src2dst = 0;
+        TEventID dst2src = 0;
 
         template <HardEvent Src2DstEvent, HardEvent Dst2SrcEvent>
         static __aicore__ inline void Alloc(TPipe* pipe, EventFlag& flag)
@@ -290,18 +357,19 @@ private:
         }
     };
 
-    //L1上用TBuf规避bank冲突
-    TBuf<TPosition::A1> l1Buf_;
     uint32_t l1aLength_ = 0;
     uint32_t l1bLength_ = 0;
+    LocalTensor<T> l1Buf_;
+    LocalTensor<T> l0aBuf_[2];
+    LocalTensor<T> l0bBuf_[2];
+
+    static constexpr uint8_t L0C_POINT_FIXPIPE_GROUP = 4;
+    static constexpr uint8_t L0C_POINT_PER_FIXPIPE_GROUP = F23_TRANSFORM_TILE_ELEMENTS_16 / L0C_POINT_FIXPIPE_GROUP;
+    static constexpr uint32_t L0C_SINGLE_POINT_BUF_BYTES = TOTAL_L0C_SIZE / F23_TRANSFORM_TILE_ELEMENTS_16;
+
+    EventFlag mad2fixpipeFlag_[L0C_POINT_FIXPIPE_GROUP];
     EventFlag mte2mte1Flag_[2];
-
-    //TQue的scalar比较重,mte1上操作比较频繁直接用TBuf减少scalar开销
     EventFlag mte1madFlag_[2];
-    TBuf<TPosition::A2> l0aBuf_[2];
-    TBuf<TPosition::B2> l0bBuf_[2];
-    TBuf<TPosition::CO1> l0cBuf_;
-
     uint8_t l0PointGroup_;
     uint8_t l0PointPerGroup_;
     const bool hf32Flag_;

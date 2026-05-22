@@ -17,6 +17,7 @@
 #define CONV_BP_WINO_H
 
 #include "conv_bp_wino_mmad.h"
+#include "conv_bp_wino_out_transform.h"
 #include "conv_bp_wino_transform.h"
 
 using namespace AscendC;
@@ -30,6 +31,7 @@ public:
         const WinoDyTransformer<T>& dy,
         __gm__ T* nk1c1k0c0FmapGm,
         __gm__ T* nk1c1k0c0DyGm,
+        __gm__ float* yGm,
         WinoMMAD<T>& winoMmad,
         uint32_t cin,
         uint32_t cout,
@@ -59,6 +61,7 @@ public:
           blockNumCin_(blockNumCin),
           blockNumCout_(blockNumCout)
     {
+        yGm_.SetGlobalBuffer(yGm);
         nk1c1k0c0FmapGm_.SetGlobalBuffer(nk1c1k0c0FmapGm);
         nk1c1k0c0DyGm_.SetGlobalBuffer(nk1c1k0c0DyGm);
     }
@@ -74,16 +77,26 @@ public:
                 singleShapeTransformC_,
                 singleShapeTilesH_ * singleShapeTilesW_);
 
+            //逆变换输出时数据按M轴均分到每个V核上
+            outputTransformer_.Init();
+            uint32_t transformOutputSize = AivPartitioner::Get2DAlignBufLength<float>(
+                                               singleShapeCout_,
+                                               singleShapeCin_)
+                                           * WinoOutputTransformer::COUT_CIN_BUF_CNT;
+
             TBuf<TPosition::VECIN> transformTmpBuf;
             TBuf<TPosition::VECIN> transformBuf[2];
+            TBuf<TPosition::VECIN> transformOutputBuf;
 
             pipe->InitBuffer(transformTmpBuf, Std::max(fmapTmpSize, dyTmpSize) * sizeof(T));
             pipe->InitBuffer(transformBuf[0], transformBufSize * sizeof(T));
             pipe->InitBuffer(transformBuf[1], transformBufSize * sizeof(T));
+            pipe->InitBuffer(transformOutputBuf, transformOutputSize * sizeof(float));
 
             tmpVBuf_ = transformTmpBuf.Get<T>();
             transformVBuf_[0] = transformBuf[0].Get<T>();
             transformVBuf_[1] = transformBuf[1].Get<T>();
+            transformOutputVBuf_ = transformOutputBuf.Get<float>();
 
             TransformVFlag::AllocEventId(pipe, transformEventFlags_[0]);
             TransformVFlag::AllocEventId(pipe, transformEventFlags_[1]);
@@ -112,6 +125,7 @@ public:
 
         fmapGM2L1_.End();
         dyUB2L1_.End();
+        cvFixpipeSyncQue_.PipeBarrierAllEnd();
         winoMmad_.End();
     }
 
@@ -194,13 +208,15 @@ public:
 
                 uint32_t currentAicCoutBlockIdx;
                 uint32_t currentAicCinBlockIdx;
-                bool valid = blockIterator.GetCurrentAicHWIdx(
+                bool notIdle = blockIterator.GetCurrentAicHWIdx(
                     currentAicCoutBlockIdx,
                     currentAicCinBlockIdx);
 
                 //dy只处理当前aiv对应的aic基本块
-                uint32_t coutIdx = valid ? currentAicCoutBlockIdx * singleShapeCout_ : 0;
-                uint32_t coutLength = valid ? Std::min(cout_ - coutIdx, singleShapeCout_) : 0;
+                uint32_t coutIdx = currentAicCoutBlockIdx * singleShapeCout_;
+                uint32_t coutLength = notIdle ? Std::min(cout_ - coutIdx, singleShapeCout_) : 0;
+                uint32_t cinIdx = currentAicCinBlockIdx * singleShapeCin_;
+                uint32_t cinLength = notIdle ? Std::min(cin_ - cinIdx, singleShapeCin_) : 0;
 
                 Transform(
                     batchIdx,
@@ -208,6 +224,10 @@ public:
                     transformWatermarkCin,
                     coutLength,
                     transformCinEnd - transformWatermarkCin);
+
+                if (notIdle) {
+                    TransformOutput(coutIdx, cinIdx, coutLength, cinLength);
+                }
 
                 transformWatermarkCin = transformCinEnd;
                 transformWatermarkCout = transformCoutEnd;
@@ -222,16 +242,28 @@ private:
     template <bool NotIdle>
     inline __aicore__ void Mmad(uint32_t batchIdx, uint32_t coutIdx, uint32_t cinIdx, bool fmapTransformFinished)
     {
-        uint32_t coutLength = Std::min(cout_ - coutIdx, singleShapeCout_);
-        uint32_t coutC1Length = Ops::Base::CeilDiv(coutLength, C0<T>());
-
-        uint32_t cinLength = Std::min(cin_ - cinIdx, singleShapeCin_);
-        uint32_t cinC1Idx = cinIdx / C0<T>();
-        uint32_t cinC1Length = Ops::Base::CeilDiv(cinLength, C0<T>());
+        uint32_t coutLength;
+        uint32_t coutC1Length;
+        uint32_t cinLength;
+        uint32_t cinC1Idx;
+        uint32_t cinC1Length;
+        if constexpr (NotIdle) {
+            coutLength = Std::min(cout_ - coutIdx, singleShapeCout_);
+            coutC1Length = Ops::Base::CeilDiv(coutLength, C0<T>());
+            cinLength = Std::min(cin_ - cinIdx, singleShapeCin_);
+            cinC1Idx = cinIdx / C0<T>();
+            cinC1Length = Ops::Base::CeilDiv(cinLength, C0<T>());
+        } else {
+            coutLength = 0;
+            coutC1Length = 0;
+            cinLength = 0;
+            cinC1Idx = 0;
+            cinC1Length = 0;
+        }
 
         TileKIterator iter(*this);
 
-        if (iter.More()) {
+        if (likely(iter.More())) {
             //winograd每个点位需要执行16次独立的mad计算
             //由于dav上cube的issue queue大小为16,算上wait flag
             //如果一次最多塞入8条mad指令后就会阻塞,进而block住整个scalar
@@ -275,14 +307,21 @@ private:
                     cinC1Idx, cinC1Length,
                     fmapTransformFinished, loadPingPong);
 
-                MmadCompute<NotIdle>(tiles, coutC1Length, cinC1Length, kIdx, computePingPong);
+                MmadCompute<NotIdle, false>(
+                    tiles, coutLength, coutC1Length,
+                    cinLength, cinC1Length,
+                    kIdx, computePingPong);
 
                 tiles = nextTiles;
                 kIdx = nextKIdx;
 
                 iter.Next();
             }
-            MmadCompute<NotIdle>(tiles, coutC1Length, cinC1Length, kIdx, computePingPong);
+
+            MmadCompute<NotIdle, true>(
+                tiles, coutLength, coutC1Length,
+                cinLength, cinC1Length,
+                kIdx, computePingPong);
         }
     }
 
@@ -310,13 +349,34 @@ private:
         fmapGM2L1_.DeQue();
     }
 
-    template <bool NotIdle>
+    template <bool NotIdle, bool FixpipeInLastK>
     inline __aicore__ void MmadCompute(
-        const HWBox& tiles, uint32_t coutC1, uint32_t cinC1, uint32_t kIdx, bool& l1PingPongFlag)
+        const HWBox& tiles,
+        uint32_t cout,
+        uint32_t coutC1,
+        uint32_t cin,
+        uint32_t cinC1,
+        uint32_t kIdx,
+        bool& l1PingPongFlag)
     {
         dyUB2L1_.WaitData();
         if constexpr (NotIdle) {
-            winoMmad_.Compute(tiles, coutC1, cinC1, kIdx == 0, l1PingPongFlag);
+            if constexpr (FixpipeInLastK) {
+                //最后一次mmad会触发FixPipe
+                cvFixpipeSyncQue_.WaitSlot();
+            }
+            winoMmad_.template Compute<FixpipeInLastK>(
+                tiles,
+                cout,
+                coutC1,
+                cin,
+                cinC1,
+                kIdx == 0,
+                l1PingPongFlag,
+                transformOutputVBuf_);
+            if constexpr (FixpipeInLastK) {
+                cvFixpipeSyncQue_.EnQue();
+            }
             l1PingPongFlag = !l1PingPongFlag;
         }
 
@@ -444,6 +504,18 @@ private:
         }
     }
 
+    inline __aicore__ void TransformOutput(
+        uint32_t coutIdx, uint32_t cinIdx,
+        uint32_t coutLength, uint32_t cinLength)
+    {
+        cvFixpipeSyncQue_.WaitData();
+
+        outputTransformer_.PartitionProcess(
+            yGm_, transformOutputVBuf_,
+            coutIdx, cinIdx, coutLength, cinLength, cin_);
+
+        cvFixpipeSyncQue_.DeQue();
+    }
 
     struct TransformVFlag;
 
@@ -625,9 +697,12 @@ private:
     static constexpr uint8_t CROSS_CORE_AIC2AIV_RECV_GM2L1_FLAG = 2;
     static constexpr uint8_t CROSS_CORE_AIV2AIC_SEND_UB2L1_FLAG = 3;
     static constexpr uint8_t CROSS_CORE_AIC2AIV_RECV_UB2L1_FLAG = 4;
+    static constexpr uint8_t CROSS_CORE_AIC2AIV_SEND_MMAD_DATA_FLAG = 5;
+    static constexpr uint8_t CROSS_CORE_AIC2AIV_RECV_MMAD_DATA_FLAG = 6;
 
     LocalTensor<T> tmpVBuf_;
     LocalTensor<T> transformVBuf_[2];
+    LocalTensor<float> transformOutputVBuf_;
     TransformVFlag transformEventFlags_[2];
     bool transformPingPongFlag_ = true;
 
@@ -640,10 +715,19 @@ private:
         CROSS_CORE_AIV2AIC_SEND_UB2L1_FLAG,
         CROSS_CORE_AIC2AIV_RECV_UB2L1_FLAG> dyUB2L1_;
 
+    CVSyncQue<PIPE_FIX, PIPE_V, PIPE_MTE3,
+        CROSS_CORE_AIC2AIV_SEND_MMAD_DATA_FLAG,
+        CROSS_CORE_AIC2AIV_RECV_MMAD_DATA_FLAG,
+        SINGLE_FREE_SLOTS, true> cvFixpipeSyncQue_;
+
     const WinoFmapTransformer<T>& fmap_;
     const WinoDyTransformer<T>& dy_;
+    WinoOutputTransformer outputTransformer_;
+
     const NK1C1K0C0::Shape<T> nk1c1k0c0Fmap_;
     const NK1C1K0C0::Shape<T> nk1c1k0c0Dy_;
+
+    GlobalTensor<float> yGm_;
     GlobalTensor<T> nk1c1k0c0FmapGm_;
     GlobalTensor<T> nk1c1k0c0DyGm_;
     WinoMMAD<T>& winoMmad_;

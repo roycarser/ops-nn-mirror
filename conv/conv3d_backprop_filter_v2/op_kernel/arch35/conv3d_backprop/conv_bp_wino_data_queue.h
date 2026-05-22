@@ -124,20 +124,46 @@ __aicore__ inline void CopyK0UB2L1(CopyK0Params<T>& p)
 static constexpr uint8_t DEFAULT_FREE_SLOTS = 12;
 //纯PingPong写入,只允许连续EnQue2次就要等DeQue通知
 static constexpr uint8_t PINGPONG_FREE_SLOTS = 2;
+//没有pingpong,只允许一个写入
+static constexpr uint8_t SINGLE_FREE_SLOTS = 1;
 
-template <pipe_t SRC_PIPE, pipe_t DST_PIPE, uint8_t PUSH_FLAG, uint8_t POP_FLAG, uint8_t FREE_SLOTS>
+//SrcPipe 输出数据的pipe
+//DST_PIPE 数据输出后触发执行的pipe
+//POP_PIPE 将数据搬出的pipe，该pipe执行完后即代表存在空闲空间
+//
+//典型场景:
+//fixpipe搬入ub后做InPlace计算在搬出:
+//FIXPIPE(SrcPipe)->V(DST_PIPE)->MTE3(POP_PIPE)
+//ub计算后cube搬入
+//MTE3(SrcPipe)->MTE1(DST_PIPE&POP_PIPE)
+//
+template <pipe_t SRC_PIPE, pipe_t DST_PIPE, pipe_t POP_PIPE,
+    uint8_t PUSH_FLAG, uint8_t POP_FLAG, uint8_t FREE_SLOTS,
+    bool C2V>
 class CVSyncQue {
 public:
     __aicore__ inline void WaitSlot()
     {
         if (freeSlots_ == 0) {
-            AscendC::CrossCoreWaitFlag<4, SRC_PIPE>(POP_FLAG);
+            if constexpr (C2V) {
+                //整个队列是按模式2实现的，但是模式2跑仿真时有bug,会产生多余的set
+                //先用模式4模拟模式2
+                AscendC::CrossCoreWaitFlag<4, SRC_PIPE>(POP_FLAG);
+                AscendC::CrossCoreWaitFlag<4, SRC_PIPE>(POP_FLAG + 16);
+            } else {
+                AscendC::CrossCoreWaitFlag<4, SRC_PIPE>(POP_FLAG);
+            }
         }
     }
 
     __aicore__ inline void EnQue()
     {
-        AscendC::CrossCoreSetFlag<4, SRC_PIPE>(PUSH_FLAG);
+        if constexpr (C2V) {
+            AscendC::CrossCoreSetFlag<4, SRC_PIPE>(PUSH_FLAG);
+            AscendC::CrossCoreSetFlag<4, SRC_PIPE>(PUSH_FLAG + 16);
+        } else {
+            AscendC::CrossCoreSetFlag<4, SRC_PIPE>(PUSH_FLAG);
+        }
         if (freeSlots_ > 0) {
             freeSlots_--;
         }
@@ -145,21 +171,27 @@ public:
 
     __aicore__ inline void WaitData()
     {
-        //整个队列时按模式2实现的，但是模式2跑仿真v->c时貌似有bug,会产生多余的set
-        //先用模式4模拟模式2
-        AscendC::CrossCoreWaitFlag<4, DST_PIPE>(PUSH_FLAG);
-        AscendC::CrossCoreWaitFlag<4, DST_PIPE>(PUSH_FLAG + 16);
+        if constexpr (C2V) {
+            AscendC::CrossCoreWaitFlag<4, DST_PIPE>(PUSH_FLAG);
+        } else {
+            AscendC::CrossCoreWaitFlag<4, DST_PIPE>(PUSH_FLAG);
+            AscendC::CrossCoreWaitFlag<4, DST_PIPE>(PUSH_FLAG + 16);
+        }
     }
 
     __aicore__ inline void DeQue()
     {
-        AscendC::CrossCoreSetFlag<4, DST_PIPE>(POP_FLAG);
-        AscendC::CrossCoreSetFlag<4, DST_PIPE>(POP_FLAG + 16);
+        if constexpr (C2V) {
+            AscendC::CrossCoreSetFlag<4, POP_PIPE>(POP_FLAG);
+        } else {
+            AscendC::CrossCoreSetFlag<4, POP_PIPE>(POP_FLAG);
+            AscendC::CrossCoreSetFlag<4, POP_PIPE>(POP_FLAG + 16);
+        }
     }
 
     __aicore__ inline void PipeBarrierAllEnd()
     {
-        //如果CrossCoreSetFlag是最后的指令可能因为一执行就核就退出导致没能成功set,整个核结束前加个全量等待
+        //如果CrossCoreSetFlag是最后的指令可能因为一执行完核就退出导致没能成功set,整个核结束前加个全量等待
         AscendC::PipeBarrier<PIPE_ALL>();
     }
 
@@ -181,7 +213,7 @@ private:
 // End()释放资源
 //
 
-template <pipe_t SRC_PIPE, pipe_t DST_PIPE, uint8_t PUSH_FLAG, uint8_t POP_FLAG, uint8_t FREE_SLOTS>
+template <pipe_t SRC_PIPE, pipe_t DST_PIPE, pipe_t POP_PIPE, uint8_t PUSH_FLAG, uint8_t POP_FLAG, uint8_t FREE_SLOTS>
 class BaseL1Queue {
 public:
     using BaseT = BaseL1Queue;
@@ -221,11 +253,11 @@ public:
     }
 
 protected:
-    CVSyncQue<SRC_PIPE, DST_PIPE, PUSH_FLAG, POP_FLAG, FREE_SLOTS> cvSyncQue_;
+    CVSyncQue<SRC_PIPE, DST_PIPE, POP_PIPE, PUSH_FLAG, POP_FLAG, FREE_SLOTS, false> cvSyncQue_;
 };
 
 template <typename T, uint8_t PUSH_FLAG, uint8_t POP_FLAG>
-class UB2L1Queue : public BaseL1Queue<PIPE_MTE3, PIPE_MTE1, PUSH_FLAG, POP_FLAG, PINGPONG_FREE_SLOTS> {
+class UB2L1Queue : public BaseL1Queue<PIPE_MTE3, PIPE_MTE1, PIPE_MTE1, PUSH_FLAG, POP_FLAG, PINGPONG_FREE_SLOTS> {
 public:
     __aicore__ inline void Init(AscendC::LocalTensor<T> (&l1Buf)[2])
     {
@@ -256,7 +288,7 @@ private:
 
 
 template <typename T, uint8_t PUSH_FLAG, uint8_t POP_FLAG, uint8_t AIC_MTE2_SYNC_FLAG>
-class GM2L1Queue : public BaseL1Queue<PIPE_MTE3, PIPE_MTE2, PUSH_FLAG, POP_FLAG, DEFAULT_FREE_SLOTS> {
+class GM2L1Queue : public BaseL1Queue<PIPE_MTE3, PIPE_MTE2, PIPE_MTE2, PUSH_FLAG, POP_FLAG, DEFAULT_FREE_SLOTS> {
 public:
     __aicore__ inline void Write(NK1C1K0C0::CopyK0Params<T>& p, const NK1C1K0C0::Shape<T>& shape)
     {
@@ -269,7 +301,7 @@ public:
     {
         if ASCEND_IS_AIC {
             GM2L1Queue::BaseT::WaitData();
-            if (transformFinished) {
+            if (!transformFinished) {
                 //所有cube核接收到aiv发送的通知后才表示这一轮数据都准备好了
                 //但整个矩阵都变换完后就不需要在额外等通知
                 AscendC::CrossCoreSetFlag<0, PIPE_MTE2>(AIC_MTE2_SYNC_FLAG);
@@ -277,7 +309,6 @@ public:
             }
         }
     }
-
 };
 
 

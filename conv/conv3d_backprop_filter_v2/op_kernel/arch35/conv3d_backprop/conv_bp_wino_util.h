@@ -153,4 +153,40 @@ static constexpr __aicore__ inline uint32_t TileUnfoldSize(uint32_t tiles)
     return tiles * F23_TRANSFORM_TILE_SIZE_4;
 }
 
+class AivPartitioner {
+public:
+    static __aicore__ inline uint32_t CeilAvgLength(uint32_t length)
+    {
+        return Ops::Base::CeilDiv(length, AivNum());
+    }
+
+    template <typename T>
+    static __aicore__ inline uint32_t Get2DAlignBufLength(uint32_t splitDim0, uint32_t innerDim1)
+    {
+        uint32_t length0 = CeilAvgLength(splitDim0);
+        return Ops::Base::CeilAlign(length0 * innerDim1, C0<T>());
+    }
+
+    static __aicore__ inline void GetPartition(
+        uint32_t length,
+        uint32_t& outStartIdx, uint32_t& outLength)
+    {
+        uint32_t avgLength = CeilAvgLength(length);
+        outStartIdx = avgLength * AivIdx();
+        outLength = AscendC::Std::min(avgLength, length - outStartIdx);
+    }
+
+private:
+    static __aicore__ inline uint32_t AivNum()
+    {
+        return AscendC::GetSubBlockNum();
+    }
+
+    static __aicore__ inline uint32_t AivIdx()
+    {
+        return AscendC::GetSubBlockIdx();
+    }
+};
+
+
 #endif //CONV_BP_WINO_UTIL_H
