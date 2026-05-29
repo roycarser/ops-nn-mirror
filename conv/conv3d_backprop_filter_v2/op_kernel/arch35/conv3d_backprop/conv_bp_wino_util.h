@@ -33,23 +33,18 @@ static constexpr __aicore__ inline uint32_t VL()
 }
 
 struct HWBox {
-    uint32_t hIdx;
-    uint32_t wIdx;
-    uint32_t hLength;
-    uint32_t wLength;
-    uint32_t elements;
+    uint32_t hIdx = 0;
+    uint32_t wIdx = 0;
+    uint32_t hLength = 0;
+    uint32_t wLength = 0;
+    uint32_t elements = 0;
 };
 
 struct HWPad {
-    uint16_t hTop;
-    uint16_t hBottom;
-    uint16_t wLeft;
-    uint16_t wRight;
-
-    static __aicore__ inline bool exists(const HWPad& p)
-    {
-        return p.hBottom != 0 || p.wRight != 0 || p.hTop != 0 || p.wLeft != 0;
-    }
+    uint16_t hTop = 0;
+    uint16_t hBottom = 0;
+    uint16_t wLeft = 0;
+    uint16_t wRight = 0;
 };
 
 template <uint32_t STRIDE, uint32_t WINDOW_SIZE>
@@ -187,6 +182,5 @@ private:
         return AscendC::GetSubBlockIdx();
     }
 };
-
 
 #endif //CONV_BP_WINO_UTIL_H

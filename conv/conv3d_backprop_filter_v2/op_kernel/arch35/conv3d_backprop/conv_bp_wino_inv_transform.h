@@ -9,12 +9,12 @@
  */
 
 /*!
- * \file conv_bp_wino_out_transform.h
+ * \file conv_bp_wino_inv_transform.h
  * \brief
  */
 
-#ifndef CONV_BP_WINO_OUT_TRANSFORM_H
-#define CONV_BP_WINO_OUT_TRANSFORM_H
+#ifndef CONV_BP_WINO_INV_TRANSFORM_H
+#define CONV_BP_WINO_INV_TRANSFORM_H
 
 #include "kernel_operator.h"
 #include "conv_bp_wino_util.h"
@@ -22,7 +22,7 @@
 
 using namespace AscendC;
 
-class WinoOutputTransformer {
+class WinoInvTransformer {
 public:
     //需要申请18个CoutCin空间,逆变换前16个用来放原始数据,逆变换后,9个用来放逆变换后的数据,剩下9个放转置后的数据
     static constexpr uint32_t COUT_CIN_BUF_CNT = 18;
@@ -232,4 +232,4 @@ private:
     TEventID v2mte3_ = 0;
 };
 
-#endif //CONV_BP_WINO_OUT_TRANSFORM_H
+#endif //CONV_BP_WINO_INV_TRANSFORM_H

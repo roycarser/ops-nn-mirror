@@ -106,9 +106,11 @@ public:
         }
     }
 
-    __aicore__ inline void LoadL1Fmap(
-        const NK1C1K0C0::Shape<T>& nk1c1k0c0Fmap,
-        NK1C1K0C0::CopyK0Params<T>& copyFmapParams,
+    template <bool LoadFmap>
+    __aicore__ inline void LoadL1(
+        const GlobalTensor<T>& gm,
+        const NK1C1K0C0::Shape<T>& shape,
+        NK1C1K0C0::CopyK0Params& copyParams,
         bool l1PingPongFlag)
     {
         EventFlag& mte2mte1 = mte2mte1Flag_[l1PingPongFlag];
@@ -118,9 +120,13 @@ public:
         // 让load2d取最后一个点的最后一个分形时凑满512字节
         auto l1Buf = GetL1Buf(l1PingPongFlag);
 
-        LocalTensor<T>& l1b = Std::get<1>(l1Buf);
-        copyFmapParams.l1 = l1b;
-        NK1C1K0C0::CopyK0GM2L1(copyFmapParams, nk1c1k0c0Fmap);
+        if constexpr (LoadFmap) {
+            LocalTensor<T>& l1b = Std::get<1>(l1Buf);
+            NK1C1K0C0::CopyK0GM2L1(copyParams, gm, l1b, shape);
+        } else {
+            LocalTensor<T>& l1a = Std::get<0>(l1Buf);
+            NK1C1K0C0::CopyK0GM2L1(copyParams, gm, l1a, shape);
+        }
 
         SetFlag<HardEvent::MTE2_MTE1>(mte2mte1.src2dst);
     }
@@ -128,7 +134,8 @@ public:
     template <bool FixpipeInLastK>
     __aicore__ inline void Compute(
         const HWBox& tiles, uint32_t cout, uint32_t coutC1, uint32_t cin, uint32_t cinC1,
-        bool firstK, bool l1PingPongFlag, LocalTensor<float>& outputTransformVBuf)
+        bool firstK, bool l1PingPongFlag,
+        const LocalTensor<float>& outputTransformVBuf)
     {
         auto l1Buf = GetL1Buf(l1PingPongFlag);
         LocalTensor<T>& l1a = Std::get<0>(l1Buf);
@@ -181,7 +188,7 @@ public:
         //除以16后单个点最多16kb,L0上一定能全载,除非singleShapeHW传进来为1
         //然后l0上对齐放大到16这类异常情况,但tiling阶段应该防止这种情况
 
-        EventFlag mte2mte1Flag = mte2mte1Flag_[l1PingPongFlag];
+        EventFlag& mte2mte1Flag = mte2mte1Flag_[l1PingPongFlag];
         WaitFlag<HardEvent::MTE2_MTE1>(mte2mte1Flag.src2dst);
         if (firstK) {
 #pragma unroll
@@ -194,13 +201,13 @@ public:
             //通过奇偶性判断l0PingPong
             const int l0pingFlag = g & 1;
 
-            EventFlag mte1madFlag = mte1madFlag_[l0pingFlag];
+            EventFlag& mte1madFlag = mte1madFlag_[l0pingFlag];
             WaitFlag<HardEvent::M_MTE1>(mte1madFlag.dst2src);
 
             uint8_t pointGroupOffset = g * l0PointPerGroup_;
 
-            LocalTensor<T> l0a = l0aBuf_[l0pingFlag];
-            LocalTensor<T> l0b = l0bBuf_[l0pingFlag];
+            LocalTensor<T>& l0a = l0aBuf_[l0pingFlag];
+            LocalTensor<T>& l0b = l0bBuf_[l0pingFlag];
 
             for (uint8_t i = 0; i < l0PointPerGroup_; i++) {
                 uint8_t pointIdx = pointGroupOffset + i;
@@ -296,7 +303,7 @@ private:
 
         LocalTensor<float> l0c = GetL0CPointBuf(fixpipeGroupIdx * L0C_POINT_PER_FIXPIPE_GROUP);
         static constexpr FixpipeConfig cfg = {CO2Layout::ROW_MAJOR, true};
-        Fixpipe<float, float, cfg>(outputTransformVBuf, l0c, fp);
+        // Fixpipe<float, float, cfg>(outputTransformVBuf, l0c, fp);
     }
 
     static __aicore__ inline void CalcWinoPointL0Group(

@@ -66,12 +66,6 @@ inline uint32_t __aicore__ Cal16TileHWBufSize(uint32_t tileHW)
 }
 }
 
-template <typename T>
-inline uint32_t __aicore__ SingleShapeTileBufSize(uint32_t c, uint32_t tileHW)
-{
-    return WinoTransformDetail::Cal16TileHWBufSize(tileHW) * Ops::Base::CeilAlign(c, C0<T>());
-}
-
 namespace WinoTransformDetail {
 template <typename T, typename Impl>
 struct UnfoldIntf {
@@ -83,12 +77,13 @@ struct UnfoldIntf {
         return Impl::InitUnfoldParams(box);
     }
 
+    template <bool HasHPadding>
     static __simd_callee__ inline void UnfoldColsVf(
         __ubuf__ T* unfoldColBuf,
         __ubuf__ T* srcBuf,
         const UnfoldColParamsT& params)
     {
-        Impl::UnfoldColsVf(unfoldColBuf, srcBuf, params);
+        Impl::template UnfoldColsVf<HasHPadding>(unfoldColBuf, srcBuf, params);
     }
 
     static __simd_callee__ inline void UnfoldRowsVf(
@@ -101,52 +96,75 @@ struct UnfoldIntf {
 };
 }
 
-template <typename T,
-    uint32_t STRIDE,
-    uint32_t WINDOW_SIZE,
-    typename UnfoldImpl,
-    bool hasInputPadding>
+template <typename Type,
+    uint32_t STRIDE_VAL,
+    uint32_t WINDOWS_SIZE_VAL,
+    typename UnfoldImplType>
+struct TransformConfig {
+    using T = Type;
+    using UnfoldImpl = UnfoldImplType;
+
+    static constexpr uint32_t STRIDE = STRIDE_VAL;
+    static constexpr uint32_t WINDOW_SIZE = WINDOWS_SIZE_VAL;
+};
+
+
+template <typename Config>
 class WinoTransformer {
 public:
+    static constexpr uint32_t STRIDE = Config::STRIDE;
+    static constexpr uint32_t WINDOW_SIZE = Config::WINDOW_SIZE;
+    using T = typename Config::T;
     using SlideWin = SlideWindows<STRIDE, WINDOW_SIZE>;
-    using UnfoldPolicy = WinoTransformDetail::UnfoldIntf<T, UnfoldImpl>;
+    using UnfoldPolicy = WinoTransformDetail::UnfoldIntf<T, typename Config::UnfoldImpl>;
+    struct TransposeCacheShape;
 
     __aicore__ inline WinoTransformer(
         __gm__ T* in,
+        __gm__ T* transposeCache,
+        const TransposeCacheShape& transposeCacheShape,
         const uint32_t srcH,
         const uint32_t srcW,
+        const uint32_t srcC,
         const uint16_t padH,
         const uint16_t padW)
-        : srcH_(srcH),
+        : transposeCacheShape_(transposeCacheShape),
+          srcH_(srcH),
           srcW_(srcW),
+          srcC_(srcC),
           padH_(padH),
           padW_(padW)
     {
+        transposeCache_.SetGlobalBuffer(transposeCache);
         gm_.SetGlobalBuffer(in);
     }
 
-    __aicore__ static inline uint32_t CalculateTmpBufLength(uint32_t tileH, uint32_t tileW)
+    __aicore__ static inline uint32_t GetOutputBufSize(
+        uint32_t c,
+        uint32_t tileH,
+        uint32_t tileW)
     {
-        uint32_t s0 = CalculateTransposeBufC0SafeElements(tileH, tileW);
-        uint32_t s1 = WinoTransformDetail::CalColUnfoldBufSize<STRIDE, WINDOW_SIZE>(
-                          tileH, tileW) * C0<T>();
-        return s0 + s1;
+        //output buf会同时存正变换结果并且在计算过程总复用一部分存放转置数据
+        //常规情况正变换结果时原始输入的4倍，转置的空间为原始hw对齐到16，所以正变换结果肯定更大
+        //因此这样复用可以减少一些空间
+        uint32_t tileBufSize = GetTransformBufSize(c, tileH * tileW);
+        //转置占用空间当前和输入相同align(srcHW,16)*c1c0
+        uint32_t transposeBufSize = TilesToC1SrcHW16C0(c, tileH, tileW);
+        return Std::max(transposeBufSize, tileBufSize);
     }
 
-    __aicore__ static inline void assignSubTmpBuf(
-        uint32_t tileH, uint32_t tileW,
-        LocalTensor<T>& tmpBuf,
-        LocalTensor<T>& transposeBufOut,
-        LocalTensor<T>& colTransBufOut)
+    __aicore__ static inline uint32_t GetInputBufSize(
+        uint32_t c,
+        uint32_t tileH,
+        uint32_t tileW)
     {
-        uint32_t s0 = CalculateTransposeBufC0SafeElements(tileH, tileW);
-        transposeBufOut = tmpBuf[0];
-        transposeBufOut.SetSize(s0);
+        return TilesToC1SrcHW16C0(c, tileH, tileW);
+    }
 
-        uint32_t s1 = WinoTransformDetail::CalColUnfoldBufSize<STRIDE, WINDOW_SIZE>(
-                          tileH, tileW) * C0<T>();
-        colTransBufOut = tmpBuf[s0];
-        colTransBufOut.SetSize(s1);
+    __aicore__ static inline uint32_t GetTmpBufLength(uint32_t tileH, uint32_t tileW)
+    {
+        return WinoTransformDetail::CalColUnfoldBufSize<STRIDE, WINDOW_SIZE>(
+                   tileH, tileW) * C0<T>();
     }
 
     __aicore__ inline TileBox CalculateSrcBox(const HWBox& tile, uint32_t cIdx, uint32_t cLength) const
@@ -171,38 +189,52 @@ public:
         return srcW_;
     }
 
-    __aicore__ inline void CopyIn(
-        const AscendC::LocalTensor<T>& buf,
-        const TileBox& box,
-        const uint64_t batchOffset) const
+    __aicore__ inline uint32_t SrcC() const
     {
-        if (const HWBox& src = box.src; src.elements != 0) {
+        return srcC_;
+    }
+
+    template <bool PreTransposeSrc>
+    __aicore__ inline void CopyIn(
+        const AscendC::LocalTensor<T>& srcBuf,
+        const TileBox& box,
+        const uint32_t batchIdx,
+        const uint32_t kIdx) const
+    {
+        const HWBox& src = box.src;
+        if (unlikely(src.elements==0)) {
+            return;
+        }
+
+        if constexpr (PreTransposeSrc) {
+            uint64_t gmOffset = transposeCacheShape_.GetOffset(batchIdx, kIdx, box.c.idx / C0<T>());
+            AscendC::DataCopyParams params;
+            params.blockCount = box.c.c1;
+            params.blockLen = src.elements;
+            params.srcGap = transposeCacheShape_.k0 - src.elements;
+            params.dstGap = 0;
+            AscendC::DataCopy(srcBuf, transposeCache_[gmOffset], params);
+        } else {
             AscendC::DataCopyExtParams params;
             params.blockCount = src.hLength;
             params.blockLen = src.wLength * sizeof(T);
             params.srcStride = (srcW_ - src.wLength) * sizeof(T);
             params.dstStride = 0;
 
-            uint32_t fmapHWAligned16 = Ops::Base::CeilAlign(src.elements, HW_SRC_ALIGNED_16);
-
+            uint32_t srcHW16 = Ops::Base::CeilAlign(src.elements, HW_SRC_ALIGNED_16);
             AscendC::LoopModeParams loop;
             loop.loop1Size = box.c.length;
             loop.loop1SrcStride = static_cast<uint64_t>(srcW_) * srcH_ * sizeof(T);
-            loop.loop1DstStride = fmapHWAligned16 * sizeof(T);
+            loop.loop1DstStride = srcHW16 * sizeof(T);
             loop.loop2Size = 1;
             loop.loop2SrcStride = 0;
             loop.loop2DstStride = 0;
 
             SetLoopModePara(loop, AscendC::DataCopyMVType::OUT_TO_UB);
 
-            // 在大小为[c1,th4,tw4,c0]的buf里面从搬入大小为[c,aligned16(hw)]大小的数据
-            // 由于c1c0 >= c
-            // 且根据数学推到[th4,tw4] >= align16(hw)
-            // 所以当前buf一定能放得下所有数据
-
             AscendC::DataCopyPad<T, AscendC::PaddingMode::Compact>(
-                buf,
-                gm_[batchOffset +
+                srcBuf,
+                gm_[static_cast<uint64_t>(batchIdx) * srcC_ * srcH_ * srcW_ +
                     static_cast<uint64_t>(box.c.idx) * srcH_ * srcW_ +
                     static_cast<uint64_t>(src.hIdx) * srcW_ +
                     src.wIdx],
@@ -212,77 +244,165 @@ public:
         }
     }
 
+    template <bool PreTransposeSrc>
     __aicore__ inline void Compute(
-        AscendC::LocalTensor<T>& mainBuf,
+        AscendC::LocalTensor<T>& srcBuf,
+        AscendC::LocalTensor<T>& outBuf,
         AscendC::LocalTensor<T>& tmpBuf,
         const TileBox& box) const
     {
         uint16_t c1 = box.c.c1;
-
-        if (const HWBox& src = box.src; src.elements != 0) {
-            uint32_t fmapHWAligned16 = Ops::Base::CeilAlign(src.elements, HW_SRC_ALIGNED_16);
-
-            uint32_t padTopOffset = box.pad.hTop * src.wLength * C0<T>();
-            uint32_t srcC1Stride = fmapHWAligned16 * C0<T>();
-            uint32_t tileUnfoldC1Stride = SingleShapeTileBufSize<T>(C0<T>(), box.tile.elements);
-
-            const auto params = UnfoldPolicy::InitUnfoldParams(box);
-            const typename UnfoldPolicy::UnfoldColParamsT& ucp = AscendC::Std::get<0>(params);
-            const typename UnfoldPolicy::UnfoldRowParamsT& urp = AscendC::Std::get<1>(params);
-
-            LocalTensor<T> transposeBuf;
-            LocalTensor<T> colTranBuf;
-            assignSubTmpBuf(box.tile.hLength, box.tile.wLength, tmpBuf, transposeBuf, colTranBuf);
-            for (uint16_t i = 0; i < c1; i++) {
-                //从末端开始处理，由于mainBuf的头部搬入了整块fmap
-                //如果顺序处理,那可能在变换第一个c1的fmap时,污染了第二个c1的fmap
-                //逆序处理就没这个问题,因为尾部不会连着其他fmap
-                const uint16_t c1Idx = c1 - i - 1;
-
-                TransposeCHW2C1HWC0(
-                    mainBuf[c1Idx * srcC1Stride],
-                    transposeBuf[padTopOffset],
-                    fmapHWAligned16);
-
-                //TODO 处理pad
-                AscendC::LocalTensor<T> outBuf = mainBuf[c1Idx * tileUnfoldC1Stride];
-                UnfoldVf(
-                    reinterpret_cast<__ubuf__ T*>(outBuf.GetPhyAddr()),
-                    reinterpret_cast<__ubuf__ T*>(colTranBuf.GetPhyAddr()),
-                    reinterpret_cast<__ubuf__ T*>(transposeBuf.GetPhyAddr()),
-                    ucp, urp);
-            }
-        } else {
+        uint32_t outBufSize = GetOutputBufSize(c1 * C0<T>(), box.tile.hLength, box.tile.wLength);
+        const HWBox& src = box.src;
+        if (unlikely(src.elements==0)) {
             //整个tile都由padding区域产生,不做计算直接置0,
-            AscendC::Duplicate(
-                mainBuf,
-                static_cast<T>(0),
-                SingleShapeTileBufSize<T>(c1 * C0<T>(), box.tile.elements));
+            AscendC::Duplicate(outBuf, static_cast<T>(0), outBufSize);
+            return;
+        }
+
+        const uint32_t srcHW16 = Ops::Base::CeilAlign(src.elements, HW_SRC_ALIGNED_16);
+        const uint32_t srcHW16C0 = srcHW16 * C0<T>();
+        const uint32_t transposeLength = srcHW16C0;
+        const uint32_t srcC1Stride = PreTransposeSrc ? src.elements * C0<T>() : srcHW16C0;
+
+        uint32_t transformBufC1Stride = GetTransformBufSize(C0<T>(), box.tile.elements);
+
+        const auto params = UnfoldPolicy::InitUnfoldParams(box);
+        const typename UnfoldPolicy::UnfoldColParamsT& ucp = AscendC::Std::get<0>(params);
+        const typename UnfoldPolicy::UnfoldRowParamsT& urp = AscendC::Std::get<1>(params);
+
+        LocalTensor<T> hwC0Buf;
+        __ubuf__ T* hwC0BufAddr;
+        if constexpr (!PreTransposeSrc) {
+            //转置复用输出buf空间
+            hwC0Buf = outBuf[outBufSize - transposeLength];
+            hwC0BufAddr = reinterpret_cast<__ubuf__ T*>(hwC0Buf.GetPhyAddr());
+        }
+        __ubuf__ T* colTransBufAddr = reinterpret_cast<__ubuf__ T*>(tmpBuf.GetPhyAddr());
+        __ubuf__ T* dstBufAddr = reinterpret_cast<__ubuf__ T*>(outBuf.GetPhyAddr());
+
+        for (uint16_t c1Idx = 0; c1Idx < c1; c1Idx++) {
+            LocalTensor<T> c1Src = srcBuf[c1Idx * srcC1Stride];
+
+            if constexpr (PreTransposeSrc) {
+                hwC0BufAddr = reinterpret_cast<__ubuf__ T*>(c1Src.GetPhyAddr());
+            } else {
+                TransposeCHW2C1HWC0(c1Src, hwC0Buf, srcHW16);
+            }
+
+            if (box.pad.hTop == 0 && box.pad.hBottom == 0) {
+                UnfoldVf<false>(dstBufAddr, colTransBufAddr, hwC0BufAddr, ucp, urp);
+            } else {
+                UnfoldVf<true>(dstBufAddr, colTransBufAddr, hwC0BufAddr, ucp, urp);
+            }
+
+            dstBufAddr += transformBufC1Stride;
         }
     }
 
 
-    __aicore__  inline void SetNK1C1K0C0CopyParams(
-        NK1C1K0C0::CopyK0Params<T>& copyParams,
-        AscendC::LocalTensor<T>& mainBuf,
+    __aicore__ inline void SetNK1C1K0C0CopyParams(
+        NK1C1K0C0::CopyK0Params& copyParams,
         const TileBox& box) const
     {
         copyParams.tiles = box.tile.elements;
         copyParams.srcBufWidthBlockStride = WinoTransformDetail::Cal16TileHWBufWidth(box.tile.elements);
         copyParams.c1Idx = box.c.idx / C0<T>();
         copyParams.c1Length = box.c.c1;
-        copyParams.ub = mainBuf;
     }
 
-private:
-    struct Format16TileHWParams {
-        uint32_t srcTileBufWidth;
-        uint32_t dstTileBufWidthBlocks;
-        uint16_t tileH;
-        uint16_t tileW;
-        uint16_t wRepeatTimes;
+    __aicore__ inline void PreTranspose(
+        LocalTensor<T>& srcBuf,
+        LocalTensor<T>& outBuf,
+        const TileBox& box) const
+    {
+        const HWBox& src = box.src;
+        if (unlikely(src.elements==0)) {
+            return;
+        }
+
+        const uint32_t srcHW16 = Ops::Base::CeilAlign(src.elements, HW_SRC_ALIGNED_16);
+        const uint32_t srcHW16C0 = srcHW16 * C0<T>();
+        const uint32_t transposeLength = srcHW16C0;
+        const uint32_t srcC1Stride = srcHW16C0;
+
+        for (uint16_t c1Idx = 0; c1Idx < box.c.c1; c1Idx++) {
+            LocalTensor<T> c1Src = srcBuf[c1Idx * srcC1Stride];
+            LocalTensor<T> c1Out = outBuf[c1Idx * transposeLength];
+            TransposeCHW2C1HWC0(c1Src, c1Out, srcHW16);
+        }
+    }
+
+    __aicore__ inline void CopyPreTransposeOut(
+        LocalTensor<T>& outBuf,
+        const TileBox& box,
+        uint32_t batchIdx,
+        uint32_t kIdx) const
+    {
+        const HWBox& src = box.src;
+        if (unlikely(src.elements==0)) {
+            return;
+        }
+
+        const uint32_t srcHW16 = Ops::Base::CeilAlign(src.elements, HW_SRC_ALIGNED_16);
+        const uint32_t transposeLengthBlocks = srcHW16;
+
+        DataCopyParams params;
+        params.blockCount = box.c.c1;
+        params.blockLen = box.src.elements;
+        params.srcGap = transposeLengthBlocks - box.src.elements;
+        params.dstGap = transposeCacheShape_.k0 - box.src.elements;
+
+        uint64_t gmOffset = transposeCacheShape_.GetOffset(batchIdx, kIdx, box.c.idx / C0<T>());
+        DataCopy(transposeCache_[gmOffset], outBuf, params);
+    }
+
+    struct TransposeCacheShape {
+        // nk1c1k0c0格式
+        const uint32_t k1;
+        const uint32_t c1;
+        const uint32_t k0;
+
+        __aicore__ inline TransposeCacheShape(
+            uint32_t c,
+            uint32_t tileH,
+            uint32_t tileW,
+            uint32_t singleShapeTileH,
+            uint32_t singleShapeTileW)
+            : k1(Ops::Base::CeilDiv(tileH, singleShapeTileH) * Ops::Base::CeilDiv(tileW, singleShapeTileW)),
+              c1(Ops::Base::CeilDiv(c, C0<T>())),
+              k0(SlideWin::Tiles2SrcLength(singleShapeTileH) * SlideWin::Tiles2SrcLength(singleShapeTileW))
+        {
+        }
+
+        __aicore__ inline uint64_t GetOffset(uint32_t batchIdx, uint32_t k1Idx, uint32_t c1Idx) const
+        {
+            uint64_t k0c0 = static_cast<uint64_t>(k0) * C0<T>();
+            uint64_t c1k0c0 = c1 * k0c0;
+            uint64_t k1c1k0c0 = k1 * c1k0c0;
+            uint64_t gmOffset = batchIdx * k1c1k0c0 + k1Idx * c1k0c0 + c1Idx * k0c0;
+            return gmOffset;
+        }
     };
 
+private:
+    __aicore__ static inline uint32_t GetTransformBufSize(uint32_t c, uint32_t tileHW)
+    {
+        return WinoTransformDetail::Cal16TileHWBufSize(tileHW) * Ops::Base::CeilAlign(c, C0<T>());
+    }
+
+    __aicore__ static inline uint32_t TilesToC1SrcHW16C0(uint32_t c, uint32_t tileH, uint32_t tileW)
+    {
+        return C1SrcHW16C0(c, SlideWin::Tiles2SrcLength(tileH) * SlideWin::Tiles2SrcLength(tileW));
+    }
+
+    __aicore__ static inline uint32_t C1SrcHW16C0(uint32_t c, uint32_t hw)
+    {
+        return Ops::Base::CeilAlign(hw, HW_SRC_ALIGNED_16) *
+               Ops::Base::CeilAlign(c, C0<T>());
+    }
+
+    template <bool HasHPadding>
     __simd_vf__ static inline void UnfoldVf(
         __ubuf__ T* outBuf,
         __ubuf__ T* colUnfoldBuf,
@@ -291,7 +411,7 @@ private:
         const typename UnfoldPolicy::UnfoldRowParamsT urp)
     {
         //将workspace中的原始数据变换到tileBuf中
-        UnfoldPolicy::UnfoldColsVf(colUnfoldBuf, transposeBuf, ucp);
+        UnfoldPolicy::template UnfoldColsVf<HasHPadding>(colUnfoldBuf, transposeBuf, ucp);
 
         AscendC::MicroAPI::LocalMemBar<
             AscendC::MicroAPI::MemType::VEC_STORE,
@@ -301,33 +421,10 @@ private:
         UnfoldPolicy::UnfoldRowsVf(outBuf, colUnfoldBuf, urp);
     }
 
-    __aicore__ static inline uint32_t CalculateTransposeBufC0SafeElements(
-        uint32_t tileH, uint32_t tileW)
-    {
-        //需要[c0,align16(hw)]的空间给c0hw转置
-        uint32_t h = SlideWin::Tiles2SrcLength(tileH);
-        uint32_t w = SlideWin::Tiles2SrcLength(tileW);
-
-        uint32_t safeElements;
-        if constexpr (hasInputPadding) {
-            //transposeBuf中会做H方向pad的清0
-            //假设tileH,tileW都为1,那么fmap下算出来h,w都为4
-            //假设存在pad_top为3,那么实际的h为1
-            //由于转置指令TransDataTo5HD所需的空间是向上对齐到16的,那么实际转置需要的空间为align16(1*4)=16
-            //那么需要 pad_top*4+align16(1*4) =12+16=28超过16
-            //所以这里要额外+15防止转置指令写入的数据溢出
-            //但如果不存在输入pad_top其实可以不做保护
-            safeElements = Ops::Base::CeilAlign(h * w + 15, HW_SRC_ALIGNED_16);
-        } else {
-            safeElements = Ops::Base::CeilAlign(h * w, HW_SRC_ALIGNED_16);
-        }
-        return safeElements * C0<T>();
-    }
-
     __aicore__ static inline void TransposeCHW2C1HWC0(
         const AscendC::LocalTensor<T>& srcBuf,
         const AscendC::LocalTensor<T>& dstBuf,
-        const uint32_t fmapHWAligned16)
+        const uint32_t srcHWAligned16)
     {
         uint64_t srcList[16];
         uint64_t dstList[16];
@@ -335,20 +432,20 @@ private:
         if constexpr (sizeof(T) == 2) {
 #pragma unroll
             for (uint32_t i = 0; i < 16; i++) {
-                uint32_t s = i * fmapHWAligned16;
+                uint32_t s = i * srcHWAligned16;
                 uint32_t d = i * 16;
                 srcList[i] = reinterpret_cast<uint64_t>(srcBuf[s].GetPhyAddr());
                 dstList[i] = reinterpret_cast<uint64_t>(dstBuf[d].GetPhyAddr());
             }
             AscendC::TransDataTo5HDParams params;
-            params.repeatTimes = fmapHWAligned16 / 16;
+            params.repeatTimes = srcHWAligned16 / 16;
             params.srcRepStride = params.repeatTimes == 1 ? 0 : 1;
             params.dstRepStride = params.repeatTimes == 1 ? 0 : 16;
             AscendC::TransDataTo5HD<T>(dstList, srcList, params);
         } else if constexpr (sizeof(T) == 4) {
 #pragma unroll
             for (uint32_t i = 0; i < 8; i++) {
-                uint32_t s = i * fmapHWAligned16;
+                uint32_t s = i * srcHWAligned16;
                 uint32_t d = i * 8;
                 srcList[i] = reinterpret_cast<uint64_t>(srcBuf[s].GetPhyAddr());
                 srcList[i + 8] = reinterpret_cast<uint64_t>(srcBuf[s + 8].GetPhyAddr());
@@ -357,16 +454,20 @@ private:
             }
 
             AscendC::TransDataTo5HDParams params;
-            params.repeatTimes = fmapHWAligned16 / 16;
+            params.repeatTimes = srcHWAligned16 / 16;
             params.srcRepStride = params.repeatTimes == 1 ? 0 : 2;
             params.dstRepStride = params.repeatTimes == 1 ? 0 : 16;
             AscendC::TransDataTo5HD<T>(dstList, srcList, params);
         }
     }
 
+
     AscendC::GlobalTensor<T> gm_;
+    AscendC::GlobalTensor<T> transposeCache_;
+    TransposeCacheShape transposeCacheShape_;
     const uint32_t srcH_;
     const uint32_t srcW_;
+    const uint32_t srcC_;
     const uint16_t padH_;
     const uint16_t padW_;
 };
@@ -382,14 +483,15 @@ using namespace AscendC::MicroAPI;
 
 struct DefaultUnfoldColParams {
     uint32_t wValidElements;
-    uint32_t wPadLeftOffset;
     uint32_t tileBufWidthBlocks;
+    uint32_t wPadLeftStoreOffset;
+    uint16_t validHStart;
+    uint16_t validHEnd;
     uint16_t wRepeatTimes;
     uint16_t tileH;
 };
 
 struct DefaultUnfoldRowParams {
-    uint32_t wLoadOffset;
     uint32_t srcTileBufWidth;
     uint32_t dstTileBufWidthBlocks;
     uint16_t hRepeatTimes;
@@ -405,7 +507,9 @@ static inline __aicore__ void InitDefaultUnfoldParams(
 {
     ucp.wValidElements = box.src.wLength * C0<T>();
     ucp.tileBufWidthBlocks = CalColUnfoldBufWidth(box.tile.hLength);
-    ucp.wPadLeftOffset = box.pad.wLeft * C0<T>();
+    ucp.wPadLeftStoreOffset = box.pad.wLeft * ucp.tileBufWidthBlocks * C0<T>();
+    ucp.validHStart = box.pad.hTop;
+    ucp.validHEnd = box.pad.hTop + box.src.hLength;
     ucp.wRepeatTimes = Ops::Base::CeilDiv(ucp.wValidElements, VL<T>());
     ucp.tileH = box.tile.hLength;
 
@@ -519,6 +623,31 @@ struct Unfold16TileHWStorer {
     }
 };
 
+template <bool hasPadding, bool incHIdxIfHasPadding = false, typename T>
+static void __simd_callee__ inline LoadAlignInHPad(
+    RegTensor<T>& reg,
+    __ubuf__ T*& src,
+    uint32_t repeatStride,
+    uint16_t& hIdx,
+    uint16_t validStart,
+    uint16_t validEnd,
+    RegTensor<T>& padding)
+{
+    if constexpr (hasPadding) {
+        uint32_t maskValue = VL<T>() * (hIdx >= validStart && hIdx <= validEnd);
+        MaskReg padMask = UpdateMask<T>(maskValue);
+        RegTensor<T> tmp;
+        LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(tmp, src, repeatStride);
+        Select(reg, padding, tmp, padMask);
+
+        if constexpr (incHIdxIfHasPadding) {
+            hIdx++;
+        }
+    } else {
+        LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(reg, src, repeatStride);
+    }
+}
+
 template <typename T>
 struct Dy {
     using UnfoldRowParamsT = DefaultUnfoldRowParams;
@@ -536,25 +665,37 @@ struct Dy {
         return AscendC::Std::make_tuple(ucp, urp);
     }
 
+    template <bool HasHPadding>
     static __simd_callee__ inline void UnfoldColsVf(
         __ubuf__ T* tileBuf,
         __ubuf__ T* dyBuf,
         const DefaultUnfoldColParams& params)
     {
         const uint32_t wValidElements = params.wValidElements;
-        //TODO impl pad
-        const uint32_t wPadLeftOffset = params.wPadLeftOffset;
+        const uint16_t validHStart = params.validHStart;
+        const uint16_t validHEnd = params.validHEnd;
+        const uint32_t wPadLeftStoreOffset = params.wPadLeftStoreOffset;
         const uint32_t tileBufWidthBlocks = params.tileBufWidthBlocks;
         const uint16_t wRepeatTimes = params.wRepeatTimes;
         const uint16_t tileH = params.tileH;
 
+        RegTensor<T> padding;
+        Duplicate(padding, 0);
+
+        //地址会往前减去topPad,可能会产生翻转,但是后续应该能转回来
+        dyBuf -= wValidElements * validHStart;
+        tileBuf += wPadLeftStoreOffset;
+
         for (uint16_t th = 0; th < tileH; th++) {
             constexpr uint32_t thStride = F23_TRANSFORM_TILE_SIZE_4 * C0<T>();
-            __ubuf__ T* src = dyBuf + wValidElements * F23_DY_STRIDE * th;
+
             __ubuf__ T* dst = tileBuf + thStride * th;
 
-            __ubuf__ T* src0 = src;
-            __ubuf__ T* src1 = src + wValidElements;
+            uint16_t hIdx0 = th * F23_DY_STRIDE;
+            uint16_t hIdx1 = hIdx0 + 1;
+
+            __ubuf__ T* src0 = dyBuf + wValidElements * hIdx0;
+            __ubuf__ T* src1 = dyBuf + wValidElements * hIdx1;
 
             uint32_t maskValue = wValidElements;
             for (uint16_t i = 0; i < wRepeatTimes; i++) {
@@ -563,8 +704,8 @@ struct Dy {
                 RegTensor<T> s0;
                 RegTensor<T> s1;
 
-                LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s0, src0, VL<T>());
-                LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s1, src1, VL<T>());
+                LoadAlignInHPad<HasHPadding>(s0, src0, VL<T>(), hIdx0, validHStart, validHEnd, padding);
+                LoadAlignInHPad<HasHPadding>(s1, src1, VL<T>(), hIdx1, validHStart, validHEnd, padding);
 
                 RegTensor<T> d0;
                 RegTensor<T> d1;
@@ -687,18 +828,28 @@ struct Fmap {
         return AscendC::Std::make_tuple(ucp, urp);
     }
 
+    template <bool HasHPadding>
     static __simd_callee__ inline void UnfoldColsVf(
         __ubuf__ T* tileBuf,
         __ubuf__ T* fmapBuf,
         const UnfoldFmapColParams& params)
     {
         const uint32_t wValidElements = params.wValidElements;
-        //TODO impl pad
-        const uint32_t wPadLeftOffset = params.wPadLeftOffset;
+
+        const uint16_t validHStart = params.validHStart;
+        const uint16_t validHEnd = params.validHEnd;
+        const uint32_t wPadLeftStoreOffset = params.wPadLeftStoreOffset;
+
         const uint32_t tileBufWidthBlocks = params.tileBufWidthBlocks;
         const uint16_t wRepeatTimes = params.wRepeatTimes;
         const uint16_t tileHMainRepeatTimes = params.tileHMainRepeatTimes;
         const uint16_t tileHTailRepeatTimes = params.tileHTailRepeatTimes;
+
+        RegTensor<T> padding;
+        Duplicate(padding, 0);
+        tileBuf += wPadLeftStoreOffset;
+        //减去padding,翻转应当不影响
+        fmapBuf -= wValidElements * validHStart;
 
         uint32_t maskValue = wValidElements;
         for (uint16_t i = 0; i < wRepeatTimes; i++) {
@@ -725,14 +876,24 @@ struct Fmap {
             const uint32_t wOffset = i * VL<T>();
 
             __ubuf__ T* src = fmapBuf + wOffset;
-            LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s0, src, wValidElements);
-            LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s1, src, wValidElements);
+
+            uint16_t hIdx = 0;
+            LoadAlignInHPad<HasHPadding, true>(
+                s0, src, wValidElements,
+                hIdx, validHStart, validHEnd, padding);
+            LoadAlignInHPad<HasHPadding, true>(
+                s1, src, wValidElements,
+                hIdx, validHStart, validHEnd, padding);
 
             __ubuf__ T* dst = tileBuf + tileBufWidthBlocks * wOffset;
 
             for (uint16_t th = 0; th < tileHMainRepeatTimes; th++) {
-                LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s2, src, wValidElements);
-                LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s3, src, wValidElements);
+                LoadAlignInHPad<HasHPadding, true>(
+                    s2, src, wValidElements,
+                    hIdx, validHStart, validHEnd, padding);
+                LoadAlignInHPad<HasHPadding, true>(
+                    s3, src, wValidElements,
+                    hIdx, validHStart, validHEnd, padding);
 
                 TransformVf(s0, s1, s2, s3, d0, d1, d2, d3, mask);
 
@@ -745,8 +906,12 @@ struct Fmap {
                 StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
                     dst, d3, tileBufWidthBlocks, 1, mask);
 
-                LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s0, src, wValidElements);
-                LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s1, src, wValidElements);
+                LoadAlignInHPad<HasHPadding, true>(
+                    s0, src, wValidElements,
+                    hIdx, validHStart, validHEnd, padding);
+                LoadAlignInHPad<HasHPadding, true>(
+                    s1, src, wValidElements,
+                    hIdx, validHStart, validHEnd, padding);
 
                 TransformVf(s2, s3, s0, s1, d0, d1, d2, d3, mask);
 
@@ -761,8 +926,12 @@ struct Fmap {
             }
 
             for (uint16_t th = 0; th < tileHTailRepeatTimes; th++) {
-                LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s2, src, wValidElements);
-                LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s3, src, wValidElements);
+                LoadAlignInHPad<HasHPadding, true>(
+                    s2, src, wValidElements,
+                    hIdx, validHStart, validHEnd, padding);
+                LoadAlignInHPad<HasHPadding, true>(
+                    s3, src, wValidElements,
+                    hIdx, validHStart, validHEnd, padding);
 
                 TransformVf(s0, s1, s2, s3, d0, d1, d2, d3, mask);
 
@@ -885,19 +1054,26 @@ struct Fmap {
         Sub(d3, s1, s3, mask);
     }
 };
+
+template <typename T>
+using FmapConfig = TransformConfig<T,
+    F23_FMAP_STRIDE,
+    F23_FMAP_WINDOWS,
+    Fmap<T> >;
+
+template <typename T>
+using DyConfig = TransformConfig<T,
+    F23_DY_STRIDE,
+    F23_DY_WINDOWS,
+    Dy<T> >;
 }
 
 
 template <typename T>
-using WinoFmapTransformer = WinoTransformer<T,
-    WinoTransformDetail::F23_FMAP_STRIDE,
-    WinoTransformDetail::F23_FMAP_WINDOWS,
-    WinoTransformDetail::Fmap<T>, true>;
+using WinoFmapFwdTransformer = WinoTransformer<WinoTransformDetail::FmapConfig<T> >;
+
 
 template <typename T>
-using WinoDyTransformer = WinoTransformer<T,
-    WinoTransformDetail::F23_DY_STRIDE,
-    WinoTransformDetail::F23_DY_WINDOWS,
-    WinoTransformDetail::Dy<T>, false>;
+using WinoDyFwdTransformer = WinoTransformer<WinoTransformDetail::DyConfig<T> >;
 
 #endif //CONV_BP_WINO_TRANSFORM_H

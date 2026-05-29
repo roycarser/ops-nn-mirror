@@ -47,22 +47,23 @@ struct Shape {
     static constexpr uint8_t c0 = C0<T>();
 };
 
-template <typename T>
+
 struct CopyK0Params {
-    uint32_t tiles = 0;
-    uint32_t srcBufWidthBlockStride = 0;
     uint32_t batchIdx = 0;
     uint32_t k1Idx = 0;
+    uint32_t tiles = 0;
+    uint32_t srcBufWidthBlockStride = 0;
     uint32_t c1Idx = 0;
     uint32_t c1Length = 0;
-    AscendC::GlobalTensor<T> gm;
-    AscendC::LocalTensor<T> ub;
-    AscendC::LocalTensor<T> l1;
 };
 
 
 template <typename T>
-__aicore__ inline void CopyK0UB2GM(CopyK0Params<T>& p, const Shape<T>& shape)
+__aicore__ inline void CopyK0UB2GM(
+    const CopyK0Params& p,
+    const AscendC::LocalTensor<T>& ub,
+    const AscendC::GlobalTensor<T>& gm,
+    const Shape<T>& shape)
 {
     ascendc_assert(shape.k0>= F23_TRANSFORM_TILE_ELEMENTS_16 * p.tiles, "can only move one k0 out");
 
@@ -82,12 +83,16 @@ __aicore__ inline void CopyK0UB2GM(CopyK0Params<T>& p, const Shape<T>& shape)
     loop.loop2Size = 1;
 
     AscendC::SetLoopModePara(loop, AscendC::DataCopyMVType::UB_TO_OUT);
-    AscendC::DataCopy(p.gm[gmOffset], p.ub, params);
+    AscendC::DataCopy(gm[gmOffset], ub, params);
     AscendC::ResetLoopModePara(AscendC::DataCopyMVType::UB_TO_OUT);
 }
 
 template <typename T>
-__aicore__ inline void CopyK0GM2L1(CopyK0Params<T>& p, const Shape<T>& shape)
+__aicore__ inline void CopyK0GM2L1(
+    const CopyK0Params& p,
+    const AscendC::GlobalTensor<T>& gm,
+    const AscendC::LocalTensor<T>& l1,
+    const Shape<T>& shape)
 {
     ascendc_assert(shape.k0>= F23_TRANSFORM_TILE_ELEMENTS_16 * p.tiles, "can only move one k0 out");
     uint64_t gmOffset = shape.GetOffset(p.batchIdx, p.k1Idx, p.c1Idx);
@@ -98,11 +103,14 @@ __aicore__ inline void CopyK0GM2L1(CopyK0Params<T>& p, const Shape<T>& shape)
     params.srcGap = shape.k0 - params.blockLen;
     params.dstGap = 0;
 
-    AscendC::DataCopy(p.l1, p.gm[gmOffset], params);
+    AscendC::DataCopy(l1, gm[gmOffset], params);
 }
 
 template <typename T>
-__aicore__ inline void CopyK0UB2L1(CopyK0Params<T>& p)
+__aicore__ inline void CopyK0UB2L1(
+    const CopyK0Params& p,
+    const AscendC::LocalTensor<T>& ub,
+    const AscendC::LocalTensor<T>& l1)
 {
     for (uint32_t c1 = 0; c1 < p.c1Length; c1++) {
         AscendC::DataCopyParams params;
@@ -113,7 +121,7 @@ __aicore__ inline void CopyK0UB2L1(CopyK0Params<T>& p)
 
         uint32_t ubOffset = p.srcBufWidthBlockStride * F23_TRANSFORM_TILE_ELEMENTS_16 * C0<T>() * c1;
         uint32_t l1Offset = p.tiles * F23_TRANSFORM_TILE_ELEMENTS_16 * C0<T>() * c1;
-        AscendC::DataCopy(p.l1[l1Offset], p.ub[ubOffset], params);
+        AscendC::DataCopy(l1[l1Offset], ub[ubOffset], params);
     }
 }
 }
@@ -189,7 +197,7 @@ public:
         }
     }
 
-    __aicore__ inline void PipeBarrierAllEnd()
+    __aicore__ inline void End()
     {
         //如果CrossCoreSetFlag是最后的指令可能因为一执行完核就退出导致没能成功set,整个核结束前加个全量等待
         AscendC::PipeBarrier<PIPE_ALL>();
@@ -220,7 +228,7 @@ public:
 
     __aicore__ inline void End()
     {
-        cvSyncQue_.PipeBarrierAllEnd();
+        cvSyncQue_.End();
     }
 
     __aicore__ inline void WaitSlot()
@@ -265,11 +273,13 @@ public:
         l1_[1] = l1Buf[1];
     }
 
-    __aicore__ inline void Write(NK1C1K0C0::CopyK0Params<T>& p, uint32_t l1Offset)
+    __aicore__ inline void Write(
+        const NK1C1K0C0::CopyK0Params& p,
+        const AscendC::LocalTensor<T>& ub,
+        uint32_t l1Offset)
     {
         if ASCEND_IS_AIV {
-            p.l1 = this->l1_[writePingPongFlag_][l1Offset];
-            NK1C1K0C0::CopyK0UB2L1(p);
+            NK1C1K0C0::CopyK0UB2L1(p, ub, this->l1_[writePingPongFlag_][l1Offset]);
         }
     }
 
@@ -290,10 +300,17 @@ private:
 template <typename T, uint8_t PUSH_FLAG, uint8_t POP_FLAG, uint8_t AIC_MTE2_SYNC_FLAG>
 class GM2L1Queue : public BaseL1Queue<PIPE_MTE3, PIPE_MTE2, PIPE_MTE2, PUSH_FLAG, POP_FLAG, DEFAULT_FREE_SLOTS> {
 public:
-    __aicore__ inline void Write(NK1C1K0C0::CopyK0Params<T>& p, const NK1C1K0C0::Shape<T>& shape)
+    __aicore__ inline GM2L1Queue(__gm__ T* gm, const NK1C1K0C0::Shape<T>& shape)
+        : shape_(shape)
+    {
+        gm_.SetGlobalBuffer(gm);
+    }
+
+    __aicore__ inline void Write(const NK1C1K0C0::CopyK0Params& p,
+        const AscendC::LocalTensor<T>& ub)
     {
         if ASCEND_IS_AIV {
-            NK1C1K0C0::CopyK0UB2GM(p, shape);
+            NK1C1K0C0::CopyK0UB2GM(p, ub, gm_, shape_);
         }
     }
 
@@ -309,6 +326,20 @@ public:
             }
         }
     }
+
+    __aicore__ inline const AscendC::GlobalTensor<T>& GetGlobalTensor() const
+    {
+        return gm_;
+    }
+
+    __aicore__ inline const NK1C1K0C0::Shape<T>& GetGMShape() const
+    {
+        return shape_;
+    }
+
+private:
+    AscendC::GlobalTensor<T> gm_;
+    const NK1C1K0C0::Shape<T> shape_;
 };
 
 
