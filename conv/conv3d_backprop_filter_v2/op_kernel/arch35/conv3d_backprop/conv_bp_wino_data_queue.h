@@ -17,15 +17,32 @@
 namespace NK1C1K0C0 {
 template <typename T>
 struct Shape {
+    template <typename TilingT>
+    __aicore__ inline static Shape Create(
+        const uint32_t c,
+        const uint32_t tileH,
+        const uint32_t tileW)
+    {
+        constexpr uint32_t singleShapeTileH = BlockConfig::SingleShapeTileH<TilingT>();
+        constexpr uint32_t singleShapeTileW = BlockConfig::SingleShapeTileW<TilingT>();
+        uint32_t k1 = Ops::Base::CeilDiv(tileH, singleShapeTileH) *
+                      Ops::Base::CeilDiv(tileW, singleShapeTileW);
+
+        constexpr uint32_t k0 = singleShapeTileH * singleShapeTileW * F23_TRANSFORM_TILE_ELEMENTS_16;
+
+        uint32_t c1 = Ops::Base::CeilDiv(c, C0<T>());
+
+        return Shape(k1, c1, k0);
+    }
+
+
     __aicore__ inline Shape(
-        uint32_t c,
-        uint32_t tileH,
-        uint32_t tileW,
-        uint32_t singleShapeTileH,
-        uint32_t singleShapeTileW)
-        : k1(Ops::Base::CeilDiv(tileH, singleShapeTileH) * Ops::Base::CeilDiv(tileW, singleShapeTileW)),
-          c1(Ops::Base::CeilDiv(c, C0<T>())),
-          k0(singleShapeTileH * singleShapeTileW * F23_TRANSFORM_TILE_ELEMENTS_16)
+        const uint32_t k1,
+        const uint32_t c1,
+        const uint32_t k0)
+        : k1(k1),
+          c1(c1),
+          k0(k0)
     {
     }
 
@@ -65,8 +82,6 @@ __aicore__ inline void CopyK0UB2GM(
     const AscendC::GlobalTensor<T>& gm,
     const Shape<T>& shape)
 {
-    ascendc_assert(shape.k0>= F23_TRANSFORM_TILE_ELEMENTS_16 * p.tiles, "can only move one k0 out");
-
     uint64_t gmOffset = shape.GetOffset(p.batchIdx, p.k1Idx, p.c1Idx);
 
     AscendC::DataCopyParams params;
@@ -94,7 +109,6 @@ __aicore__ inline void CopyK0GM2L1(
     const AscendC::LocalTensor<T>& l1,
     const Shape<T>& shape)
 {
-    ascendc_assert(shape.k0>= F23_TRANSFORM_TILE_ELEMENTS_16 * p.tiles, "can only move one k0 out");
     uint64_t gmOffset = shape.GetOffset(p.batchIdx, p.k1Idx, p.c1Idx);
 
     AscendC::DataCopyParams params;
@@ -177,13 +191,14 @@ public:
         }
     }
 
+    template <pipe_t SYNC_DST_PIPE = DST_PIPE>
     __aicore__ inline void WaitData()
     {
         if constexpr (C2V) {
-            AscendC::CrossCoreWaitFlag<4, DST_PIPE>(PUSH_FLAG);
+            AscendC::CrossCoreWaitFlag<4, SYNC_DST_PIPE>(PUSH_FLAG);
         } else {
-            AscendC::CrossCoreWaitFlag<4, DST_PIPE>(PUSH_FLAG);
-            AscendC::CrossCoreWaitFlag<4, DST_PIPE>(PUSH_FLAG + 16);
+            AscendC::CrossCoreWaitFlag<4, SYNC_DST_PIPE>(PUSH_FLAG);
+            AscendC::CrossCoreWaitFlag<4, SYNC_DST_PIPE>(PUSH_FLAG + 16);
         }
     }
 
@@ -203,6 +218,9 @@ public:
         AscendC::PipeBarrier<PIPE_ALL>();
     }
 
+protected:
+    using QueT = CVSyncQue;
+
 private:
     uint8_t freeSlots_ = FREE_SLOTS;
 };
@@ -221,84 +239,67 @@ private:
 // End()释放资源
 //
 
-template <pipe_t SRC_PIPE, pipe_t DST_PIPE, pipe_t POP_PIPE, uint8_t PUSH_FLAG, uint8_t POP_FLAG, uint8_t FREE_SLOTS>
-class BaseL1Queue {
-public:
-    using BaseT = BaseL1Queue;
-
-    __aicore__ inline void End()
-    {
-        cvSyncQue_.End();
-    }
-
-    __aicore__ inline void WaitSlot()
-    {
-        if ASCEND_IS_AIV {
-            cvSyncQue_.WaitSlot();
-        }
-    }
-
-    __aicore__ inline void WaitData()
-    {
-        if ASCEND_IS_AIC {
-            cvSyncQue_.WaitData();
-        }
-    }
-
-    __aicore__ inline void EnQue()
-    {
-        if ASCEND_IS_AIV {
-            //同步等待所有aiv的mte3完成
-            this->cvSyncQue_.EnQue();
-        }
-    }
-
-    __aicore__ inline void DeQue()
-    {
-        if ASCEND_IS_AIC {
-            this->cvSyncQue_.DeQue();
-        }
-    }
-
-protected:
-    CVSyncQue<SRC_PIPE, DST_PIPE, POP_PIPE, PUSH_FLAG, POP_FLAG, FREE_SLOTS, false> cvSyncQue_;
-};
-
 template <typename T, uint8_t PUSH_FLAG, uint8_t POP_FLAG>
-class UB2L1Queue : public BaseL1Queue<PIPE_MTE3, PIPE_MTE1, PIPE_MTE1, PUSH_FLAG, POP_FLAG, PINGPONG_FREE_SLOTS> {
+class UB2L1Queue : public CVSyncQue<PIPE_MTE3, PIPE_MTE1, PIPE_MTE1, PUSH_FLAG, POP_FLAG, PINGPONG_FREE_SLOTS, false> {
 public:
-    __aicore__ inline void Init(AscendC::LocalTensor<T> (&l1Buf)[2])
+    __aicore__ inline void Init(AscendC::LocalTensor<T> (&l1FmapBuf)[2], AscendC::LocalTensor<T> (&l1DyBuf)[2])
     {
-        l1_[0] = l1Buf[0];
-        l1_[1] = l1Buf[1];
+        l1Fmap_[0] = l1FmapBuf[0];
+        l1Fmap_[1] = l1FmapBuf[1];
+        l1Dy_[0] = l1DyBuf[0];
+        l1Dy_[1] = l1DyBuf[1];
     }
 
-    __aicore__ inline void Write(
+    __aicore__ inline void WriteFmap(
         const NK1C1K0C0::CopyK0Params& p,
         const AscendC::LocalTensor<T>& ub,
-        uint32_t l1Offset)
+        const uint32_t l1Offset)
     {
-        if ASCEND_IS_AIV {
-            NK1C1K0C0::CopyK0UB2L1(p, ub, this->l1_[writePingPongFlag_][l1Offset]);
-        }
+        Write<true>(p, ub, l1Offset);
+    }
+
+    __aicore__ inline void WriteDy(
+        const NK1C1K0C0::CopyK0Params& p,
+        const AscendC::LocalTensor<T>& ub,
+        const uint32_t l1Offset)
+    {
+        Write<false>(p, ub, l1Offset);
     }
 
     __aicore__ inline void EnQue()
     {
         if ASCEND_IS_AIV {
-            UB2L1Queue::BaseT::EnQue();
-            writePingPongFlag_ = !writePingPongFlag_;
+            UB2L1Queue::QueT::EnQue();
+            writeFmapPingPongFlag_ = !writeFmapPingPongFlag_;
+            writeDyPingPongFlag_ = !writeDyPingPongFlag_;
         }
     }
 
 private:
-    bool writePingPongFlag_ = false;
-    AscendC::LocalTensor<T> l1_[2];
+    template <bool WriteFmap>
+    __aicore__ inline void Write(
+        const NK1C1K0C0::CopyK0Params& p,
+        const AscendC::LocalTensor<T>& ub,
+        const uint32_t l1Offset)
+    {
+        if ASCEND_IS_AIV {
+            if constexpr (WriteFmap) {
+                NK1C1K0C0::CopyK0UB2L1(p, ub, this->l1Fmap_[writeFmapPingPongFlag_][l1Offset]);
+            } else {
+                NK1C1K0C0::CopyK0UB2L1(p, ub, this->l1Dy_[writeDyPingPongFlag_][l1Offset]);
+            }
+        }
+    }
+
+    AscendC::LocalTensor<T> l1Fmap_[2];
+    AscendC::LocalTensor<T> l1Dy_[2];
+    bool writeFmapPingPongFlag_ = false;
+    bool writeDyPingPongFlag_ = false;
 };
 
 
 template <typename T, uint8_t PUSH_FLAG, uint8_t POP_FLAG, uint8_t AIC_MTE2_SYNC_FLAG>
-class GM2L1Queue : public BaseL1Queue<PIPE_MTE3, PIPE_MTE2, PIPE_MTE2, PUSH_FLAG, POP_FLAG, DEFAULT_FREE_SLOTS> {
+class GM2L1Queue : public CVSyncQue<PIPE_MTE3, PIPE_MTE2, PIPE_MTE2, PUSH_FLAG, POP_FLAG, DEFAULT_FREE_SLOTS, false> {
 public:
     __aicore__ inline GM2L1Queue(__gm__ T* gm, const NK1C1K0C0::Shape<T>& shape)
         : shape_(shape)
@@ -306,7 +307,8 @@ public:
         gm_.SetGlobalBuffer(gm);
     }
 
-    __aicore__ inline void Write(const NK1C1K0C0::CopyK0Params& p,
+    __aicore__ inline void Write(
+        const NK1C1K0C0::CopyK0Params& p,
         const AscendC::LocalTensor<T>& ub)
     {
         if ASCEND_IS_AIV {
@@ -314,16 +316,41 @@ public:
         }
     }
 
-    __aicore__ inline void WaitData(bool transformFinished)
+    __aicore__ inline void WaitData()
     {
         if ASCEND_IS_AIC {
-            GM2L1Queue::BaseT::WaitData();
-            if (!transformFinished) {
-                //所有cube核接收到aiv发送的通知后才表示这一轮数据都准备好了
-                //但整个矩阵都变换完后就不需要在额外等通知
-                AscendC::CrossCoreSetFlag<0, PIPE_MTE2>(AIC_MTE2_SYNC_FLAG);
-                AscendC::CrossCoreWaitFlag<0, PIPE_MTE2>(AIC_MTE2_SYNC_FLAG);
-            }
+            //所有cube核接收到aiv发送的通知后才表示这一轮数据都准备好了
+            //但整个矩阵都变换完后就不需要对cube做全局同步额外等通知
+
+            //这里aiv通知后trigger的pipe为Fixpipe而非MTE2
+            //如果直接触发mte2,后续全核同步就需要在mte2做SetWaitFlag，
+            //这需要等待全核当前所有mte2搬运操作完成，从而大大降低mte2的并行度
+            //Fixpipe负责L0C的搬出，一版只有在k轴完成累加后才触发，执行频率相对mte2低不少
+            //因此这里借用执行Fixpipe作为中转流水,通过Fixpipe做全核同步降低对整体并行度的影响
+            GM2L1Queue::QueT::template WaitData<PIPE_FIX>();
+            AscendC::CrossCoreSetFlag<0, PIPE_FIX>(AIC_MTE2_SYNC_FLAG);
+            AscendC::CrossCoreWaitFlag<0, PIPE_MTE2>(AIC_MTE2_SYNC_FLAG);
+        }
+    }
+
+    __aicore__ inline void WaitSlot()
+    {
+        if ASCEND_IS_AIV {
+            GM2L1Queue::QueT::WaitSlot();
+        }
+    }
+
+    __aicore__ inline void DeQue()
+    {
+        if ASCEND_IS_AIC {
+            GM2L1Queue::QueT::DeQue();
+        }
+    }
+
+    __aicore__ inline void EnQue()
+    {
+        if ASCEND_IS_AIV {
+            GM2L1Queue::QueT::EnQue();
         }
     }
 

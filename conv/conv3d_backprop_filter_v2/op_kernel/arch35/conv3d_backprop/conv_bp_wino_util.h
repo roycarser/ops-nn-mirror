@@ -112,7 +112,7 @@ public:
                    STRIDE) + 1;
     }
 
-    static __aicore__ inline uint32_t Tiles2SrcLength(const uint32_t tiles)
+    static constexpr __aicore__ inline uint32_t Tiles2SrcLength(const uint32_t tiles)
     {
         if constexpr (WINDOW_SIZE == STRIDE) {
             //滑窗大小和stride相同时可以简化下处理逻辑
@@ -122,7 +122,7 @@ public:
         return tiles == 0 ? 0 : (tiles - 1) * STRIDE + WINDOW_SIZE;
     }
 
-    static __aicore__ inline uint32_t Tiles2Elements(const uint32_t tiles)
+    static constexpr __aicore__ inline uint32_t Tiles2Elements(const uint32_t tiles)
     {
         //tile里的元素个数
         return WINDOW_SIZE * WINDOW_SIZE * tiles;
@@ -146,6 +146,32 @@ static constexpr __aicore__ inline uint32_t TileUnfoldElements(uint32_t tiles)
 static constexpr __aicore__ inline uint32_t TileUnfoldSize(uint32_t tiles)
 {
     return tiles * F23_TRANSFORM_TILE_SIZE_4;
+}
+
+namespace ConstexprMaths {
+//用于编译期计算的特殊函数，很多库函数没有constexpr标记，没办法赋值给constexpr对象
+
+template <typename T>
+static constexpr __aicore__ inline T Max(const T src0, const T src1)
+{
+    return (src0 > src1) ? src0 : src1;
+}
+
+template <typename T>
+static constexpr __aicore__ inline T Min(const T src0, const T src1)
+{
+    return (src0 < src1) ? src0 : src1;
+}
+
+static constexpr __aicore__ inline uint32_t AlignUp(const uint32_t a, const uint32_t b)
+{
+    return AscendC::AlignUp(a, b);
+}
+
+static constexpr __aicore__ inline uint32_t CeilDiv(const uint32_t a, const uint32_t b)
+{
+    return AscendC::ConstCeil(a, b);
+}
 }
 
 class AivPartitioner {
@@ -182,5 +208,97 @@ private:
         return AscendC::GetSubBlockIdx();
     }
 };
+
+namespace BlockConfig {
+enum InputTensor {
+    FMAP,
+    DY,
+};
+
+template <
+    uint16_t SingleShapeCoutVal,
+    uint16_t SingleShapeCinVal,
+    uint16_t SingleTransformC1Val,
+    uint16_t SingleShapeTileHVal,
+    uint16_t SingleShapeTileWVal,
+    uint16_t SingleTransformBufCntVal,
+    uint16_t SingleShapeResidentCValue,
+    InputTensor ResidentTargetValue>
+struct Tiling {
+    static constexpr uint16_t SingleShapeCout = SingleShapeCoutVal;
+    static constexpr uint16_t SingleShapeCin = SingleShapeCinVal;
+    static constexpr uint16_t SingleTransformC1 = SingleTransformC1Val;
+    static constexpr uint16_t SingleShapeTileH = SingleShapeTileHVal;
+    static constexpr uint16_t SingleShapeTileW = SingleShapeTileWVal;
+    static constexpr uint16_t SingleTransformBufCnt = SingleTransformBufCntVal;
+    static constexpr uint16_t SingleShapeResidentC = SingleShapeResidentCValue;
+    static constexpr InputTensor ResidentTarget = ResidentTargetValue;
+};
+
+template <typename TilingT>
+static constexpr __aicore__ inline uint16_t SingleShapeCout()
+{
+    return TilingT::SingleShapeCout;
+}
+
+template <typename TilingT>
+static constexpr __aicore__ inline uint16_t SingleShapeCin()
+{
+    return TilingT::SingleShapeCin;
+}
+
+template <typename TilingT, InputTensor TensorType>
+static constexpr __aicore__ inline uint16_t SingleShapeC()
+{
+    if constexpr (TensorType == FMAP) {
+        return SingleShapeCin<TilingT>();
+    } else if constexpr (TensorType == DY) {
+        return SingleShapeCout<TilingT>();
+    }
+}
+
+template <typename TilingT>
+static constexpr __aicore__ inline uint16_t SingleTransformC1()
+{
+    return TilingT::SingleTransformC1;
+}
+
+template <typename TilingT>
+static constexpr __aicore__ inline uint16_t SingleShapeTileH()
+{
+    return TilingT::SingleShapeTileH;
+}
+
+template <typename TilingT>
+static constexpr __aicore__ inline uint16_t SingleShapeTileW()
+{
+    return TilingT::SingleShapeTileW;
+}
+
+template <typename TilingT>
+static constexpr __aicore__ inline uint16_t SingleShapeTileHW()
+{
+    return SingleShapeTileH<TilingT>() * SingleShapeTileW<TilingT>();
+}
+
+template <typename TilingT>
+static constexpr __aicore__ inline uint16_t SingleTransformBufCnt()
+{
+    return TilingT::SingleTransformBufCnt;
+}
+
+template <typename TilingT>
+static constexpr __aicore__ inline uint16_t SingleShapeResidentC()
+{
+    return TilingT::SingleShapeResidentC;
+}
+
+template <typename TilingT>
+static constexpr __aicore__ inline InputTensor ResidentTarget()
+{
+    return TilingT::ResidentTarget;
+}
+}
+
 
 #endif //CONV_BP_WINO_UTIL_H
