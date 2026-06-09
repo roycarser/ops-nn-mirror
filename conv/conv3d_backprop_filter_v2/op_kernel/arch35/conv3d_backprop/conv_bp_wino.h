@@ -279,6 +279,7 @@ public:
             BlockConfig::SingleShapeC<TilingT, ResidentTarget>(),
             streamT1, residentT1);
 
+        uint32_t residentTaskOffset = 0;
         while (kIter.More()) {
             HWBox tile = kIter.TileBox();
 
@@ -290,7 +291,7 @@ public:
                 ProcessResidentTransform<TensorT1>(
                     tile,
                     gm2l1Ctx,
-                    residentT1);
+                    residentT1, residentTaskOffset);
 
                 gm2l1Que.EnQue();
             }
@@ -456,7 +457,7 @@ private:
     __aicore__ inline void ProcessResidentTransform(
         const HWBox& tile,
         typename TransformFunctions::GM2L1Ctx& ctx,
-        const ResidentTaskInfo& task)
+        const ResidentTaskInfo& task, uint32_t& taskOffset)
     {
         using TransformConfig = Std::conditional_t<
             TransformType == BlockConfig::InputTensor::FMAP,
@@ -466,7 +467,7 @@ private:
         const uint16_t coreId = GetBlockIdx() * AivNumInBlock() + GetSubBlockIdx();
         const uint16_t stride = AivNumInBlock() * GetBlockNum();
 
-        for (uint32_t taskId = coreId;
+        for (uint32_t taskId = (coreId + stride - taskOffset) % stride;
              taskId < task.cTaskCnt;
              taskId += stride) {
             uint32_t cBlockIdx = taskId / TaskPerSingleResidentC;
@@ -487,6 +488,8 @@ private:
                 TransformFunctions::template CopyOut<TransformConfig, typename TransformFunctions::GM2L1>,
                 tile, task.cIdx + cBlockOffset, offsetInCBlock, cLengthInBlock);
         }
+
+        taskOffset = (taskOffset + task.cTaskCnt) % stride;
     }
 
     struct StreamTaskInfo {
