@@ -174,40 +174,6 @@ static constexpr __aicore__ inline uint32_t CeilDiv(const uint32_t a, const uint
 }
 }
 
-class AivPartitioner {
-public:
-    static __aicore__ inline uint32_t CeilAvgLength(uint32_t length)
-    {
-        return Ops::Base::CeilDiv(length, AivNum());
-    }
-
-    template <typename T>
-    static __aicore__ inline uint32_t Get2DAlignBufLength(uint32_t splitDim0, uint32_t innerDim1)
-    {
-        uint32_t length0 = CeilAvgLength(splitDim0);
-        return Ops::Base::CeilAlign(length0 * innerDim1, C0<T>());
-    }
-
-    static __aicore__ inline void GetPartition(
-        uint32_t length,
-        uint32_t& outStartIdx, uint32_t& outLength)
-    {
-        uint32_t avgLength = CeilAvgLength(length);
-        outStartIdx = avgLength * AivIdx();
-        outLength = AscendC::Std::min(avgLength, length - outStartIdx);
-    }
-
-private:
-    static __aicore__ inline uint32_t AivNum()
-    {
-        return AscendC::GetSubBlockNum();
-    }
-
-    static __aicore__ inline uint32_t AivIdx()
-    {
-        return AscendC::GetSubBlockIdx();
-    }
-};
 
 namespace BlockConfig {
 enum InputTensor {
@@ -221,18 +187,22 @@ template <
     uint16_t SingleTransformC1Val,
     uint16_t SingleShapeTileHVal,
     uint16_t SingleShapeTileWVal,
-    uint16_t SingleTransformBufCntVal,
+    uint8_t SingleTransformBufCntVal,
     uint16_t SingleShapeResidentCValue,
-    InputTensor ResidentTargetValue>
+    InputTensor ResidentTargetValue,
+    uint8_t InvTransformBufCntValue,
+    uint16_t SingleShapeInvTransformCoutVal>
 struct Tiling {
     static constexpr uint16_t SingleShapeCout = SingleShapeCoutVal;
     static constexpr uint16_t SingleShapeCin = SingleShapeCinVal;
     static constexpr uint16_t SingleTransformC1 = SingleTransformC1Val;
     static constexpr uint16_t SingleShapeTileH = SingleShapeTileHVal;
     static constexpr uint16_t SingleShapeTileW = SingleShapeTileWVal;
-    static constexpr uint16_t SingleTransformBufCnt = SingleTransformBufCntVal;
+    static constexpr uint8_t SingleTransformBufCnt = SingleTransformBufCntVal;
     static constexpr uint16_t SingleShapeResidentC = SingleShapeResidentCValue;
     static constexpr InputTensor ResidentTarget = ResidentTargetValue;
+    static constexpr uint8_t InvTransformBufCnt = InvTransformBufCntValue;
+    static constexpr uint16_t SingleShapeInvTransformCout = SingleShapeInvTransformCoutVal;
 };
 
 template <typename TilingT>
@@ -282,7 +252,7 @@ static constexpr __aicore__ inline uint16_t SingleShapeTileHW()
 }
 
 template <typename TilingT>
-static constexpr __aicore__ inline uint16_t SingleTransformBufCnt()
+static constexpr __aicore__ inline uint8_t SingleTransformBufCnt()
 {
     return TilingT::SingleTransformBufCnt;
 }
@@ -298,7 +268,62 @@ static constexpr __aicore__ inline InputTensor ResidentTarget()
 {
     return TilingT::ResidentTarget;
 }
+
+template <typename TilingT>
+static constexpr __aicore__ inline uint8_t InvTransformBufCnt()
+{
+    return TilingT::InvTransformBufCnt;
 }
 
+template <typename TilingT>
+static constexpr __aicore__ inline uint16_t SingleShapeInvTransformCout()
+{
+    return TilingT::SingleShapeInvTransformCout;
+}
+}
+
+
+struct CoutCinRange {
+    uint32_t coutIdx = 0;
+    uint32_t cinIdx = 0;
+    uint32_t coutLength = 0;
+    uint32_t cinLength = 0;
+
+    template <BlockConfig::InputTensor t>
+    __aicore__ inline uint32_t GetIdx() const
+    {
+        if constexpr (t == BlockConfig::InputTensor::FMAP) {
+            return cinIdx;
+        } else if constexpr (t == BlockConfig::InputTensor::DY) {
+            return coutIdx;
+        }
+    }
+
+    template <BlockConfig::InputTensor t>
+    __aicore__ inline uint32_t GetLen() const
+    {
+        if constexpr (t == BlockConfig::InputTensor::FMAP) {
+            return cinLength;
+        } else if constexpr (t == BlockConfig::InputTensor::DY) {
+            return coutLength;
+        }
+    }
+
+    __aicore__ inline bool NotEmpty() const
+    {
+        return coutLength != 0 && cinLength != 0;
+    }
+};
+
+static constexpr uint32_t __aicore__ AivNumInBlock()
+{
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+    return 2;
+#elif
+    return 1;
+#endif
+
+
+}
 
 #endif //CONV_BP_WINO_UTIL_H

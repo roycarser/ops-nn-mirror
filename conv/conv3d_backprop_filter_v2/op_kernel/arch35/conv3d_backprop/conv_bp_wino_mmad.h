@@ -17,6 +17,7 @@
 #define CONV_BP_WINO_MMAD_H
 
 #include "conv_bp_wino_data_queue.h"
+#include "conv_bp_wino_inv_transform.h"
 
 using namespace AscendC;
 
@@ -37,19 +38,15 @@ public:
         if ASCEND_IS_AIC {
             mte2mte1Flag_[0] = EventFlag::template Alloc<HardEvent::MTE2_MTE1, HardEvent::MTE1_MTE2>(pipe);
             mte2mte1Flag_[1] = EventFlag::template Alloc<HardEvent::MTE2_MTE1, HardEvent::MTE1_MTE2>(pipe);
-            mte1madFlag_[0] = EventFlag::template Alloc<HardEvent::MTE1_M, HardEvent::M_MTE1>(pipe);
-            mte1madFlag_[1] = EventFlag::template Alloc<HardEvent::MTE1_M, HardEvent::M_MTE1>(pipe);
+            mad2fixpipeFlag_ = EventFlag::template Alloc<HardEvent::M_FIX, HardEvent::FIX_M>(pipe);
 
-#pragma unroll
-            for (uint8_t n = 0; n != L0C_POINT_FIXPIPE_GROUP; n++) {
-                mad2fixpipeFlag_[n] = EventFlag::template Alloc<HardEvent::M_FIX, HardEvent::FIX_M>(pipe);
-                SetFlag<HardEvent::FIX_M>(mad2fixpipeFlag_[n].dst2src);
+            for (uint8_t i = 0; i < L0_BUF_CNT; i++) {
+                mte1madFlag_[i] = EventFlag::template Alloc<HardEvent::MTE1_M, HardEvent::M_MTE1>(pipe);
+                SetFlag<HardEvent::M_MTE1>(mte1madFlag_[i].dst2src);
             }
-
+            SetFlag<HardEvent::FIX_M>(mad2fixpipeFlag_.dst2src);
             SetFlag<HardEvent::MTE1_MTE2>(mte2mte1Flag_[0].dst2src);
             SetFlag<HardEvent::MTE1_MTE2>(mte2mte1Flag_[1].dst2src);
-            SetFlag<HardEvent::M_MTE1>(mte1madFlag_[0].dst2src);
-            SetFlag<HardEvent::M_MTE1>(mte1madFlag_[1].dst2src);
             SetHF32Mode(hf32Flag_);
         }
     }
@@ -59,11 +56,9 @@ public:
         if ASCEND_IS_AIC {
             WaitFlag<HardEvent::MTE1_MTE2>(mte2mte1Flag_[0].dst2src);
             WaitFlag<HardEvent::MTE1_MTE2>(mte2mte1Flag_[1].dst2src);
-            WaitFlag<HardEvent::M_MTE1>(mte1madFlag_[0].dst2src);
-            WaitFlag<HardEvent::M_MTE1>(mte1madFlag_[1].dst2src);
-#pragma unroll
-            for (uint8_t n = 0; n != L0C_POINT_FIXPIPE_GROUP; n++) {
-                WaitFlag<HardEvent::FIX_M>(mad2fixpipeFlag_[n].dst2src);
+            WaitFlag<HardEvent::FIX_M>(mad2fixpipeFlag_.dst2src);
+            for (uint8_t i = 0; i < L0_BUF_CNT; i++) {
+                WaitFlag<HardEvent::M_MTE1>(mte1madFlag_[i].dst2src);
             }
             SetHF32Mode(false);
         }
@@ -79,7 +74,7 @@ public:
         const EventFlag& mte2mte1 = mte2mte1Flag_[l1PingPongFlag];
         WaitFlag<HardEvent::MTE1_MTE2>(mte2mte1.dst2src);
 
-        //TODO L1 要留一个(16-tile.elements%16)的空间
+        //TODO 确认读L1越界的影响，否则 要留一个(tile.elements%16)的空间
         // 让load2d取最后一个点的最后一个分形时凑满512字节
         auto l1Buf = GetL1Buf(l1PingPongFlag);
 
@@ -94,16 +89,14 @@ public:
         SetFlag<HardEvent::MTE2_MTE1>(mte2mte1.src2dst);
     }
 
-    template <bool FixpipeInLastK>
     __aicore__ inline void Compute(
         const HWBox& tiles, uint32_t cout, uint32_t coutC1, uint32_t cin, uint32_t cinC1,
-        bool firstK, bool l1PingPongFlag,
-        const LocalTensor<float>& outputTransformVBuf)
+        bool firstK, bool l1PingPongFlag)
     {
-        auto l1Buf = GetL1Buf(l1PingPongFlag);
-        LocalTensor<T>& l1a = Std::get<0>(l1Buf);
-        LocalTensor<T>& l1b = Std::get<1>(l1Buf);
-
+        if (firstK) {
+            WaitFlag<HardEvent::FIX_M>(mad2fixpipeFlag_.dst2src);
+        }
+        //TODO cout为1时 mmad会有个gemv的特殊操作，待确认是否有影响
         MmadParams mad;
         mad.m = cout;
         mad.n = cin;
@@ -147,32 +140,29 @@ public:
         uint32_t l0aPointElements = l0aMStep * l0aKStep * (AscendC::BYTE_PER_FRACTAL / sizeof(T));
         uint32_t l0bPointElements = l0bMStep * l0bKStep * (AscendC::BYTE_PER_FRACTAL / sizeof(T));
 
+        auto l1Buf = GetL1Buf(l1PingPongFlag);
+        LocalTensor<T>& l1a = Std::get<0>(l1Buf);
+        LocalTensor<T>& l1b = Std::get<1>(l1Buf);
+
         //不需要baseK循环,L1上左右Tensor在PingPong后最多一共占用256kb
         //除以16后单个点最多16kb,L0上一定能全载,除非singleShapeHW传进来为1
         //然后l0上对齐放大到16这类异常情况,但tiling阶段应该防止这种情况
-
         const EventFlag& mte2mte1Flag = mte2mte1Flag_[l1PingPongFlag];
         WaitFlag<HardEvent::MTE2_MTE1>(mte2mte1Flag.src2dst);
-        if (firstK) {
-#pragma unroll
-            for (uint8_t n = 0; n != L0C_POINT_FIXPIPE_GROUP; n++) {
-                WaitFlag<HardEvent::FIX_M>(mad2fixpipeFlag_[n].dst2src);
-            }
-        }
 
-        for (uint8_t g = 0; g < L0POINTS.group_; g++) {
+        for (uint8_t g = 0; g < L0POINTS.group; g++) {
             //通过奇偶性判断l0PingPong
-            const int l0pingFlag = g & 1;
+            const int l0BufFlag = g % L0_BUF_CNT;
 
-            const EventFlag& mte1madFlag = mte1madFlag_[l0pingFlag];
+            const EventFlag& mte1madFlag = mte1madFlag_[l0BufFlag];
             WaitFlag<HardEvent::M_MTE1>(mte1madFlag.dst2src);
 
-            uint8_t pointGroupOffset = g * L0POINTS.pointPerGroup_;
+            uint8_t pointGroupOffset = g * L0POINTS.pointPerGroup;
 
-            LocalTensor<T> l0a = LocalTensor<T>(TPosition::A2, L0POINTS.l0aSize_ * l0pingFlag, L0POINTS.l0aSize_);
-            LocalTensor<T> l0b = LocalTensor<T>(TPosition::B2, L0POINTS.l0bSize_ * l0pingFlag, L0POINTS.l0aSize_);
+            LocalTensor<T> l0a = LocalTensor<T>(TPosition::A2, L0POINTS.l0aSize * l0BufFlag, L0POINTS.l0aSize);
+            LocalTensor<T> l0b = LocalTensor<T>(TPosition::B2, L0POINTS.l0bSize * l0BufFlag, L0POINTS.l0aSize);
 
-            for (uint8_t i = 0; i < L0POINTS.pointPerGroup_; i++) {
+            for (uint8_t i = 0; i < L0POINTS.pointPerGroup; i++) {
                 uint8_t pointIdx = pointGroupOffset + i;
                 uint32_t offsetL1 = pointIdx * tiles.elements * C0<T>();
 
@@ -200,7 +190,7 @@ public:
             SetFlag<HardEvent::MTE1_M>(mte1madFlag.src2dst);
             WaitFlag<HardEvent::MTE1_M>(mte1madFlag.src2dst);
 
-            for (uint8_t i = 0; i < L0POINTS.pointPerGroup_; i++) {
+            for (uint8_t i = 0; i < L0POINTS.pointPerGroup; i++) {
                 uint8_t pointIdx = pointGroupOffset + i;
 
                 LocalTensor<float> l0cBuf = GetL0CPointBuf(pointIdx);
@@ -208,23 +198,59 @@ public:
                 uint32_t offsetB = i * l0bPointElements;
 
                 AscendC::Mmad(l0cBuf, l0a[offsetA], l0b[offsetB], mad);
-
-                if constexpr (FixpipeInLastK) {
-                    if ((pointIdx + 1) % L0C_POINT_PER_FIXPIPE_GROUP == 0) {
-                        uint8_t fixpipeGroupIdx = pointIdx / L0C_POINT_PER_FIXPIPE_GROUP;
-                        const EventFlag& m2f = mad2fixpipeFlag_[fixpipeGroupIdx];
-                        SetFlag<HardEvent::M_FIX>(m2f.src2dst);
-                        WaitFlag<HardEvent::M_FIX>(m2f.src2dst);
-                        fixpipe2UB(fixpipeGroupIdx, cout, cin, outputTransformVBuf);
-                        SetFlag<HardEvent::FIX_M>(m2f.dst2src);
-                    }
-                }
             }
 
             SetFlag<HardEvent::M_MTE1>(mte1madFlag.dst2src);
         }
 
         SetFlag<HardEvent::MTE1_MTE2>(mte2mte1Flag.dst2src);
+    }
+
+
+    template <typename SyncQueConfig>
+    __aicore__ inline void Fixpipe2UB(
+        CVSyncQue<SyncQueConfig>& syncQue,
+        uint32_t cout,
+        uint32_t cin,
+        const LocalTensor<float>& outputTransformVBuf)
+    {
+        SetFlag<HardEvent::M_FIX>(mad2fixpipeFlag_.src2dst);
+        WaitFlag<HardEvent::M_FIX>(mad2fixpipeFlag_.src2dst);
+
+        constexpr uint8_t aivNums = AivNumInBlock();
+        constexpr uint32_t invTransSingleBufSize = WinoInvTransformer<T, TilingT>::InvTransBufSize();
+        constexpr uint32_t invTransBufCnt = BlockConfig::InvTransformBufCnt<TilingT>();
+        constexpr uint16_t singleBlockCout = BlockConfig::SingleShapeInvTransformCout<TilingT>() * aivNums;
+        const auto l0c = LocalTensor<float>(TPosition::CO1, 0, TOTAL_L0C_SIZE);
+
+        uint32_t index = 0;
+        for (uint32_t coutIdx = 0; coutIdx < cout; coutIdx += singleBlockCout) {
+            const uint16_t coutLength = Std::min(singleBlockCout, cout - coutIdx);
+
+            //mSize对齐到2用于ub均分,由于实际计算分形一定是16的倍数，所以这么操作应当不会导致地址溢出
+            //假设cout为16，那么对齐后还是16，如果是17那就会变成18，实际计算分形则是32，不存在溢出
+            // //TODO 判断尾块非C0对齐有没有问题
+            FixpipeParamsC310 fp;
+            fp.mSize = aivNums == 2 ? coutLength + (coutLength & 1) : coutLength;
+            fp.nSize = cin;
+            fp.srcStride = Ops::Base::CeilAlign(coutLength, static_cast<uint16_t>(BLOCK_CUBE));
+            fp.dstStride = cin;
+            fp.params.ndNum = F23_TRANSFORM_TILE_ELEMENTS_16;
+            fp.params.srcNdStride = L0C_SINGLE_POINT_BUF_BYTES / (BLOCK_CUBE * sizeof(float));
+            //到UB上按C0对齐
+            fp.params.dstNdStride = WinoInvTransformer<T, TilingT>::InvTransSinglePointBufSize();
+            fp.dualDstCtl = 1;
+
+            syncQue.WaitSlot();
+            static constexpr FixpipeConfig cfg = {CO2Layout::ROW_MAJOR, true};
+            const uint32_t srcOffset = singleBlockCout * BLOCK_CUBE * index;
+            const uint32_t dstOffset = invTransSingleBufSize * (index % invTransBufCnt);
+            Fixpipe<float, float, cfg>(outputTransformVBuf[dstOffset], l0c[srcOffset], fp);
+            syncQue.EnQue();
+
+            index++;
+        }
+        SetFlag<HardEvent::FIX_M>(mad2fixpipeFlag_.dst2src);
     }
 
     static __aicore__ inline Std::tuple<LocalTensor<T>, LocalTensor<T> > GetL1Buf(bool flagPingPong)
@@ -244,36 +270,12 @@ public:
     }
 
 private:
-    __aicore__ static inline void fixpipe2UB(
-        uint8_t fixpipeGroupIdx,
-        uint32_t cout,
-        uint32_t cin,
-        const LocalTensor<float>& outputTransformVBuf)
-    {
-        AscendC::FixpipeParamsC310 fp;
-        //mSize对齐到2用于ub均分,由于实际计算分形一定是16的倍数，所以这么操作应当不会导致地址溢出
-        //假设cout为16，那么对齐后还是16，如果是17那就会变成18，实际计算分形则是32，不存在溢出
-        //TODO 判断尾块非C0对齐有没有问题
-        fp.mSize = GetSubBlockNum() == 2 ? cout + (cout & 1) : cout;
-        fp.nSize = cin;
-        fp.srcStride = Ops::Base::CeilAlign(cout, static_cast<uint32_t>(BLOCK_CUBE));
-        fp.dstStride = cin;
-        fp.params.ndNum = L0C_POINT_PER_FIXPIPE_GROUP;
-        fp.params.srcNdStride = L0C_SINGLE_POINT_BUF_BYTES / (BLOCK_CUBE * sizeof(float));
-        //到UB上按C0对齐
-        fp.params.dstNdStride = AivPartitioner::Get2DAlignBufLength<float>(cout, cin);
-        fp.dualDstCtl = 1;
-
-        LocalTensor<float> l0c = GetL0CPointBuf(fixpipeGroupIdx * L0C_POINT_PER_FIXPIPE_GROUP);
-        static constexpr FixpipeConfig cfg = {CO2Layout::ROW_MAJOR, true};
-        // Fixpipe<float, float, cfg>(outputTransformVBuf, l0c, fp);
-    }
 
     struct L0Point {
-        uint8_t group_;
-        uint8_t pointPerGroup_;
-        uint32_t l0aSize_;
-        uint32_t l0bSize_;
+        uint8_t group;
+        uint8_t pointPerGroup;
+        uint32_t l0aSize;
+        uint32_t l0bSize;
     };
 
     static __aicore__ inline LocalTensor<float> GetL0CPointBuf(uint8_t pointIdx)
@@ -299,11 +301,12 @@ private:
                                                     BlockConfig::SingleShapeCin<TilingT>(),
                                                     BLOCK_CUBE) * l0KSize;
 
-        constexpr uint32_t l0BufLimit = TOTAL_L0A_SIZE / 2;
+        constexpr uint32_t l0BufLimit = TOTAL_L0A_SIZE / L0_BUF_CNT;
         constexpr uint32_t maxPointsL0A = l0BufLimit / singlePointL0ASize;
         constexpr uint32_t maxPointsL0B = l0BufLimit / singlePointL0BSize;
         constexpr uint32_t maxPointsL0 = ConstexprMaths::Min(maxPointsL0A, maxPointsL0B);
 
+        static_assert(maxPointsL0 >= 1, "illegal points size");
         //计算最多几个点一起批跑,从1,2,4,8这几个数里挑选,确保整除不会有尾轮处理
         //因为开了PingPong所以最多8个点一批,16个点一批PingPong就没意义了
         constexpr uint32_t pointsPerGroup = maxPointsL0 >= 8 ?
@@ -326,8 +329,6 @@ private:
         };
     }
 
-
-
     struct EventFlag {
         TEventID src2dst = 0;
         TEventID dst2src = 0;
@@ -349,15 +350,14 @@ private:
                                            BlockConfig::SingleShapeTileHW<TilingT>() *
                                            BlockConfig::SingleShapeCin<TilingT>();
 
+    //64*64下，mte1的耗时略高于mmad,当前看开4buf，相比pingpong会减少mte1等待mmad而造成空隙，性能略微好一点
+    static constexpr uint8_t L0_BUF_CNT = 4;
     static constexpr L0Point L0POINTS = CalcWinoPointL0Group();
-
-    static constexpr uint8_t L0C_POINT_FIXPIPE_GROUP = 4;
-    static constexpr uint8_t L0C_POINT_PER_FIXPIPE_GROUP = F23_TRANSFORM_TILE_ELEMENTS_16 / L0C_POINT_FIXPIPE_GROUP;
     static constexpr uint32_t L0C_SINGLE_POINT_BUF_BYTES = TOTAL_L0C_SIZE / F23_TRANSFORM_TILE_ELEMENTS_16;
 
-    EventFlag mad2fixpipeFlag_[L0C_POINT_FIXPIPE_GROUP];
+    EventFlag mad2fixpipeFlag_;
     EventFlag mte2mte1Flag_[2];
-    EventFlag mte1madFlag_[2];
+    EventFlag mte1madFlag_[L0_BUF_CNT];
     const bool hf32Flag_;
 };
 

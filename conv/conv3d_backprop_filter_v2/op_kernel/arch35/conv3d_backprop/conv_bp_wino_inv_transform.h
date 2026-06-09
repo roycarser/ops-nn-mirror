@@ -22,153 +22,296 @@
 
 using namespace AscendC;
 
+template <typename T, typename TilingT>
 class WinoInvTransformer {
 public:
-    //需要申请18个CoutCin空间,逆变换前16个用来放原始数据,逆变换后,9个用来放逆变换后的数据,剩下9个放转置后的数据
-    static constexpr uint32_t COUT_CIN_BUF_CNT = 18;
+    //需要申请26个CoutCin空间,16个用来放原始数据,9个用来放逆变换转置后的数据
+    static constexpr uint32_t COUT_CIN_BUF_CNT = 25;
 
-    void Init()
+    __aicore__ inline explicit WinoInvTransformer(__gm__ T* yGm)
     {
-        v2mte3_ = GetTPipePtr()->AllocEventID<HardEvent::V_MTE3>();
+        yGm_.SetGlobalBuffer(yGm);
     }
 
-    __aicore__ inline void PartitionProcess(
-        const GlobalTensor<float>& yGm,
-        const LocalTensor<float>& buf,
-        uint32_t coutIdx,
-        uint32_t cinIdx,
-        uint32_t coutLength,
-        uint32_t cinLength,
-        uint32_t cinSrc)
+    __aicore__ inline void Init()
     {
-        uint32_t singlePointAlignElements = AivPartitioner::Get2DAlignBufLength<float>(
-            coutLength, cinLength);
+        TPipe* pipe = GetTPipePtr();
+        v2mte3_ = pipe->AllocEventID<HardEvent::V_MTE3>();
+        mte32mte2_ = pipe->AllocEventID<HardEvent::MTE3_MTE2>();
+    }
 
-        uint32_t partitionCoutIdx;
-        uint32_t partitionCoutLength;
-        AivPartitioner::GetPartition(coutLength, partitionCoutIdx, partitionCoutLength);
-        uint32_t partitionCoutCinLength = partitionCoutLength * cinLength;
-        //将4*4的dw变换为3*3的dw
-        TransformVf(
-            reinterpret_cast<__ubuf__ float*>(buf.GetPhyAddr()),
-            singlePointAlignElements,
-            Ops::Base::CeilDiv(singlePointAlignElements, VL<float>()),
-            partitionCoutCinLength,
-            Ops::Base::CeilDiv(partitionCoutCinLength, VL<float>()));
+    static constexpr __aicore__ inline uint32_t InvTransSinglePointBufSize()
+    {
+        constexpr uint32_t sizeCoutCin = BlockConfig::SingleShapeInvTransformCout<TilingT>() *
+                                         BlockConfig::SingleShapeCin<TilingT>();
+        return ConstexprMaths::AlignUp(sizeCoutCin, C0<float>());
+    }
 
-        SetFlag<HardEvent::V_MTE3>(v2mte3_);
-        WaitFlag<HardEvent::V_MTE3>(v2mte3_);
+    static constexpr __aicore__ inline uint32_t InvTransBufSize()
+    {
+        return InvTransSinglePointBufSize() * COUT_CIN_BUF_CNT;
+    }
 
-        uint64_t gmOffset = static_cast<uint64_t>(coutIdx + partitionCoutIdx) * cinIdx * KERNEL_3x3;
+    static constexpr __aicore__ inline uint32_t GetInvBufTotalSizeInBytes()
+    {
+        constexpr uint8_t BufCnt = BlockConfig::InvTransformBufCnt<TilingT>();
+        constexpr uint32_t bufSize = InvTransBufSize() * BufCnt * sizeof(float);
+        static_assert(bufSize < TOTAL_UB_SIZE, "illegal buffer size");
+        return bufSize;
+    }
 
-        DataCopyExtParams params;
-        params.blockCount = partitionCoutLength;
-        params.blockLen = cinLength * KERNEL_3x3 * sizeof(float);
-        params.srcStride = 0;
-        params.dstStride = (static_cast<int64_t>(cinSrc) - cinLength) * KERNEL_3x3 * sizeof(float);
 
-        DataCopyPad<float, PaddingMode::Compact>(
-            yGm[gmOffset],
-            buf[KERNEL_3x3 * singlePointAlignElements],
-            params);
+    template <typename QueConfig>
+    __aicore__ inline void TransformOutput(
+        CVSyncQue<QueConfig>& l0c2ubSync,
+        const CoutCinRange& localBlock,
+        const uint32_t cinSrc,
+        const LocalTensor<float>& vBuf)
+    {
+        constexpr uint16_t aivNums = AivNumInBlock();
+        constexpr uint16_t singleShapeInvTransCout = BlockConfig::SingleShapeInvTransformCout<TilingT>();
+        constexpr uint16_t singleBlockCout = singleShapeInvTransCout * aivNums;
+        constexpr uint8_t BufCnt = BlockConfig::InvTransformBufCnt<TilingT>();
+        const uint16_t aivId = GetSubBlockIdx();
+
+        uint32_t bufIdx = 0;
+        for (uint32_t coutIdxInBlock = 0; coutIdxInBlock < localBlock.coutLength; coutIdxInBlock += singleBlockCout) {
+            const uint16_t coutLengthInBlock = Std::min(singleBlockCout, localBlock.coutLength - coutIdxInBlock);
+
+            l0c2ubSync.WaitData();
+
+            const uint16_t localCoutLength = Ops::Base::CeilDiv(coutLengthInBlock, aivNums);
+            const uint16_t localCoutOffset = localCoutLength * aivId;
+
+            if (localCoutOffset < coutLengthInBlock) {
+                const uint32_t processCoutLength = Std::min(localCoutLength, coutLengthInBlock - localCoutOffset);
+                const uint32_t coutCin = processCoutLength * localBlock.cinLength;
+
+                LocalTensor<float> buf = vBuf[bufIdx * InvTransBufSize()];
+                ProcessInvTransform(
+                    reinterpret_cast<__ubuf__ float*>(buf.GetPhyAddr()),
+                    coutCin,
+                    Ops::Base::CeilDiv(coutCin, VL<float>()));
+
+                const uint32_t coutIdx = localBlock.coutIdx + coutIdxInBlock + localCoutOffset;
+
+                SetFlag<HardEvent::V_MTE3>(v2mte3_);
+                WaitFlag<HardEvent::V_MTE3>(v2mte3_);
+
+                uint64_t gmOffset = static_cast<uint64_t>(coutIdx) * localBlock.cinIdx * KERNEL_3x3;
+
+                DataCopyExtParams params;
+                params.blockCount = processCoutLength;
+                params.blockLen = localBlock.cinLength * KERNEL_3x3 * sizeof(T);
+                params.srcStride = 0;
+                params.dstStride = (static_cast<uint64_t>(cinSrc) - localBlock.cinLength) * KERNEL_3x3 * sizeof(T);
+
+                DataCopyPad<T, PaddingMode::Compact>(
+                    yGm_[gmOffset],
+                    buf[KERNEL_3x3 * InvTransSinglePointBufSize()].ReinterpretCast<T>(),
+                    params);
+            }
+
+            l0c2ubSync.DeQue();
+            bufIdx = (bufIdx + 1) % BufCnt;
+        }
+    }
+
+    __aicore__ inline void BlockMTE2ByMTE3() const
+    {
+        SetFlag<HardEvent::MTE3_MTE2>(mte32mte2_);
+        WaitFlag<HardEvent::MTE3_MTE2>(mte32mte2_);
     }
 
 private:
     static constexpr uint32_t KERNEL_3 = 3;
     static constexpr uint32_t KERNEL_3x3 = 9;
 
-    __simd_vf__ static inline void TransformVf(
-        __ubuf__ float* buf,
-        uint32_t singlePointAlignElements,
-        uint16_t loopCnt0,
-        uint32_t partitionCoutCinLength,
-        uint16_t loopCnt1)
-    {
-        Transform4x4To3x3Vf(buf, singlePointAlignElements, loopCnt0);
-        MicroAPI::LocalMemBar<MicroAPI::MemType::VEC_STORE, MicroAPI::MemType::VEC_LOAD>();
-        Transpose2NCHW(buf, singlePointAlignElements, partitionCoutCinLength, loopCnt1);
-    }
 
-    __simd_callee__ static inline void Transform4x4To3x3Vf(
+    __simd_vf__ static inline void ProcessInvTransform(
         __ubuf__ float* buf,
-        uint32_t singlePointAlignElements,
-        uint16_t loopCnt)
+        const uint32_t coutCinLength,
+        const uint16_t loopCnt)
     {
         using namespace MicroAPI;
         RegTensor<float> value0P5;
         Duplicate(value0P5, 0.5f);
 
-        uint32_t srcRowStride = singlePointAlignElements * F23_TRANSFORM_TILE_SIZE_4;
+        constexpr uint32_t singlePointSize = InvTransSinglePointBufSize();
+        __ubuf__ float* src0 = buf;
+        __ubuf__ float* src1 = buf + singlePointSize * F23_TRANSFORM_TILE_SIZE_4;
+        __ubuf__ float* src2 = buf + singlePointSize * F23_TRANSFORM_TILE_SIZE_4 * 2;
+        __ubuf__ float* src3 = buf + singlePointSize * F23_TRANSFORM_TILE_SIZE_4 * 3;
 
-        for (uint16_t col = 0; col < 4; col++) {
-            __ubuf__ float* src0 = buf + col * singlePointAlignElements;
-            __ubuf__ float* src1 = src0 + srcRowStride;
-            __ubuf__ float* src2 = src1 + srcRowStride;
-            __ubuf__ float* src3 = src2 + srcRowStride;
+        RegTensor<uint32_t> seq;
+        RegTensor<uint32_t> tmp9;
+        RegTensor<uint32_t> index;
 
-            uint32_t maskValue = singlePointAlignElements;
-            for (uint16_t i = 0; i < loopCnt; i++) {
-                MaskReg mask = UpdateMask<float>(maskValue);
+        Arange(reinterpret_cast<RegTensor<int32_t>&>(seq), 0);
+        Duplicate(tmp9, 9);
+        MaskReg maskAll = CreateMask<uint32_t, MaskPattern::ALL>();
+        Mul(index, seq, tmp9, maskAll);
+        __ubuf__ float* transposeBuf = buf + F23_TRANSFORM_TILE_ELEMENTS_16 * InvTransSinglePointBufSize();
+        __ubuf__ float* dst = transposeBuf;
 
-                RegTensor<float> s0;
-                RegTensor<float> s1;
-                RegTensor<float> s2;
-                RegTensor<float> s3;
-                RegTensor<float> d0;
-                RegTensor<float> d1;
-                RegTensor<float> d2;
+        uint32_t maskValue = coutCinLength;
 
-                LoadAlign(s0, src0);
-                LoadAlign(s1, src1);
-                LoadAlign(s2, src2);
-                LoadAlign<float, PostLiteral::POST_MODE_UPDATE>(s3, src3, VL<float>());
+        for (uint16_t i = 0; i < loopCnt; i++) {
+            MaskReg mask = UpdateMask<float>(maskValue);
 
-                TransformVf(value0P5, s0, s1, s2, s3, d0, d1, d2, mask);
+            RegTensor<float> col0d0;
+            RegTensor<float> col0d1;
+            RegTensor<float> col0d2;
+            TransformCol(
+                src0, src1, src2, src3,
+                mask, value0P5, col0d0, col0d1, col0d2,
+                singlePointSize);
 
-                StoreAlign<float, PostLiteral::POST_MODE_UPDATE>(src0, d0, VL<float>(), mask);
-                StoreAlign<float, PostLiteral::POST_MODE_UPDATE>(src1, d1, VL<float>(), mask);
-                StoreAlign<float, PostLiteral::POST_MODE_UPDATE>(src2, d2, VL<float>(), mask);
-            }
+            RegTensor<float> col1d0;
+            RegTensor<float> col1d1;
+            RegTensor<float> col1d2;
+            TransformCol(
+                src0, src1, src2, src3,
+                mask, value0P5, col1d0, col1d1, col1d2,
+                singlePointSize);
+
+            RegTensor<float> col2d0;
+            RegTensor<float> col2d1;
+            RegTensor<float> col2d2;
+            TransformCol(
+                src0, src1, src2, src3,
+                mask, value0P5, col2d0, col2d1, col2d2,
+                singlePointSize);
+
+            RegTensor<float> col3d0;
+            RegTensor<float> col3d1;
+            RegTensor<float> col3d2;
+            constexpr int32_t nextColStride = -3 * singlePointSize + VL<float>();
+            TransformCol(
+                src0, src1, src2, src3,
+                mask, value0P5, col3d0, col3d1, col3d2,
+                nextColStride);
+
+            RegTensor<float> r0, r1, r2;
+            TransformRowAndCastInZero(
+                mask, value0P5,
+                col0d0, col1d0, col2d0, col3d0,
+                r0, r1, r2);
+
+            __ubuf__ float* dst0 = dst;
+            Scatter(dst0, r0, index, mask);
+            ++dst0;
+            Scatter(dst0, r1, index, mask);
+            ++dst0;
+            Scatter(dst0, r2, index, mask);
+            ++dst0;
+
+            RegTensor<float> r3, r4, r5;
+            TransformRowAndCastInZero(
+                mask, value0P5,
+                col0d1, col1d1, col2d1, col3d1,
+                r3, r4, r5);
+
+            Scatter(dst0, r3, index, mask);
+            ++dst0;
+            Scatter(dst0, r4, index, mask);
+            ++dst0;
+            Scatter(dst0, r5, index, mask);
+            ++dst0;
+
+            RegTensor<float> r6, r7, r8;
+            TransformRowAndCastInZero(
+                mask, value0P5,
+                col0d2, col1d2, col2d2, col3d2,
+                r6, r7, r8);
+
+            Scatter(dst0, r6, index, mask);
+            ++dst0;
+            Scatter(dst0, r7, index, mask);
+            ++dst0;
+            Scatter(dst0, r8, index, mask);
+
+            dst += VL<float>() * KERNEL_3x3;
         }
 
-        LocalMemBar<MemType::VEC_STORE, MemType::VEC_LOAD>();
+        //scatter完后在重新做cast，把float转b16后空的2个字节移除，不能直接用b16做scatter，bank冲突太严重
+        if constexpr (!Std::is_same_v<T, float>) {
+            LocalMemBar<MemType::VEC_STORE, MemType::VEC_LOAD>();
 
-        for (uint16_t row = 0; row < 4; row++) {
-            __ubuf__ float* src0 = buf + row * srcRowStride;
-            __ubuf__ float* src1 = src0 + singlePointAlignElements;
-            __ubuf__ float* src2 = src1 + singlePointAlignElements;
-            __ubuf__ float* src3 = src2 + singlePointAlignElements;
-
-            //让变换结果变成连在一起
-            __ubuf__ float* dst0 = buf + singlePointAlignElements * row * 3;
-            __ubuf__ float* dst1 = dst0 + singlePointAlignElements;
-            __ubuf__ float* dst2 = dst1 + singlePointAlignElements;
-
-            uint32_t maskValue = singlePointAlignElements;
+            __ubuf__ float* loadSrc = transposeBuf;
+            __ubuf__ float* castDst = transposeBuf;
             for (uint16_t i = 0; i < loopCnt; i++) {
-                MaskReg mask = UpdateMask<float>(maskValue);
-
-                RegTensor<float> s0;
-                RegTensor<float> s1;
-                RegTensor<float> s2;
-                RegTensor<float> s3;
-                RegTensor<float> d0;
-                RegTensor<float> d1;
-                RegTensor<float> d2;
-
-                LoadAlign<float, PostLiteral::POST_MODE_UPDATE>(s0, src0, VL<float>());
-                LoadAlign<float, PostLiteral::POST_MODE_UPDATE>(s1, src1, VL<float>());
-                LoadAlign<float, PostLiteral::POST_MODE_UPDATE>(s2, src2, VL<float>());
-                LoadAlign<float, PostLiteral::POST_MODE_UPDATE>(s3, src3, VL<float>());
-
-                TransformVf(value0P5, s0, s1, s2, s3, d0, d1, d2, mask);
-
-                StoreAlign<float, PostLiteral::POST_MODE_UPDATE>(dst0, d0, VL<float>(), mask);
-                StoreAlign<float, PostLiteral::POST_MODE_UPDATE>(dst1, d1, VL<float>(), mask);
-                StoreAlign<float, PostLiteral::POST_MODE_UPDATE>(dst2, d2, VL<float>(), mask);
+                for (uint16_t j = 0; j < KERNEL_3x3; j++) {
+                    RegTensor<float> t0;
+                    LoadAlign<float, PostLiteral::POST_MODE_UPDATE>(t0, loadSrc, VL<float>());
+                    StoreAlign<float, PostLiteral::POST_MODE_UPDATE, StoreDist::DIST_PACK_B32>(
+                        castDst, t0, VL<float>() / 2, maskAll);
+                }
             }
         }
     }
+
+
+
+
+    __simd_callee__ static inline void TransformCol(
+        __ubuf__ float*& src0,
+        __ubuf__ float*& src1,
+        __ubuf__ float*& src2,
+        __ubuf__ float*& src3,
+        MicroAPI::MaskReg& mask,
+        MicroAPI::RegTensor<float>& value0P5,
+        MicroAPI::RegTensor<float>& d0,
+        MicroAPI::RegTensor<float>& d1,
+        MicroAPI::RegTensor<float>& d2,
+        const int32_t postUpdateStride)
+    {
+        MicroAPI::RegTensor<float> s0;
+        MicroAPI::RegTensor<float> s1;
+        MicroAPI::RegTensor<float> s2;
+        MicroAPI::RegTensor<float> s3;
+
+        MicroAPI::LoadAlign<float, MicroAPI::PostLiteral::POST_MODE_UPDATE>(s0, src0, postUpdateStride);
+        MicroAPI::LoadAlign<float, MicroAPI::PostLiteral::POST_MODE_UPDATE>(s1, src1, postUpdateStride);
+        MicroAPI::LoadAlign<float, MicroAPI::PostLiteral::POST_MODE_UPDATE>(s2, src2, postUpdateStride);
+        MicroAPI::LoadAlign<float, MicroAPI::PostLiteral::POST_MODE_UPDATE>(s3, src3, postUpdateStride);
+
+        TransformVf(value0P5, s0, s1, s2, s3, d0, d1, d2, mask);
+    }
+
+    __simd_callee__ static inline void TransformRowAndCastInZero(
+        MicroAPI::MaskReg& mask,
+        MicroAPI::RegTensor<float>& value0P5,
+        MicroAPI::RegTensor<float>& d0,
+        MicroAPI::RegTensor<float>& d1,
+        MicroAPI::RegTensor<float>& d2,
+        MicroAPI::RegTensor<float>& d3,
+        MicroAPI::RegTensor<float>& out0,
+        MicroAPI::RegTensor<float>& out1,
+        MicroAPI::RegTensor<float>& out2)
+    {
+        if constexpr (Std::is_same_v<T, float>) {
+            TransformVf(value0P5, d0, d1, d2, d3, out0, out1, out2, mask);
+        } else {
+            MicroAPI::RegTensor<float> tmp0;
+            MicroAPI::RegTensor<float> tmp1;
+            MicroAPI::RegTensor<float> tmp2;
+            TransformVf(value0P5, d0, d1, d2, d3, tmp0, tmp1, tmp2, mask);
+
+            static_assert(sizeof(T) == 2);
+            static constexpr MicroAPI::CastTrait castTraitB322B16 = {
+                MicroAPI::RegLayout::ZERO,
+                MicroAPI::SatMode::NO_SAT,
+                MicroAPI::MaskMergeMode::ZEROING,
+                RoundMode::CAST_RINT,
+            };
+
+            Cast<T, float, castTraitB322B16>(reinterpret_cast<MicroAPI::RegTensor<T>&>(out0), tmp0, mask);
+            Cast<T, float, castTraitB322B16>(reinterpret_cast<MicroAPI::RegTensor<T>&>(out1), tmp1, mask);
+            Cast<T, float, castTraitB322B16>(reinterpret_cast<MicroAPI::RegTensor<T>&>(out2), tmp2, mask);
+        }
+    }
+
 
     __simd_callee__ static inline void TransformVf(
         MicroAPI::RegTensor<float>& value0P5,
@@ -193,43 +336,10 @@ private:
         MicroAPI::Mul(d2, s3, tmpAddHalf, mask);
     }
 
-    __simd_callee__ static inline void Transpose2NCHW(
-        __ubuf__ float* buf,
-        uint32_t singlePointAlignElements,
-        uint32_t partitionCoutCinLength,
-        uint16_t loopCnt)
-    {
-        using namespace MicroAPI;
 
-        RegTensor<uint32_t> seq;
-        RegTensor<uint32_t> tmp9;
-        RegTensor<uint32_t> index;
-
-        Arange(reinterpret_cast<RegTensor<int32_t>&>(seq), 0);
-        Duplicate(tmp9, 9);
-        MaskReg maskAll = CreateMask<uint32_t, MaskPattern::ALL>();
-        Mul(index, seq, tmp9, maskAll);
-
-        RegTensor<float> regCoutCin;
-        __ubuf__ float* dst = buf + KERNEL_3x3 * singlePointAlignElements;
-
-        for (uint16_t n = 0; n < KERNEL_3x3; n++) {
-            __ubuf__ float* src = buf + n * singlePointAlignElements;
-            __ubuf__ float* dst0 = dst;
-
-            uint32_t maskValue = partitionCoutCinLength;
-            for (uint16_t i = 0; i < loopCnt; i++) {
-                MaskReg mask = UpdateMask<float>(maskValue);
-                LoadAlign<float, PostLiteral::POST_MODE_UPDATE>(regCoutCin, src, VL<float>());
-                Scatter(dst0, regCoutCin, index, mask);
-                dst0 += VL<float>() * KERNEL_3x3;
-            }
-
-            dst++;
-        }
-    }
-
+    TEventID mte32mte2_ = 0;
     TEventID v2mte3_ = 0;
+    GlobalTensor<T> yGm_;
 };
 
 #endif //CONV_BP_WINO_INV_TRANSFORM_H

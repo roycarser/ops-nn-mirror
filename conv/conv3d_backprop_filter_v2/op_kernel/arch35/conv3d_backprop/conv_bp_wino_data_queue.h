@@ -159,11 +159,31 @@ static constexpr uint8_t SINGLE_FREE_SLOTS = 1;
 //ub计算后cube搬入
 //MTE3(SrcPipe)->MTE1(DST_PIPE&POP_PIPE)
 //
-template <pipe_t SRC_PIPE, pipe_t DST_PIPE, pipe_t POP_PIPE,
-    uint8_t PUSH_FLAG, uint8_t POP_FLAG, uint8_t FREE_SLOTS,
-    bool C2V>
+
+template <pipe_t Src, pipe_t Dst, pipe_t Pop,
+    uint8_t PushFlag, uint8_t PopFlag, uint8_t FreeSlots,
+    bool C2v>
+struct CVSyncQueConfig {
+    static constexpr pipe_t SRC_PIPE = Src;
+    static constexpr pipe_t DST_PIPE = Dst;
+    static constexpr pipe_t POP_PIPE = Pop;
+    static constexpr uint8_t PUSH_FLAG = PushFlag;
+    static constexpr uint8_t POP_FLAG = PopFlag;
+    static constexpr uint8_t FREE_SLOTS = FreeSlots;
+    static constexpr bool C2V = C2v;
+};
+
+template <typename Config>
 class CVSyncQue {
 public:
+    static constexpr pipe_t SRC_PIPE = Config::SRC_PIPE;
+    static constexpr pipe_t DST_PIPE = Config::DST_PIPE;
+    static constexpr pipe_t POP_PIPE = Config::POP_PIPE;
+    static constexpr uint8_t PUSH_FLAG = Config::PUSH_FLAG;
+    static constexpr uint8_t POP_FLAG = Config::POP_FLAG;
+    static constexpr uint8_t FREE_SLOTS = Config::FREE_SLOTS;
+    static constexpr bool C2V = Config::C2V;
+
     __aicore__ inline void WaitSlot()
     {
         if (freeSlots_ == 0) {
@@ -240,7 +260,14 @@ private:
 //
 
 template <typename T, uint8_t PUSH_FLAG, uint8_t POP_FLAG>
-class UB2L1Queue : public CVSyncQue<PIPE_MTE3, PIPE_MTE1, PIPE_MTE1, PUSH_FLAG, POP_FLAG, PINGPONG_FREE_SLOTS, false> {
+class UB2L1Queue : public CVSyncQue<
+        CVSyncQueConfig<PIPE_MTE3,
+            PIPE_MTE1,
+            PIPE_MTE1,
+            PUSH_FLAG,
+            POP_FLAG,
+            PINGPONG_FREE_SLOTS,
+            false> > {
 public:
     __aicore__ inline void Init(AscendC::LocalTensor<T> (&l1FmapBuf)[2], AscendC::LocalTensor<T> (&l1DyBuf)[2])
     {
@@ -299,7 +326,14 @@ private:
 
 
 template <typename T, uint8_t PUSH_FLAG, uint8_t POP_FLAG, uint8_t AIC_MTE2_SYNC_FLAG>
-class GM2L1Queue : public CVSyncQue<PIPE_MTE3, PIPE_MTE2, PIPE_MTE2, PUSH_FLAG, POP_FLAG, DEFAULT_FREE_SLOTS, false> {
+class GM2L1Queue : public CVSyncQue<
+        CVSyncQueConfig<PIPE_MTE3,
+            PIPE_MTE2,
+            PIPE_MTE2,
+            PUSH_FLAG,
+            POP_FLAG,
+            DEFAULT_FREE_SLOTS,
+            false> > {
 public:
     __aicore__ inline GM2L1Queue(__gm__ T* gm, const NK1C1K0C0::Shape<T>& shape)
         : shape_(shape)

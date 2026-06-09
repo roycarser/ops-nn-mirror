@@ -43,10 +43,11 @@ using FwdTransformUB2L1Queue = UB2L1Queue<T,
     CROSS_CORE_AIV2AIC_SEND_UB2L1_FLAG,
     CROSS_CORE_AIC2AIV_RECV_UB2L1_FLAG>;
 
-using InvTransformL0C2UBSyncQueue = CVSyncQue<PIPE_FIX, PIPE_V, PIPE_MTE3,
+template <typename TilingT>
+using InvTransformL0C2UBSyncQueue = CVSyncQue<CVSyncQueConfig<PIPE_FIX, PIPE_V, PIPE_MTE3,
     CROSS_CORE_AIC2AIV_SEND_MMAD_DATA_FLAG,
     CROSS_CORE_AIC2AIV_RECV_MMAD_DATA_FLAG,
-    SINGLE_FREE_SLOTS, true>;
+    BlockConfig::InvTransformBufCnt<TilingT>(), true> >;
 
 template <typename TilingT>
 class TileKIterator {
@@ -68,20 +69,6 @@ public:
         tile.elements = tile.hLength * tile.wLength;
         return tile;
     }
-
-    // __aicore__ inline HWBox TileBox(uint32_t kIdx) const
-    // {
-    //     uint32_t hStepIdx = kIdx / wStep_;
-    //     uint32_t wStepIdx = kIdx - hStepIdx * wStep_;
-    //
-    //     HWBox tile = {};
-    //     tile.hIdx = hStepIdx * SingleShapeTileH;
-    //     tile.wIdx = wStepIdx * singleShapeTilesW_;
-    //     tile.hLength = Std::min(static_cast<uint32_t>(singleShapeTilesH_), tilesH_ - tile.hIdx);
-    //     tile.wLength = Std::min(static_cast<uint32_t>(singleShapeTilesW_), tilesW_ - tile.wIdx);
-    //     tile.elements = tile.hLength * tile.wLength;
-    //     return tile;
-    // }
 
     __aicore__ inline void Next()
     {
@@ -120,33 +107,6 @@ enum BlockIterDirection {
     CIN,
 };
 
-struct CoutCinRange {
-    uint32_t coutIdx = 0;
-    uint32_t cinIdx = 0;
-    uint32_t coutLength = 0;
-    uint32_t cinLength = 0;
-
-    template <BlockConfig::InputTensor t>
-    __aicore__ inline uint32_t GetIdx() const
-    {
-        if constexpr (t == BlockConfig::InputTensor::FMAP) {
-            return cinIdx;
-        } else if constexpr (t == BlockConfig::InputTensor::DY) {
-            return coutIdx;
-        }
-    }
-
-    template <BlockConfig::InputTensor t>
-    __aicore__ inline uint32_t GetLen() const
-    {
-        if constexpr (t == BlockConfig::InputTensor::FMAP) {
-            return cinLength;
-        } else if constexpr (t == BlockConfig::InputTensor::DY) {
-            return coutLength;
-        }
-    }
-};
-
 template <BlockIterDirection IterDir, typename TilingT>
 class BlockIterator {
 public:
@@ -169,7 +129,7 @@ public:
         return loopIdx_ * GetBlockNum() < totalCnt_;
     }
 
-    //获取当前aic计算的基本块范围
+    //获取当前aic计算的基本块范围,若当前核无基本块计算则返回false并且将length设置为0
     inline __aicore__ bool GetLocalBlock(CoutCinRange& cRange) const
     {
         uint16_t coreId;
@@ -269,20 +229,20 @@ public:
 
     __aicore__ inline void Init()
     {
-        constexpr uint32_t fwdTmpBufSize = GetFwdTmpBufSize();
-        constexpr uint32_t fwdSrcBufSize = GetFwdSrcBufSize();
-        constexpr uint32_t fwdOutBufSize = GetFwdOutBufSize();
-        constexpr uint32_t totalSize = fwdTmpBufSize + fwdSrcBufSize * BUF_CNT + fwdOutBufSize * BUF_CNT;
-        static_assert(totalSize * sizeof(T) < TOTAL_UB_SIZE, "exceed ub size limit");
+        constexpr uint32_t fwdTmpBufSize = GetFwdTmpBufSize() * sizeof(T);
+        constexpr uint32_t fwdSrcBufSize = GetFwdSrcBufSize() * sizeof(T) * BUF_CNT;
+        constexpr uint32_t fwdOutBufSize = GetFwdOutBufSize() * sizeof(T) * BUF_CNT;
 
         TBuf<TPosition::VECIN> transformFwdTmpBuf;
         TBuf<TPosition::VECIN> transformFwdSrcBuf;
         TBuf<TPosition::VECIN> transformFwdOutBuf;
 
+        static_assert((fwdTmpBufSize + fwdSrcBufSize + fwdOutBufSize) < TOTAL_UB_SIZE, "illegal buffer size");
+
         TPipe* pipe = GetTPipePtr();
-        pipe->InitBuffer(transformFwdTmpBuf, fwdTmpBufSize * sizeof(T));
-        pipe->InitBuffer(transformFwdSrcBuf, fwdSrcBufSize * sizeof(T) * BUF_CNT);
-        pipe->InitBuffer(transformFwdOutBuf, fwdOutBufSize * sizeof(T) * BUF_CNT);
+        pipe->InitBuffer(transformFwdTmpBuf, fwdTmpBufSize);
+        pipe->InitBuffer(transformFwdSrcBuf, fwdSrcBufSize);
+        pipe->InitBuffer(transformFwdOutBuf, fwdOutBufSize);
         transformFwdTmpVBuf_ = transformFwdTmpBuf.Get<T>();
         transformFwdSrcVBuf_ = transformFwdSrcBuf.Get<T>();
         transformFwdOutVBuf_ = transformFwdOutBuf.Get<T>();
@@ -294,20 +254,15 @@ public:
         }
     }
 
-    template <auto D>
     __aicore__ inline void IterateK(
-        const BlockIterator<D, TilingT>& blockIter,
+        const CoutCinRange& localBlock,
         TileKIterator<TilingT>& kIter,
         FwdTransformGM2L1Queue<T>& gm2l1Que,
         FwdTransformUB2L1Queue<T>& ub2l1Que,
-        uint32_t batchIdx)
+        uint32_t batchIdx,
+        uint32_t watermarkResidentC,
+        uint32_t residentCBound)
     {
-        CoutCinRange localBlock;
-        blockIter.GetLocalBlock(localBlock);
-
-        uint32_t clusterCoutBound, clusterCinBound;
-        blockIter.GetClusterBlockUpperBound(clusterCoutBound, clusterCinBound);
-
         using BlockConfig::InputTensor;
         constexpr InputTensor ResidentTarget = BlockConfig::ResidentTarget<TilingT>();
         constexpr InputTensor TensorT0 = ResidentTarget != InputTensor::FMAP ? InputTensor::FMAP : InputTensor::DY;
@@ -316,20 +271,18 @@ public:
         StreamTaskInfo streamT0;
         ComputeT0TaskInfo(localBlock.GetIdx<TensorT0>(), localBlock.GetLen<TensorT0>(), streamT0);
 
-        const uint32_t cBoundT1 = TensorT1 == InputTensor::FMAP ? clusterCinBound : clusterCoutBound;
-
         StreamTaskInfo streamT1;
         ResidentTaskInfo residentT1;
         ComputeT1TaskInfo(
             localBlock.GetIdx<TensorT1>(), localBlock.GetLen<TensorT1>(),
-            cBoundT1,
+            residentCBound, watermarkResidentC,
             BlockConfig::SingleShapeC<TilingT, ResidentTarget>(),
             streamT1, residentT1);
 
         while (kIter.More()) {
             HWBox tile = kIter.TileBox();
 
-            if (cBoundT1 > watermarkResidentC_) {
+            if (residentCBound > watermarkResidentC) {
                 typename TransformFunctions::GM2L1Ctx gm2l1Ctx = {batchIdx, kIter.kIdx(), {gm2l1Que}};
                 gm2l1Que.WaitSlot();
 
@@ -355,8 +308,6 @@ public:
 
             kIter.Next();
         }
-
-        watermarkResidentC_ = Std::max(watermarkResidentC_, cBoundT1);
     }
 
     __aicore__ inline void End()
@@ -380,33 +331,32 @@ private:
         //当前非驻留矩阵区域
         stream.cIdx = localCIdx;
         stream.cLen = localCLen;
-        const uint32_t aivNumInBlock = GetSubBlockNum();
         stream.singleCoreCLen = Ops::Base::CeilDiv(
                                     Ops::Base::CeilDiv(stream.cLen, C0<T>()),
-                                    aivNumInBlock) * C0<T>();
+                                    AivNumInBlock()) * C0<T>();
     }
 
     __aicore__ inline void ComputeT1TaskInfo(
         uint32_t localCIdx,
         uint16_t localCLen,
-        uint32_t clusterCBound,
+        uint32_t residentCBound,
+        uint32_t watermarkResidentC,
         uint16_t singleShapeC,
         StreamTaskInfo& stream,
         ResidentTaskInfo& resident) const
     {
         stream.cIdx = localCIdx + SingleShapeResidentC;
         stream.cLen = Std::max(localCLen, SingleShapeResidentC) - SingleShapeResidentC;
-        const uint32_t aivNumInBlock = GetSubBlockNum();
         stream.singleCoreCLen = Ops::Base::CeilDiv(
                                     Ops::Base::CeilDiv(stream.cLen, C0<T>()),
-                                    aivNumInBlock) * C0<T>();
+                                    AivNumInBlock()) * C0<T>();
 
-        if (clusterCBound > watermarkResidentC_) {
-            uint32_t t1FullCLen = clusterCBound - watermarkResidentC_;
+        if (residentCBound > watermarkResidentC) {
+            uint32_t t1FullCLen = residentCBound - watermarkResidentC;
             uint32_t t1MainCBlk = t1FullCLen / singleShapeC;
             uint16_t t1TailCLen = t1FullCLen % singleShapeC;
 
-            resident.cIdx = watermarkResidentC_;
+            resident.cIdx = watermarkResidentC;
             resident.singleShapeTailC = t1TailCLen;
             resident.tailCTaskCnt = Ops::Base::CeilDiv(
                 Std::min(t1TailCLen, SingleShapeResidentC),
@@ -513,8 +463,8 @@ private:
             WinoTransformDetail::FmapConfig<T, TilingT>,
             WinoTransformDetail::DyConfig<T, TilingT> >;
 
-        const uint16_t coreId = GetBlockIdx() * GetSubBlockNum() + GetSubBlockIdx();
-        const uint16_t stride = GetSubBlockNum() * GetBlockNum();
+        const uint16_t coreId = GetBlockIdx() * AivNumInBlock() + GetSubBlockIdx();
+        const uint16_t stride = AivNumInBlock() * GetBlockNum();
 
         for (uint32_t taskId = coreId;
              taskId < task.cTaskCnt;
@@ -688,7 +638,6 @@ private:
     LocalTensor<T> transformFwdOutVBuf_;
     TransformVFlag transformFwdEventFlags_[BUF_CNT];
 
-    uint32_t watermarkResidentC_ = 0;
     uint8_t bufIndex = 0;
 };
 
@@ -723,35 +672,38 @@ public:
         winoMmad_.End();
     }
 
-    template <auto D>
     __aicore__ inline void IterateK(
-        const BlockIterator<D, TilingT>& blockIter,
+        const CoutCinRange& blockRange,
         TileKIterator<TilingT>& kIter,
         uint32_t batchIdx,
         FwdTransformGM2L1Queue<T>& gm2l1,
         FwdTransformUB2L1Queue<T>& ub2l1,
-        InvTransformL0C2UBSyncQueue& l0c2ubSync,
-        const LocalTensor<float>& transformInvVBuf)
+        bool waitResidentTransform)
     {
-        uint32_t coutBound, cinBound;
-        blockIter.GetClusterBlockUpperBound(coutBound, cinBound);
-        uint32_t residentCBound = ResidentTarget == BlockConfig::InputTensor::FMAP ? cinBound : coutBound;
-
-        if (CoutCinRange blockRange; likely(blockIter.GetLocalBlock(blockRange))) {
+        if (blockRange.NotEmpty()) {
             RunMmad<true>(
                 batchIdx, blockRange, kIter,
-                gm2l1, ub2l1, l0c2ubSync,
-                transformInvVBuf,
-                residentCBound > watermarkResidentC_);
+                gm2l1, ub2l1,
+                waitResidentTransform);
         } else {
             // 闲置核仅参与 Queue 信号同步，维持集群流水线运转，不进行实际 Compute
             RunMmad<false>(
                 batchIdx, blockRange, kIter,
-                gm2l1, ub2l1, l0c2ubSync,
-                transformInvVBuf,
-                residentCBound > watermarkResidentC_);
+                gm2l1, ub2l1,
+                waitResidentTransform);
         }
-        watermarkResidentC_ = Std::max(watermarkResidentC_, residentCBound);
+    }
+
+    __aicore__ inline void Fixpipe2UB(
+        InvTransformL0C2UBSyncQueue<TilingT>& syncQue,
+        CoutCinRange& localBlock,
+        const LocalTensor<float>& invBuf)
+    {
+        winoMmad_.Fixpipe2UB(
+            syncQue,
+            localBlock.coutLength,
+            localBlock.cinLength,
+            invBuf);
     }
 
 private:
@@ -762,8 +714,6 @@ private:
         TileKIterator<TilingT>& iter,
         FwdTransformGM2L1Queue<T>& gm2l1,
         FwdTransformUB2L1Queue<T>& ub2l1,
-        InvTransformL0C2UBSyncQueue& l0c2ubSync,
-        const LocalTensor<float>& transformInvVBuf,
         bool waitResidentTransform)
     {
         static constexpr uint16_t SingleShapeResidentC = BlockConfig::SingleShapeResidentC<TilingT>();
@@ -839,12 +789,11 @@ private:
                     residentC1Idx, residentC1Length,
                     waitResidentTransform, loadPingPong);
 
-                MmadCompute<NotIdle, false>(
-                    tiles, ub2l1, l0c2ubSync,
+                MmadCompute<NotIdle>(
+                    tiles, ub2l1,
                     cRange.coutLength, coutC1Length,
                     cRange.cinLength, cinC1Length,
-                    kIdx,
-                    transformInvVBuf,
+                    kIdx == 0 && batchIdx == 0,
                     computePingPong);
 
                 tiles = nextTiles;
@@ -854,12 +803,11 @@ private:
             }
 
             // ================= 阶段 3: Epilogue (计算最后一轮数据并触发 Fixpipe 落盘) =================
-            MmadCompute<NotIdle, true>(
-                tiles, ub2l1, l0c2ubSync,
+            MmadCompute<NotIdle>(
+                tiles, ub2l1,
                 cRange.coutLength, coutC1Length,
                 cRange.cinLength, cinC1Length,
-                kIdx,
-                transformInvVBuf,
+                kIdx == 0 && batchIdx == 0,
                 computePingPong);
         }
     }
@@ -901,40 +849,30 @@ private:
         }
     }
 
-    template <bool NotIdle, bool FixpipeInLastK>
+    template <bool NotIdle>
     __aicore__ inline void MmadCompute(
         const HWBox& tiles,
         FwdTransformUB2L1Queue<T>& ub2l1,
-        InvTransformL0C2UBSyncQueue& l0c2ubSync,
         uint32_t cout,
         uint32_t coutC1,
         uint32_t cin,
         uint32_t cinC1,
-        uint32_t kIdx,
-        const LocalTensor<float>& transformInvVBuf,
+        bool firstK,
         bool& l1PingPongFlag)
     {
         // 阻塞等待 AIV 的 DY 生产信号
         ub2l1.WaitData();
 
         if constexpr (NotIdle) {
-            if constexpr (FixpipeInLastK) {
-                l0c2ubSync.WaitSlot();
-            }
-
-            winoMmad_.template Compute<FixpipeInLastK>(
+            winoMmad_.Compute(
                 tiles,
                 cout,
                 coutC1,
                 cin,
                 cinC1,
-                kIdx == 0,
-                l1PingPongFlag,
-                transformInvVBuf);
-
-            if constexpr (FixpipeInLastK) {
-                l0c2ubSync.EnQue();
-            }
+                firstK,
+                l1PingPongFlag);
+            //TODO pingpong和ub2l1更新同步
             l1PingPongFlag = !l1PingPongFlag;
         }
 
@@ -942,7 +880,6 @@ private:
     }
 
     WinoMMAD<T, TilingT>& winoMmad_;
-    uint32_t watermarkResidentC_ = 0;
 };
 }
 
@@ -957,12 +894,14 @@ public:
         const WinoDyFwdTransformer<T, TilingT>& dy,
         __gm__ T* nk1c1k0c0FmapGm,
         __gm__ T* nk1c1k0c0DyGm,
-        __gm__ float* yGm,
+        __gm__ T* yGm,
         WinoMMAD<T, TilingT>& winoMmad,
         uint32_t tilesH,
-        uint32_t tilesW)
+        uint32_t tilesW,
+        uint32_t batch)
         : tilesH_(tilesH),
           tilesW_(tilesW),
+          batch_(batch),
           cin_(fmap.SrcC()),
           cout_(dy.SrcC()),
           gm2l1_(
@@ -970,28 +909,17 @@ public:
               NK1C1K0C0::Shape<T>::template Create<TilingT>(
                   ResidentFmap ? cin_ : cout_, tilesH, tilesW)),
           dwFwd_(fmap, dy),
-          dwMmad_(winoMmad)
+          dwMmad_(winoMmad),
+          dwInv_(yGm)
     {
-        yGm_.SetGlobalBuffer(yGm);
     }
 
     inline void __aicore__ Init()
     {
         if ASCEND_IS_AIV {
             dwFwd_.Init();
-            //逆变换输出时数据按M轴均分到每个V核上
             dwInv_.Init();
-            // uint32_t transformInvOutBufSize = AivPartitioner::Get2DAlignBufLength<float>(
-            //                                       singleShapeCout_,
-            //                                       singleShapeCin_)
-            //                                   * WinoInvTransformer::COUT_CIN_BUF_CNT;
-
-            // TBuf<TPosition::VECIN> transformInvOutBuf;
-            // pipe->InitBuffer(transformInvOutBuf, transformInvOutBufSize * sizeof(float));
-            // transformInvVBuf_ = transformInvOutBuf.Get<float>();
         }
-
-        // uint32_t singleShapeTileHW = singleShapeTilesH_ * singleShapeTilesW_;
         dwMmad_.Init(ub2l1_);
     }
 
@@ -1007,82 +935,86 @@ public:
         dwMmad_.End();
     }
 
-    inline void __aicore__ IterateAll(
-        uint32_t batchIdx)
+    inline void __aicore__ IterateAll()
     {
         using namespace WinoDetail;
 
-        constexpr BlockIterDirection BasicBlockDir = ResidentFmap ? CIN : COUT;
+        constexpr BlockIterDirection BasicBlockDir = ResidentFmap ? COUT : CIN;
         BlockIterator<BasicBlockDir, TilingT> blockIter(
             cout_,
             cin_);
 
+        uint32_t watermarkResidentC = 0;
+
         while (blockIter.More()) {
-            TileKIterator<TilingT> kIter(
-                tilesH_,
-                tilesW_);
+            CoutCinRange localBlock;
+            blockIter.GetLocalBlock(localBlock);
 
-            if ASCEND_IS_AIC {
-                dwMmad_.IterateK(
-                    blockIter,
-                    kIter,
-                    batchIdx,
-                    gm2l1_,
-                    ub2l1_,
-                    l0c2ubSync_,
-                    transformInvVBuf_);
+            uint32_t clusterCoutBound, clusterCinBound;
+            blockIter.GetClusterBlockUpperBound(clusterCoutBound, clusterCinBound);
+            uint32_t residentCBound = ResidentFmap ? clusterCinBound : clusterCoutBound;
+
+            for (uint32_t batchIdx = 0; batchIdx < batch_; batchIdx++) {
+                TileKIterator<TilingT> kIter(
+                    tilesH_,
+                    tilesW_);
+
+                if ASCEND_IS_AIC {
+                    dwMmad_.IterateK(
+                        localBlock,
+                        kIter,
+                        batchIdx,
+                        gm2l1_,
+                        ub2l1_,
+                        residentCBound > watermarkResidentC);
+                }
+
+                if ASCEND_IS_AIV {
+                    dwFwd_.IterateK(
+                        localBlock,
+                        kIter,
+                        gm2l1_,
+                        ub2l1_,
+                        batchIdx,
+                        watermarkResidentC,
+                        residentCBound);
+                }
+                blockIter.Next();
             }
 
-            if ASCEND_IS_AIV {
-                dwFwd_.IterateK(
-                    blockIter,
-                    kIter,
-                    gm2l1_,
-                    ub2l1_,
-                    batchIdx);
+            if (localBlock.NotEmpty()) {
+                //当前ub很难同时放下正变换和逆变换的速率，所以逆变换需要停掉整个正变换，并空出整个ub来逆变换，
+                constexpr uint32_t invBufSize = WinoInvTransformer<T, TilingT>::GetInvBufTotalSizeInBytes();
+                static_assert(invBufSize < TOTAL_UB_SIZE, "illegal buffer size");
+                auto invBuf = LocalTensor<float>(TPosition::VECIN, 0, invBufSize);
 
-                TransformOutput(blockIter);
+                if ASCEND_IS_AIC {
+                    dwMmad_.Fixpipe2UB(l0c2ubSync_, localBlock, invBuf);
+                }
+                if ASCEND_IS_AIV {
+                    dwInv_.TransformOutput(l0c2ubSync_, localBlock, cin_, invBuf);
+                    //停掉正变换的mte2搬运直到逆变换mte3搬出结束
+                    dwInv_.BlockMTE2ByMTE3();
+                }
             }
-            blockIter.Next();
+
+            watermarkResidentC = Std::max(watermarkResidentC, residentCBound);
         }
     }
 
 private:
-    template <WinoDetail::BlockIterDirection D>
-    inline __aicore__ void TransformOutput(
-        const WinoDetail::BlockIterator<D, TilingT>& blockIter)
-    {
-        WinoDetail::CoutCinRange cRange;
-        if (!blockIter.GetLocalBlock(cRange)) {
-            return;
-        }
-        l0c2ubSync_.WaitData();
-
-        // dwInv_.PartitionProcess(
-        //     yGm_, transformInvVBuf_,
-        //     cRange.coutIdx,
-        //     cRange.cinIdx,
-        //     cRange.coutLength,
-        //     cRange.cinLength,
-        //     cin_);
-
-        l0c2ubSync_.DeQue();
-    }
-
-
     const uint32_t tilesH_;
     const uint32_t tilesW_;
+    const uint32_t batch_;
     const uint32_t cin_;
     const uint32_t cout_;
 
-    LocalTensor<float> transformInvVBuf_;
     WinoDetail::FwdTransformGM2L1Queue<T> gm2l1_;
     WinoDetail::FwdTransformUB2L1Queue<T> ub2l1_;
-    WinoDetail::InvTransformL0C2UBSyncQueue l0c2ubSync_;
+    WinoDetail::InvTransformL0C2UBSyncQueue<TilingT> l0c2ubSync_;
     WinoDetail::AivFwdTransformer<T, TilingT> dwFwd_;
     WinoDetail::AicMmadComputer<T, TilingT> dwMmad_;
-    WinoInvTransformer dwInv_;
-    GlobalTensor<float> yGm_;
+    WinoInvTransformer<T, TilingT> dwInv_;
 };
 
 
