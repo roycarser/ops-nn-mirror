@@ -84,6 +84,10 @@ bool Conv3DBackpropFilterV2WinogradTiling::IsCapable()
     return true;
 }
 
+constexpr size_t Y_INDEX = 2;
+constexpr size_t FILTER_INDEX = 0;
+constexpr size_t OUTPUT_BP_INDEX = 0;
+
 bool Conv3DBackpropFilterV2WinogradTiling::CheckFormat()
 {
     const auto fmapDesc = context_->GetInputDesc(OUTPUT_BP_INDEX);
