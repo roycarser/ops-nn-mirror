@@ -330,6 +330,7 @@ private:
         StreamTaskInfo& stream) const
     {
         //当前非驻留矩阵区域
+        stream.cLocalIdx = localCIdx;
         stream.cIdx = localCIdx;
         stream.cLen = localCLen;
         stream.singleCoreCLen = Ops::Base::CeilDiv(
@@ -346,6 +347,7 @@ private:
         StreamTaskInfo& stream,
         ResidentTaskInfo& resident) const
     {
+        stream.cLocalIdx = localCIdx;
         stream.cIdx = localCIdx + SingleShapeResidentC;
         stream.cLen = Std::max(localCLen, SingleShapeResidentC) - SingleShapeResidentC;
         stream.singleCoreCLen = Ops::Base::CeilDiv(
@@ -493,6 +495,7 @@ private:
     }
 
     struct StreamTaskInfo {
+        uint32_t cLocalIdx;
         uint32_t cIdx;
         uint32_t cLen;
         uint16_t singleCoreCLen;
@@ -517,7 +520,7 @@ private:
              c < cLength;
              c += SingleShapeTransformC) {
             //c一定是C0对齐，所以tile元素直接乘上c值就行
-            ctx.l1method.ub2l1Offset = tile.elements * F23_TRANSFORM_TILE_ELEMENTS_16 * (cIdx + c);
+            ctx.l1method.ub2l1Offset = tile.elements * F23_TRANSFORM_TILE_ELEMENTS_16 * (cIdx + c - tasks.cLocalIdx);
 
             Execute(
                 GetTransformer<TransformType>(),
@@ -895,8 +898,7 @@ public:
     __aicore__ inline ConvBackpropFilterWinograd(
         const WinoFmapFwdTransformer<T, TilingT>& fmap,
         const WinoDyFwdTransformer<T, TilingT>& dy,
-        __gm__ T* nk1c1k0c0FmapGm,
-        __gm__ T* nk1c1k0c0DyGm,
+        __gm__ T* nk1c1k0c0Gm,
         __gm__ T* yGm,
         WinoMMAD<T, TilingT>& winoMmad,
         uint32_t tilesH,
@@ -908,7 +910,7 @@ public:
           cin_(fmap.SrcC()),
           cout_(dy.SrcC()),
           gm2l1_(
-              ResidentFmap ? nk1c1k0c0FmapGm : nk1c1k0c0DyGm,
+              nk1c1k0c0Gm,
               NK1C1K0C0::Shape<T>::template Create<TilingT>(
                   ResidentFmap ? cin_ : cout_, tilesH, tilesW)),
           dwFwd_(fmap, dy),

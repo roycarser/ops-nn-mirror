@@ -19,42 +19,82 @@
 
 #include "basic_api/kernel_basic_intf.h"
 #include "conv3d_backprop_filter_v2_tiling_data.h"
-#include "../conv3d_backprop/conv_bp_winograd.h"
+#include "../conv3d_backprop/conv_bp_wino.h"
 
 using namespace AscendC ;
 
-template <typename xType, typename dyType>
+template <typename T, uint32_t WinoTilingFlag>
 class Conv2dDwWinograd {
 public:
     __aicore__ inline void Init(
-        TPipe* pipe,
-        GM_ADDR x,
-        GM_ADDR dy,
-        GM_ADDR dw,
-        const conv_bp_v2_kernel::Conv2DBackpropFilterWinogradTilingData* tiling)
-        : fmapTransformer(
-            pipe, x,
-            tiling->cin,
-            tiling->hi,
-            tiling->wi,
-            tiling->padH,
-            tiling->padW,
-            tiling->singleShapeCin,
-            tiling->singleShapeK)
+        GM_ADDR x, GM_ADDR dedy, GM_ADDR y, GM_ADDR workspace,
+        conv_bp_v2_kernel::Conv3DBackpropFilterV2TilingData* tilingData)
     {
-        this->dyGm_.SetGlobalBuffer(dy);
-        this->dwGm_.SetGlobalBuffer(dw);
+        x_ = reinterpret_cast<__gm__ T*>(x);
+        dy_ = reinterpret_cast<__gm__ T*>(dedy);
+        y_ = reinterpret_cast<__gm__ T*>(y);
+        workspace_ = reinterpret_cast<__gm__ T*>(workspace);
+        tilingData_ = &tilingData->dwTiling;
     }
 
     __aicore__ inline void Process()
     {
-        typename WinoFmapTransformer<xType>::TileKIter kIter;
-        fmapTransformer.Transform(0, 0, &kIter);
+        uint32_t batch = tilingData_->batch;
+        uint32_t cout = tilingData_->cout;
+        uint32_t cin = tilingData_->cin;
+        uint32_t padH = tilingData_->padUp;
+        uint32_t padW = tilingData_->padLeft;
+        uint32_t fmapH = tilingData_->hi;
+        uint32_t fmapW = tilingData_->wi;
+        uint32_t dyH = tilingData_->ho;
+        uint32_t dyW = tilingData_->wo;
+        bool hf32 = tilingData_->hf32Flag;
 
+        using TilingT = decltype( BuildTilingType());
+        WinoFmapFwdTransformer<T, TilingT> fmapFwd(x_, fmapH, fmapW, cin, padH, padW);
+        WinoDyFwdTransformer<T, TilingT> dyFwd(dy_, dyH, dyW, cout, 0, 0);
+        WinoMMAD<T, TilingT> winoMmad(hf32);
+
+        uint32_t tileH = WinoDyFwdTransformer<T, TilingT>::SlideWin::SrcLength2Tiles(dyH);
+        uint32_t tileW = WinoDyFwdTransformer<T, TilingT>::SlideWin::SrcLength2Tiles(dyW);
+
+        ConvBackpropFilterWinograd<T, TilingT> winograd(fmapFwd, dyFwd, workspace_, y_, winoMmad, tileH, tileW, batch);
+
+        winograd.Init();
+        winograd.IterateAll();
+        winograd.End();
     }
 
 private:
-    WinoFmapTransformer<xType> fmapTransformer;
-    GlobalTensor<dyType> dyGm_;
-    GlobalTensor<float> dwGm_;
+    static __aicore__ inline constexpr auto BuildTilingType()
+    {
+        constexpr uint32_t singleShapeCout = 64;
+        constexpr uint32_t singleShapeCin = 64;
+        constexpr uint32_t singleShapeTransformC = 16;
+        constexpr uint32_t singleShapeResidentC = 32;
+        constexpr uint32_t fwdBufCnt = 5;
+        constexpr uint32_t invTransBufCnt = 4;
+        constexpr uint32_t invTransCout = 8;
+
+        //TODO set by dtype and tilingFlag
+        constexpr uint32_t singleShapeTileH = 2;
+        constexpr uint32_t singleShapeTileW = 32;
+
+        return BlockConfig::Tiling<singleShapeCout,
+            singleShapeCin,
+            singleShapeTransformC / C0<T>(),
+            singleShapeTileH,
+            singleShapeTileW,
+            fwdBufCnt,
+            singleShapeResidentC,
+            BlockConfig::InputTensor::FMAP,
+            invTransBufCnt,
+            invTransCout>{};
+    }
+
+    __gm__ T* x_ = nullptr;
+    __gm__ T* dy_ = nullptr;
+    __gm__ T* y_ = nullptr;
+    __gm__ T* workspace_ = nullptr;
+    AscendC::conv_bp_v2_kernel::TConv3DDwTiling* tilingData_ = nullptr;
 };
