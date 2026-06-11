@@ -15,7 +15,8 @@
 
 #ifndef CONV3D_BACKPROP_FILTER_V2_WINOGRAD_TILING_CPP
 #define CONV3D_BACKPROP_FILTER_V2_WINOGRAD_TILING_CPP
-#include "ascendc/host_api/tiling/template_argument.h"
+
+#include "conv/conv3d_backprop_filter_v2/op_kernel/arch35/conv3d_backprop_filter_v2/conv3d_backprop_filter_v2_tiling_key.h"
 #include "op_host/tiling_templates_registry.h"
 #include "error_util.h"
 #include "op_host/util/math_util.h"
