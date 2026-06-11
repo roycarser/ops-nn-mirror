@@ -23,6 +23,15 @@ namespace Ops {
 namespace NN {
 namespace Conv {
 class Conv3DBackpropFilterV2WinogradTiling : public Conv3DDWV2BasicBlockTilingArch35 {
+public:
+    explicit Conv3DBackpropFilterV2WinogradTiling(gert::TilingContext* context) : Conv3DDWV2BasicBlockTilingArch35(
+        context)
+    {
+        Reset();
+    }
+
+    ~Conv3DBackpropFilterV2WinogradTiling() override = default;
+
 protected:
     bool IsCapable() override;
 
