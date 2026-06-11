@@ -24,7 +24,7 @@ using namespace AscendC;
 template <typename T, typename TilingT>
 class WinoMMAD {
 public:
-    __aicore__ WinoMMAD(bool hf32Flag)
+    __aicore__ explicit WinoMMAD(bool hf32Flag)
         : hf32Flag_(hf32Flag)
     {
     }

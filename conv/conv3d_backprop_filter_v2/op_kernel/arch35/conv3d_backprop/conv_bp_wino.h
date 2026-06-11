@@ -943,8 +943,8 @@ public:
     inline void __aicore__ IterateAll()
     {
         using namespace WinoDetail;
-
-        constexpr BlockIterDirection BasicBlockDir = ResidentFmap ? COUT : CIN;
+        //TODO 调整block遍历方式
+        constexpr BlockIterDirection BasicBlockDir = ResidentFmap ? CIN : COUT;
         BlockIterator<BasicBlockDir, TilingT> blockIter(
             cout_,
             cin_);

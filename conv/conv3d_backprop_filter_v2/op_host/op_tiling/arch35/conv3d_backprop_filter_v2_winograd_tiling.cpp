@@ -43,8 +43,7 @@ bool Conv3DBackpropFilterV2WinogradTiling::IsCapable()
         return false;
     }
 
-    if (!((runInfo_.a_dtype == runInfo_.b_dtype) && (runInfo_.a_dtype == runInfo_.c_dtype))) {
-        //数据类型要相同，理论只需要输入相同，输出可以不一样，但是输出不一样的代码还没实现
+    if (runInfo_.a_dtype != runInfo_.b_dtype) {
         //TODO 适配通路里ctype为假的fp32
         OP_LOGD(opName_, "Winograd tiling is not support different dtype");
         return false;
@@ -52,8 +51,9 @@ bool Conv3DBackpropFilterV2WinogradTiling::IsCapable()
 
     if (runInfo_.di != 1 ||
         runInfo_.dout != 1 ||
-        runInfo_.di != 1 ||
         runInfo_.kd != 1 ||
+        runInfo_.dilation_d != 1 ||
+        runInfo_.stride_d != 1 ||
         runInfo_.pad_f != 0 ||
         runInfo_.pad_b != 0) {
         OP_LOGD(opName_, "Winograd tiling is only supported for 2d");
