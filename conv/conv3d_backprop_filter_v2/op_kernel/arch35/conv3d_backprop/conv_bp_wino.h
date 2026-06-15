@@ -132,15 +132,7 @@ public:
     //获取当前aic计算的基本块范围,若当前核无基本块计算则返回false并且将length设置为0
     inline __aicore__ bool GetLocalBlock(CoutCinRange& cRange) const
     {
-        uint16_t coreId;
-
-        if ASCEND_IS_AIC {
-            coreId = GetBlockIdx();
-        } else {
-            coreId = GetBlockIdx() / GetSubBlockNum();
-        }
-
-        return GetBlock(coreId, cRange);
+        return GetBlock(AicCoreId(), cRange);
     }
 
     inline __aicore__ bool GetBlock(uint16_t coreId, CoutCinRange& cRange) const
@@ -347,6 +339,7 @@ private:
         StreamTaskInfo& stream,
         ResidentTaskInfo& resident) const
     {
+        //[resident,stream]
         stream.cLocalIdx = localCIdx;
         stream.cIdx = localCIdx + SingleShapeResidentC;
         stream.cLen = Std::max(localCLen, SingleShapeResidentC) - SingleShapeResidentC;
@@ -466,8 +459,8 @@ private:
             WinoTransformDetail::FmapConfig<T, TilingT>,
             WinoTransformDetail::DyConfig<T, TilingT> >;
 
-        const uint16_t coreId = GetBlockIdx() * AivNumInBlock() + GetSubBlockIdx();
-        const uint16_t stride = AivNumInBlock() * GetBlockNum();
+        const uint32_t coreId = AivCoreId();
+        const uint32_t stride = AivNums();
 
         for (uint32_t taskId = (coreId + stride - taskOffset) % stride;
              taskId < task.cTaskCnt;
@@ -889,18 +882,18 @@ private:
 };
 }
 
-template <typename T, typename TilingT>
+template <typename SrcT,typename DstT, typename TilingT>
 class ConvBackpropFilterWinograd {
 public:
     static constexpr bool ResidentFmap =
         BlockConfig::ResidentTarget<TilingT>() == BlockConfig::InputTensor::FMAP;
 
     __aicore__ inline ConvBackpropFilterWinograd(
-        const WinoFmapFwdTransformer<T, TilingT>& fmap,
-        const WinoDyFwdTransformer<T, TilingT>& dy,
-        __gm__ T* nk1c1k0c0Gm,
-        __gm__ T* yGm,
-        WinoMMAD<T, TilingT>& winoMmad,
+        const WinoFmapFwdTransformer<SrcT, TilingT>& fmap,
+        const WinoDyFwdTransformer<SrcT, TilingT>& dy,
+        __gm__ SrcT* nk1c1k0c0Gm,
+        __gm__ DstT* yGm,
+        WinoMMAD<SrcT, TilingT>& winoMmad,
         uint32_t tilesH,
         uint32_t tilesW,
         uint32_t batch)
@@ -911,7 +904,7 @@ public:
           cout_(dy.SrcC()),
           gm2l1_(
               nk1c1k0c0Gm,
-              NK1C1K0C0::Shape<T>::template Create<TilingT>(
+              NK1C1K0C0::Shape<SrcT>::template Create<TilingT>(
                   ResidentFmap ? cin_ : cout_, tilesH, tilesW)),
           dwFwd_(fmap, dy),
           dwMmad_(winoMmad),
@@ -959,6 +952,7 @@ public:
             blockIter.GetClusterBlockUpperBound(clusterCoutBound, clusterCinBound);
             uint32_t residentCBound = ResidentFmap ? clusterCinBound : clusterCoutBound;
 
+            //TODO N轴内移提升性能，跨N状态重置会导致一些不连续
             for (uint32_t batchIdx = 0; batchIdx < batch_; batchIdx++) {
                 TileKIterator<TilingT> kIter(
                     tilesH_,
@@ -989,7 +983,7 @@ public:
 
             if (localBlock.NotEmpty()) {
                 //当前ub很难同时放下正变换和逆变换的速率，所以逆变换需要停掉整个正变换，并空出整个ub来逆变换，
-                constexpr uint32_t invBufSize = WinoInvTransformer<T, TilingT>::GetInvBufTotalSizeInBytes();
+                constexpr uint32_t invBufSize = WinoInvBufUtil::GetInvBufTotalSizeInBytes<TilingT>();
                 static_assert(invBufSize < TOTAL_UB_SIZE, "illegal buffer size");
                 auto invBuf = LocalTensor<float>(TPosition::VECIN, 0, invBufSize);
 
@@ -1014,12 +1008,12 @@ private:
     const uint32_t cin_;
     const uint32_t cout_;
 
-    WinoDetail::FwdTransformGM2L1Queue<T> gm2l1_;
-    WinoDetail::FwdTransformUB2L1Queue<T> ub2l1_;
+    WinoDetail::FwdTransformGM2L1Queue<SrcT> gm2l1_;
+    WinoDetail::FwdTransformUB2L1Queue<SrcT> ub2l1_;
     WinoDetail::InvTransformL0C2UBSyncQueue<TilingT> l0c2ubSync_;
-    WinoDetail::AivFwdTransformer<T, TilingT> dwFwd_;
-    WinoDetail::AicMmadComputer<T, TilingT> dwMmad_;
-    WinoInvTransformer<T, TilingT> dwInv_;
+    WinoDetail::AivFwdTransformer<SrcT, TilingT> dwFwd_;
+    WinoDetail::AicMmadComputer<SrcT, TilingT> dwMmad_;
+    WinoInvTransformer<DstT, TilingT> dwInv_;
 };
 
 
