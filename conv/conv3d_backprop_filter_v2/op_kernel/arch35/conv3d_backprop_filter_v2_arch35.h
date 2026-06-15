@@ -14,11 +14,12 @@
  */
 #ifndef CONV3D_BACKPROP_FILTER_V2_ARCH_35_H
 #define CONV3D_BACKPROP_FILTER_V2_ARCH_35_H
-#include "conv3d_backprop_filter_v2/conv2d_dw_winograd.h"
+
 #include "conv3d_backprop_filter_v2/conv3d_backprop_filter_v2.h"
 #include "conv3d_backprop_filter_v2/conv3d_backprop_filter_v2_init_output.h"
 #include "conv3d_backprop_filter_v2/conv3d_dw_v2_basic_block.h"
 #include "conv3d_backprop_filter_v2/conv3d_backprop_filter_v2_tiling_data.h"
+#include "conv3d_backprop_filter_v2/conv2d_dw_winograd.h"
 
 using namespace AscendC;
 
@@ -29,7 +30,7 @@ using namespace AscendC;
         op.Process();                                    \
     } while (0)
 
-template <uint32_t conv3DDWTemplateId, bool isSplitKernelHW, bool groupEnlarge,int32_t winogradTilingFlag>
+template <uint32_t conv3DDWTemplateId, bool isSplitKernelHW, bool groupEnlarge, uint32_t winogradTilingFlag>
 __global__ __aicore__ void conv3d_backprop_filter_v2_arch35(GM_ADDR x, GM_ADDR filter_size, GM_ADDR out_backprop,
                                                             GM_ADDR y, GM_ADDR workSpace, GM_ADDR tiling)
 {
@@ -54,14 +55,12 @@ __global__ __aicore__ void conv3d_backprop_filter_v2_arch35(GM_ADDR x, GM_ADDR f
 
     if constexpr (winogradTilingFlag != TPL_WINOGRAD_DISABLE) {
         TPipe pipe;
-        CONV3D_DX_INPUT_RUN_OP(Conv2dDwWinograd<DTYPE_X, winogradTilingFlag>);
-        return;
-    }
-
-    Conv3dDwInitOutput<DTYPE_Y> opInitOutput;
-    opInitOutput.Init(y, &tilingData);
-    opInitOutput.Process();
-    opInitOutput.Destroy();
+        CONV3D_DX_INPUT_RUN_OP(Conv2dDwWinograd<DTYPE_X, DTYPE_Y, winogradTilingFlag>);
+    } else {
+        Conv3dDwInitOutput<DTYPE_Y> opInitOutput;
+        opInitOutput.Init(y, &tilingData);
+        opInitOutput.Process();
+        opInitOutput.Destroy();
 
     if constexpr (conv3DDWTemplateId == TPL_STREAM_K) {
         CONV3D_DX_INPUT_RUN_OP(Conv3dDwBasicBlockStreamK<DTYPE_X, FORMAT_X, DTYPE_OUT_BACKPROP, FORMAT_OUT_BACKPROP,

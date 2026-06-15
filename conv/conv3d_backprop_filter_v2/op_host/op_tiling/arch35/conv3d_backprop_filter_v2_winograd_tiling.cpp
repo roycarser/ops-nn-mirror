@@ -76,7 +76,7 @@ bool Conv3DBackpropFilterV2WinogradTiling::IsCapable()
         return false;
     }
 
-    if ((runInfo_.ho / 2) * (runInfo_.wo / 2) * runInfo_.batch < 65536) {
+    if ((runInfo_.ho / 2) * (runInfo_.wo / 2) * runInfo_.batch > 65536) {
         //累加轴过大暂时不处理，winograd累加轴比常规实现少了4倍，应该能囊括绝大部分case
         //有需要可以适当放大
         OP_LOGD(opName_, "current reduce asix is too large for Winograd impl");

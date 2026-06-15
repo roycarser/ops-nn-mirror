@@ -50,11 +50,12 @@ using InvTransformL0C2UBSyncQueue = CVSyncQue<CVSyncQueConfig<PIPE_FIX, PIPE_V, 
     BlockConfig::InvTransformBufCnt<TilingT>(), true> >;
 
 template <typename TilingT>
-class TileKIterator {
+class BatchTileKIterator {
 public:
-    __aicore__ inline explicit TileKIterator(
-        uint32_t tilesH, uint32_t tilesW)
-        : tilesH_(tilesH),
+    __aicore__ inline explicit BatchTileKIterator(
+        uint32_t batch, uint32_t tilesH, uint32_t tilesW)
+        : batch_(batch),
+          tilesH_(tilesH),
           tilesW_(tilesW)
     {
     }
@@ -72,13 +73,21 @@ public:
 
     __aicore__ inline void Next()
     {
+        tileKIdx_++;
+
         tileWIdx_ += SingleShapeTileW;
+
         if (tileWIdx_ >= tilesW_) {
             tileWIdx_ = 0;
             tileHIdx_ += SingleShapeTileH;
-            end_ = tileHIdx_ >= tilesH_;
+
+            if (tileHIdx_ >= tilesH_) {
+                tileHIdx_ = 0;
+                batchIdx_++;
+                tileKIdx_ = 0;
+                end_ = batchIdx_ >= batch_;
+            }
         }
-        kIdx_++;
     }
 
     __aicore__ inline bool More() const
@@ -86,9 +95,14 @@ public:
         return !end_;
     }
 
-    __aicore__ inline uint32_t kIdx() const
+    __aicore__ inline uint32_t TileKIdx() const
     {
-        return kIdx_;
+        return tileKIdx_;
+    }
+
+    __aicore__ inline uint32_t BatchIdx() const
+    {
+        return batchIdx_;
     }
 
 private:
@@ -96,9 +110,11 @@ private:
     constexpr static uint16_t SingleShapeTileW = BlockConfig::SingleShapeTileW<TilingT>();
     const uint32_t tilesH_;
     const uint32_t tilesW_;
+    const uint32_t batch_;
     uint32_t tileHIdx_ = 0;
     uint32_t tileWIdx_ = 0;
-    uint32_t kIdx_ = 0;
+    uint32_t batchIdx_ = 0;
+    uint32_t tileKIdx_ = 0;
     bool end_ = false;
 };
 
@@ -248,10 +264,9 @@ public:
 
     __aicore__ inline void IterateK(
         const CoutCinRange& localBlock,
-        TileKIterator<TilingT>& kIter,
+        BatchTileKIterator<TilingT>& kIter,
         FwdTransformGM2L1Queue<T>& gm2l1Que,
         FwdTransformUB2L1Queue<T>& ub2l1Que,
-        uint32_t batchIdx,
         uint32_t watermarkResidentC,
         uint32_t residentCBound)
     {
@@ -276,7 +291,7 @@ public:
             HWBox tile = kIter.TileBox();
 
             if (residentCBound > watermarkResidentC) {
-                typename TransformFunctions::GM2L1Ctx gm2l1Ctx = {batchIdx, kIter.kIdx(), {gm2l1Que}};
+                typename TransformFunctions::GM2L1Ctx gm2l1Ctx = {kIter.BatchIdx(), kIter.TileKIdx(), {gm2l1Que}};
                 gm2l1Que.WaitSlot();
 
                 //TODO 全核轮询执行，而非一直从0核开始
@@ -288,7 +303,7 @@ public:
                 gm2l1Que.EnQue();
             }
 
-            typename TransformFunctions::UB2L1Ctx ub2l1Ctx = {batchIdx, kIter.kIdx(), {ub2l1Que, 0}};
+            typename TransformFunctions::UB2L1Ctx ub2l1Ctx = {kIter.BatchIdx(), kIter.TileKIdx(), {ub2l1Que, 0}};
             ub2l1Que.WaitSlot();
 
             ProcessStreamingTransform<TensorT0>(
@@ -673,21 +688,20 @@ public:
 
     __aicore__ inline void IterateK(
         const CoutCinRange& blockRange,
-        TileKIterator<TilingT>& kIter,
-        uint32_t batchIdx,
+        BatchTileKIterator<TilingT>& kIter,
         FwdTransformGM2L1Queue<T>& gm2l1,
         FwdTransformUB2L1Queue<T>& ub2l1,
         bool waitResidentTransform)
     {
         if (blockRange.NotEmpty()) {
             RunMmad<true>(
-                batchIdx, blockRange, kIter,
+                blockRange, kIter,
                 gm2l1, ub2l1,
                 waitResidentTransform);
         } else {
             // 闲置核仅参与 Queue 信号同步，维持集群流水线运转，不进行实际 Compute
             RunMmad<false>(
-                batchIdx, blockRange, kIter,
+                blockRange, kIter,
                 gm2l1, ub2l1,
                 waitResidentTransform);
         }
@@ -708,9 +722,8 @@ public:
 private:
     template <bool NotIdle>
     __aicore__ inline void RunMmad(
-        const uint32_t batchIdx,
         const CoutCinRange& cRange,
-        TileKIterator<TilingT>& iter,
+        BatchTileKIterator<TilingT>& iter,
         FwdTransformGM2L1Queue<T>& gm2l1,
         FwdTransformUB2L1Queue<T>& ub2l1,
         bool waitResidentTransform)
@@ -747,7 +760,8 @@ private:
             bool computePingPong = false;
 
             HWBox tiles = iter.TileBox();
-            uint32_t kIdx = iter.kIdx();
+            uint32_t kIdx = iter.TileKIdx();
+            uint32_t batchIdx = iter.BatchIdx();
 
             // ================= 阶段 1: Prologue (预载入第一轮数据) =================
             MmadLoadResident<NotIdle>(
@@ -781,10 +795,11 @@ private:
                 // ComputePong可以立刻执行
                 //  Compute Pong
                 HWBox nextTiles = iter.TileBox();
-                uint32_t nextKIdx = iter.kIdx();
+                uint32_t nextKIdx = iter.TileKIdx();
+                uint32_t nextBatchIdx = iter.BatchIdx();
 
                 MmadLoadResident<NotIdle>(
-                    nextTiles, gm2l1, batchIdx, nextKIdx,
+                    nextTiles, gm2l1, nextBatchIdx, nextKIdx,
                     residentC1Idx, residentC1Length,
                     waitResidentTransform, loadPingPong);
 
@@ -797,6 +812,7 @@ private:
 
                 tiles = nextTiles;
                 kIdx = nextKIdx;
+                batchIdx = nextBatchIdx;
 
                 iter.Next();
             }
@@ -882,7 +898,7 @@ private:
 };
 }
 
-template <typename SrcT,typename DstT, typename TilingT>
+template <typename SrcT, typename DstT, typename TilingT>
 class ConvBackpropFilterWinograd {
 public:
     static constexpr bool ResidentFmap =
@@ -952,33 +968,28 @@ public:
             blockIter.GetClusterBlockUpperBound(clusterCoutBound, clusterCinBound);
             uint32_t residentCBound = ResidentFmap ? clusterCinBound : clusterCoutBound;
 
-            //TODO N轴内移提升性能，跨N状态重置会导致一些不连续
-            for (uint32_t batchIdx = 0; batchIdx < batch_; batchIdx++) {
-                TileKIterator<TilingT> kIter(
-                    tilesH_,
-                    tilesW_);
+            BatchTileKIterator<TilingT> kIter(
+                batch_,
+                tilesH_,
+                tilesW_);
 
-                if ASCEND_IS_AIC {
-                    dwMmad_.IterateK(
-                        localBlock,
-                        kIter,
-                        batchIdx,
-                        gm2l1_,
-                        ub2l1_,
-                        residentCBound > watermarkResidentC);
-                }
+            if ASCEND_IS_AIC {
+                dwMmad_.IterateK(
+                    localBlock,
+                    kIter,
+                    gm2l1_,
+                    ub2l1_,
+                    residentCBound > watermarkResidentC);
+            }
 
-                if ASCEND_IS_AIV {
-                    dwFwd_.IterateK(
-                        localBlock,
-                        kIter,
-                        gm2l1_,
-                        ub2l1_,
-                        batchIdx,
-                        watermarkResidentC,
-                        residentCBound);
-                }
-                blockIter.Next();
+            if ASCEND_IS_AIV {
+                dwFwd_.IterateK(
+                    localBlock,
+                    kIter,
+                    gm2l1_,
+                    ub2l1_,
+                    watermarkResidentC,
+                    residentCBound);
             }
 
             if (localBlock.NotEmpty()) {
@@ -997,6 +1008,7 @@ public:
                 }
             }
 
+            blockIter.Next();
             watermarkResidentC = Std::max(watermarkResidentC, residentCBound);
         }
     }

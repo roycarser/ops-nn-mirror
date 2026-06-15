@@ -190,8 +190,11 @@ public:
             if constexpr (C2V) {
                 //整个队列是按模式2实现的，但是模式2跑仿真时有bug,会产生多余的set
                 //先用模式4模拟模式2
-                AscendC::CrossCoreWaitFlag<4, SRC_PIPE>(POP_FLAG);
-                AscendC::CrossCoreWaitFlag<4, SRC_PIPE>(POP_FLAG + 16);
+#pragma unroll
+                for (uint8_t i = 0; i < AivNumInBlock(); i++) {
+                    AscendC::CrossCoreWaitFlag<4, SRC_PIPE>(POP_FLAG + 16 * i);
+                }
+
             } else {
                 AscendC::CrossCoreWaitFlag<4, SRC_PIPE>(POP_FLAG);
             }
@@ -201,8 +204,10 @@ public:
     __aicore__ inline void EnQue()
     {
         if constexpr (C2V) {
-            AscendC::CrossCoreSetFlag<4, SRC_PIPE>(PUSH_FLAG);
-            AscendC::CrossCoreSetFlag<4, SRC_PIPE>(PUSH_FLAG + 16);
+#pragma unroll
+            for (uint8_t i = 0; i < AivNumInBlock(); i++) {
+                AscendC::CrossCoreSetFlag<4, SRC_PIPE>(PUSH_FLAG + 16 * i);
+            }
         } else {
             AscendC::CrossCoreSetFlag<4, SRC_PIPE>(PUSH_FLAG);
         }
@@ -217,8 +222,10 @@ public:
         if constexpr (C2V) {
             AscendC::CrossCoreWaitFlag<4, SYNC_DST_PIPE>(PUSH_FLAG);
         } else {
-            AscendC::CrossCoreWaitFlag<4, SYNC_DST_PIPE>(PUSH_FLAG);
-            AscendC::CrossCoreWaitFlag<4, SYNC_DST_PIPE>(PUSH_FLAG + 16);
+#pragma unroll
+            for (uint8_t i = 0; i < AivNumInBlock(); i++) {
+                AscendC::CrossCoreWaitFlag<4, SYNC_DST_PIPE>(PUSH_FLAG + 16 * i);
+            }
         }
     }
 
@@ -227,8 +234,10 @@ public:
         if constexpr (C2V) {
             AscendC::CrossCoreSetFlag<4, POP_PIPE>(POP_FLAG);
         } else {
-            AscendC::CrossCoreSetFlag<4, POP_PIPE>(POP_FLAG);
-            AscendC::CrossCoreSetFlag<4, POP_PIPE>(POP_FLAG + 16);
+#pragma unroll
+            for (uint8_t i = 0; i < AivNumInBlock(); i++) {
+                AscendC::CrossCoreSetFlag<4, POP_PIPE>(POP_FLAG + 16 * i);
+            }
         }
     }
 

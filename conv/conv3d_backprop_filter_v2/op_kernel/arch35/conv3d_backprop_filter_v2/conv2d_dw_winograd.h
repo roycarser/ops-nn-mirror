@@ -17,23 +17,22 @@
 #define CONV2D_BACKPROP_FILTER_WINOGRAD_H
 #endif
 
-#include "basic_api/kernel_basic_intf.h"
 #include "conv3d_backprop_filter_v2_tiling_data.h"
 #include "../conv3d_backprop/conv_bp_wino.h"
 
 using namespace AscendC ;
 
-template <typename T, uint32_t WinoTilingFlag>
+template <typename SrcT,typename DstT, uint32_t WinoTilingFlag>
 class Conv2dDwWinograd {
 public:
     __aicore__ inline void Init(
         GM_ADDR x, GM_ADDR dedy, GM_ADDR y, GM_ADDR workspace,
         conv_bp_v2_kernel::Conv3DBackpropFilterV2TilingData* tilingData)
     {
-        x_ = reinterpret_cast<__gm__ T*>(x);
-        dy_ = reinterpret_cast<__gm__ T*>(dedy);
-        y_ = reinterpret_cast<__gm__ T*>(y);
-        workspace_ = reinterpret_cast<__gm__ T*>(workspace);
+        x_ = reinterpret_cast<__gm__ SrcT*>(x);
+        dy_ = reinterpret_cast<__gm__ SrcT*>(dedy);
+        workspace_ = reinterpret_cast<__gm__ SrcT*>(workspace);
+        y_ = reinterpret_cast<__gm__ DstT*>(y);
         tilingData_ = &tilingData->dwTiling;
     }
 
@@ -51,14 +50,19 @@ public:
         bool hf32 = tilingData_->hf32Flag;
 
         using TilingT = decltype( BuildTilingType());
-        WinoFmapFwdTransformer<T, TilingT> fmapFwd(x_, fmapH, fmapW, cin, padH, padW);
-        WinoDyFwdTransformer<T, TilingT> dyFwd(dy_, dyH, dyW, cout, 0, 0);
-        WinoMMAD<T, TilingT> winoMmad(hf32);
+        WinoFmapFwdTransformer<SrcT, TilingT> fmapFwd(x_, fmapH, fmapW, cin, padH, padW);
+        WinoDyFwdTransformer<SrcT, TilingT> dyFwd(dy_, dyH, dyW, cout, 0, 0);
+        WinoMMAD<SrcT, TilingT> winoMmad(hf32);
 
-        uint32_t tileH = WinoDyFwdTransformer<T, TilingT>::SlideWin::SrcLength2Tiles(dyH);
-        uint32_t tileW = WinoDyFwdTransformer<T, TilingT>::SlideWin::SrcLength2Tiles(dyW);
+        uint32_t tileH = WinoDyFwdTransformer<SrcT, TilingT>::SlideWin::SrcLength2Tiles(dyH);
+        uint32_t tileW = WinoDyFwdTransformer<SrcT, TilingT>::SlideWin::SrcLength2Tiles(dyW);
 
-        ConvBackpropFilterWinograd<T, TilingT> winograd(fmapFwd, dyFwd, workspace_, y_, winoMmad, tileH, tileW, batch);
+        ConvBackpropFilterWinograd<SrcT, DstT, TilingT> winograd(
+            fmapFwd, dyFwd,
+            workspace_, y_,
+            winoMmad,
+            tileH, tileW,
+            batch);
 
         winograd.Init();
         winograd.IterateAll();
@@ -82,7 +86,7 @@ private:
 
         return BlockConfig::Tiling<singleShapeCout,
             singleShapeCin,
-            singleShapeTransformC / C0<T>(),
+            singleShapeTransformC / C0<SrcT>(),
             singleShapeTileH,
             singleShapeTileW,
             fwdBufCnt,
@@ -92,9 +96,9 @@ private:
             invTransCout>{};
     }
 
-    __gm__ T* x_ = nullptr;
-    __gm__ T* dy_ = nullptr;
-    __gm__ T* y_ = nullptr;
-    __gm__ T* workspace_ = nullptr;
+    __gm__ SrcT* x_ = nullptr;
+    __gm__ SrcT* dy_ = nullptr;
+    __gm__ SrcT* workspace_ = nullptr;
+    __gm__ DstT* y_ = nullptr;
     AscendC::conv_bp_v2_kernel::TConv3DDwTiling* tilingData_ = nullptr;
 };

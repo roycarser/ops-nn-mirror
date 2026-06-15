@@ -16,19 +16,45 @@
 #ifndef CONV_BP_WINO_INV_TRANSFORM_H
 #define CONV_BP_WINO_INV_TRANSFORM_H
 
-#include "kernel_operator.h"
 #include "conv_bp_wino_util.h"
-
 
 using namespace AscendC;
 
-template <typename T, typename TilingT>
+namespace WinoInvBufUtil {
+//需要申请26个CoutCin空间,16个用来放原始数据,9个用来放逆变换转置后的数据
+static constexpr uint32_t COUT_CIN_BUF_CNT = 25;
+
+template <typename TilingT>
+static constexpr __aicore__ inline uint32_t InvTransSinglePointBufSize()
+{
+    constexpr uint32_t sizeCoutCin = BlockConfig::SingleShapeInvTransformCout<TilingT>() *
+                                     BlockConfig::SingleShapeCin<TilingT>();
+    return ConstexprMaths::AlignUp(sizeCoutCin, C0<float>());
+}
+
+template <typename TilingT>
+static constexpr __aicore__ inline uint32_t InvTransBufSize()
+{
+    return InvTransSinglePointBufSize<TilingT>() * COUT_CIN_BUF_CNT;
+}
+
+template <typename TilingT>
+static constexpr __aicore__ inline uint32_t GetInvBufTotalSizeInBytes()
+{
+    constexpr uint8_t BufCnt = BlockConfig::InvTransformBufCnt<TilingT>();
+    constexpr uint32_t bufSize = InvTransBufSize<TilingT>() * BufCnt * sizeof(float);
+    static_assert(bufSize < TOTAL_UB_SIZE, "illegal buffer size");
+    return bufSize;
+}
+}
+
+template <typename DstT, typename TilingT>
 class WinoInvTransformer {
 public:
-    //需要申请26个CoutCin空间,16个用来放原始数据,9个用来放逆变换转置后的数据
-    static constexpr uint32_t COUT_CIN_BUF_CNT = 25;
+    static constexpr uint32_t INV_TRANS_BUF_SIZE = WinoInvBufUtil::InvTransBufSize<TilingT>();
+    static constexpr uint32_t INV_TRANS_SINGLE_POINT_BUF_SIZE = WinoInvBufUtil::InvTransSinglePointBufSize<TilingT>();
 
-    __aicore__ inline explicit WinoInvTransformer(__gm__ T* yGm)
+    __aicore__ inline explicit WinoInvTransformer(__gm__ DstT* yGm)
     {
         yGm_.SetGlobalBuffer(yGm);
     }
@@ -38,26 +64,6 @@ public:
         TPipe* pipe = GetTPipePtr();
         v2mte3_ = pipe->AllocEventID<HardEvent::V_MTE3>();
         mte32mte2_ = pipe->AllocEventID<HardEvent::MTE3_MTE2>();
-    }
-
-    static constexpr __aicore__ inline uint32_t InvTransSinglePointBufSize()
-    {
-        constexpr uint32_t sizeCoutCin = BlockConfig::SingleShapeInvTransformCout<TilingT>() *
-                                         BlockConfig::SingleShapeCin<TilingT>();
-        return ConstexprMaths::AlignUp(sizeCoutCin, C0<float>());
-    }
-
-    static constexpr __aicore__ inline uint32_t InvTransBufSize()
-    {
-        return InvTransSinglePointBufSize() * COUT_CIN_BUF_CNT;
-    }
-
-    static constexpr __aicore__ inline uint32_t GetInvBufTotalSizeInBytes()
-    {
-        constexpr uint8_t BufCnt = BlockConfig::InvTransformBufCnt<TilingT>();
-        constexpr uint32_t bufSize = InvTransBufSize() * BufCnt * sizeof(float);
-        static_assert(bufSize < TOTAL_UB_SIZE, "illegal buffer size");
-        return bufSize;
     }
 
 
@@ -87,7 +93,7 @@ public:
                 const uint32_t processCoutLength = Std::min(localCoutLength, coutLengthInBlock - localCoutOffset);
                 const uint32_t coutCin = processCoutLength * localBlock.cinLength;
 
-                LocalTensor<float> buf = vBuf[bufIdx * InvTransBufSize()];
+                LocalTensor<float> buf = vBuf[bufIdx * INV_TRANS_BUF_SIZE];
                 ProcessInvTransform(
                     reinterpret_cast<__ubuf__ float*>(buf.GetPhyAddr()),
                     coutCin,
@@ -98,17 +104,16 @@ public:
                 SetFlag<HardEvent::V_MTE3>(v2mte3_);
                 WaitFlag<HardEvent::V_MTE3>(v2mte3_);
 
-                uint64_t gmOffset = static_cast<uint64_t>(coutIdx) * localBlock.cinIdx * KERNEL_3x3;
+                uint64_t gmOffset = (static_cast<uint64_t>(coutIdx) * cinSrc + localBlock.cinIdx) * KERNEL_3x3;
 
                 DataCopyExtParams params;
                 params.blockCount = processCoutLength;
-                params.blockLen = localBlock.cinLength * KERNEL_3x3 * sizeof(T);
+                params.blockLen = localBlock.cinLength * KERNEL_3x3 * sizeof(DstT);
                 params.srcStride = 0;
-                params.dstStride = (static_cast<uint64_t>(cinSrc) - localBlock.cinLength) * KERNEL_3x3 * sizeof(T);
-
-                DataCopyPad<T, PaddingMode::Compact>(
+                params.dstStride = (static_cast<uint64_t>(cinSrc) - localBlock.cinLength) * KERNEL_3x3 * sizeof(DstT);
+                DataCopyPad<DstT, PaddingMode::Compact>(
                     yGm_[gmOffset],
-                    buf[KERNEL_3x3 * InvTransSinglePointBufSize()].ReinterpretCast<T>(),
+                    buf[F23_TRANSFORM_TILE_ELEMENTS_16 * INV_TRANS_SINGLE_POINT_BUF_SIZE].ReinterpretCast<DstT>(),
                     params);
             }
 
@@ -137,7 +142,7 @@ private:
         RegTensor<float> value0P5;
         Duplicate(value0P5, 0.5f);
 
-        constexpr uint32_t singlePointSize = InvTransSinglePointBufSize();
+        constexpr uint32_t singlePointSize = INV_TRANS_SINGLE_POINT_BUF_SIZE;
         __ubuf__ float* src0 = buf;
         __ubuf__ float* src1 = buf + singlePointSize * F23_TRANSFORM_TILE_SIZE_4;
         __ubuf__ float* src2 = buf + singlePointSize * F23_TRANSFORM_TILE_SIZE_4 * 2;
@@ -151,7 +156,7 @@ private:
         Duplicate(tmp9, 9);
         MaskReg maskAll = CreateMask<uint32_t, MaskPattern::ALL>();
         Mul(index, seq, tmp9, maskAll);
-        __ubuf__ float* transposeBuf = buf + F23_TRANSFORM_TILE_ELEMENTS_16 * InvTransSinglePointBufSize();
+        __ubuf__ float* transposeBuf = buf + F23_TRANSFORM_TILE_ELEMENTS_16 * singlePointSize;
         __ubuf__ float* dst = transposeBuf;
 
         uint32_t maskValue = coutCinLength;
@@ -235,7 +240,7 @@ private:
         }
 
         //scatter完后在重新做cast，把float转b16后空的2个字节移除，不能直接用b16做scatter，bank冲突太严重
-        if constexpr (!Std::is_same_v<T, float>) {
+        if constexpr (!Std::is_same_v<DstT, float>) {
             LocalMemBar<MemType::VEC_STORE, MemType::VEC_LOAD>();
 
             __ubuf__ float* loadSrc = transposeBuf;
@@ -250,8 +255,6 @@ private:
             }
         }
     }
-
-
 
 
     __simd_callee__ static inline void TransformCol(
@@ -290,7 +293,7 @@ private:
         MicroAPI::RegTensor<float>& out1,
         MicroAPI::RegTensor<float>& out2)
     {
-        if constexpr (Std::is_same_v<T, float>) {
+        if constexpr (Std::is_same_v<DstT, float>) {
             TransformVf(value0P5, d0, d1, d2, d3, out0, out1, out2, mask);
         } else {
             MicroAPI::RegTensor<float> tmp0;
@@ -298,7 +301,7 @@ private:
             MicroAPI::RegTensor<float> tmp2;
             TransformVf(value0P5, d0, d1, d2, d3, tmp0, tmp1, tmp2, mask);
 
-            static_assert(sizeof(T) == 2);
+            static_assert(sizeof(DstT) == 2);
             static constexpr MicroAPI::CastTrait castTraitB322B16 = {
                 MicroAPI::RegLayout::ZERO,
                 MicroAPI::SatMode::NO_SAT,
@@ -306,9 +309,9 @@ private:
                 RoundMode::CAST_RINT,
             };
 
-            Cast<T, float, castTraitB322B16>(reinterpret_cast<MicroAPI::RegTensor<T>&>(out0), tmp0, mask);
-            Cast<T, float, castTraitB322B16>(reinterpret_cast<MicroAPI::RegTensor<T>&>(out1), tmp1, mask);
-            Cast<T, float, castTraitB322B16>(reinterpret_cast<MicroAPI::RegTensor<T>&>(out2), tmp2, mask);
+            Cast<DstT, float, castTraitB322B16>(reinterpret_cast<MicroAPI::RegTensor<DstT>&>(out0), tmp0, mask);
+            Cast<DstT, float, castTraitB322B16>(reinterpret_cast<MicroAPI::RegTensor<DstT>&>(out1), tmp1, mask);
+            Cast<DstT, float, castTraitB322B16>(reinterpret_cast<MicroAPI::RegTensor<DstT>&>(out2), tmp2, mask);
         }
     }
 
@@ -331,15 +334,15 @@ private:
         MicroAPI::Add(tmpAdd, s1, s2, mask);
         MicroAPI::Sub(tmpSub, s1, s2, mask);
         MicroAPI::Mul(tmpAddHalf, tmpAdd, value0P5, mask);
-        MicroAPI::Mul(d0, s0, tmpAddHalf, mask);
+        MicroAPI::Add(d0, s0, tmpAddHalf, mask);
         MicroAPI::Mul(d1, tmpSub, value0P5, mask);
-        MicroAPI::Mul(d2, s3, tmpAddHalf, mask);
+        MicroAPI::Add(d2, s3, tmpAddHalf, mask);
     }
 
 
     TEventID mte32mte2_ = 0;
     TEventID v2mte3_ = 0;
-    GlobalTensor<T> yGm_;
+    GlobalTensor<DstT> yGm_;
 };
 
 #endif //CONV_BP_WINO_INV_TRANSFORM_H

@@ -315,15 +315,34 @@ struct CoutCinRange {
     }
 };
 
-static constexpr uint32_t __aicore__ AivNumInBlock()
+static inline constexpr uint32_t __aicore__ AivNumInBlock()
 {
 #if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
     return 2;
 #elif
     return 1;
 #endif
+}
 
+static inline uint32_t __aicore__ AivCoreId()
+{
+    //use it in aiv only
+    return GetBlockIdx();
+}
 
+static inline uint32_t __aicore__ AicCoreId()
+{
+    if ASCEND_IS_AIC {
+        return GetBlockIdx();
+    }
+    if ASCEND_IS_AIV {
+        return GetBlockIdx() / AivNumInBlock();
+    }
+}
+
+static inline uint32_t __aicore__ AivNums()
+{
+    return GetBlockNum() * AivNumInBlock();
 }
 
 #endif //CONV_BP_WINO_UTIL_H

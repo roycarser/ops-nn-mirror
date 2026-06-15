@@ -363,11 +363,11 @@ struct DefaultUnfoldColParams {
 };
 
 struct DefaultUnfoldRowParams {
+    uint32_t hValidElements;
     uint32_t srcTileBufWidth;
     uint32_t dstTileBufWidthBlocks;
     uint16_t hRepeatTimes;
     uint16_t tileW;
-    uint16_t tileH;
 };
 
 template <typename T, uint32_t F23_STRIDE, uint32_t F23_WINDOW>
@@ -381,11 +381,11 @@ static inline __aicore__ void InitDefaultUnfoldParams(
     ucp.wRepeatTimes = Ops::Base::CeilDiv(ucp.wValidElements, VL<T>());
     ucp.tileH = box.tile.hLength;
 
+    urp.hValidElements = TileUnfoldSize(box.tile.hLength) * C0<T>();
     urp.srcTileBufWidth = ucp.tileBufWidthBlocks * C0<T>();
     urp.dstTileBufWidthBlocks = Cal16TileHWBufWidth(box.tile.elements);
-    urp.hRepeatTimes = Ops::Base::CeilDiv(TileUnfoldSize(box.tile.hLength) * C0<T>(), VL<T>());
+    urp.hRepeatTimes = Ops::Base::CeilDiv(urp.hValidElements, VL<T>());
     urp.tileW = box.tile.wLength;
-    urp.tileH = box.tile.hLength;
 }
 
 
@@ -408,15 +408,6 @@ struct Unfold16TileHWStorer {
         MaskReg highHalfPartMask;
     };
 
-
-    static __simd_callee__ inline void CalTileHMainTailRepeatTimes(
-        uint16_t hRepeatTimes, uint16_t tileH,
-        uint16_t& hMainRepeatTimes, uint16_t& hTailRepeatTimes)
-    {
-        bool hasTail = hRepeatTimes * AscendC::DEFAULT_BLK_NUM > tileH * F23_TRANSFORM_TILE_SIZE_4;
-        hTailRepeatTimes = static_cast<uint16_t>(hasTail);
-        hMainRepeatTimes = hRepeatTimes - hTailRepeatTimes;
-    }
 
     template <typename T>
     static __simd_callee__ inline void CreateStoreInfo(
@@ -459,38 +450,45 @@ struct Unfold16TileHWStorer {
         p.dst7 += step;
     }
 
-    template <bool enableLowHalf, bool enableHighHalf, typename T>
+    template <typename T>
+    static __simd_callee__ inline void GetHighHalfPartMask(
+        StoreInfo<T>& p,
+        MaskReg& highHalfPartMask,
+        MaskReg& tileHMask)
+    {
+        And(highHalfPartMask, tileHMask, p.highHalfPartMask, p.maskAll);
+    }
+
+    template <typename T>
     static __simd_callee__ inline void store(
         StoreInfo<T>& p,
         RegTensor<T>& r0,
         RegTensor<T>& r1,
         RegTensor<T>& r2,
-        RegTensor<T>& r3)
+        RegTensor<T>& r3,
+        MaskReg& highHalfPartMask)
     {
         //TODO 尝试先gather在select完成block级别的交织
-        if constexpr (enableLowHalf) {
-            StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-                p.dst0, r0, p.dstTileBufWidthBlocks, 1, p.lowHalfPartMask);
-            StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-                p.dst1, r1, p.dstTileBufWidthBlocks, 1, p.lowHalfPartMask);
 
-            StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-                p.dst2, r2, p.dstTileBufWidthBlocks, 1, p.lowHalfPartMask);
-            StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-                p.dst3, r3, p.dstTileBufWidthBlocks, 1, p.lowHalfPartMask);
-        }
+        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+            p.dst0, r0, p.dstTileBufWidthBlocks, 1, p.lowHalfPartMask);
+        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+            p.dst1, r1, p.dstTileBufWidthBlocks, 1, p.lowHalfPartMask);
 
-        if constexpr (enableHighHalf) {
-            StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-                p.dst4, r0, p.dstTileBufWidthBlocks, 1, p.highHalfPartMask);
-            StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-                p.dst5, r1, p.dstTileBufWidthBlocks, 1, p.highHalfPartMask);
+        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+            p.dst2, r2, p.dstTileBufWidthBlocks, 1, p.lowHalfPartMask);
+        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+            p.dst3, r3, p.dstTileBufWidthBlocks, 1, p.lowHalfPartMask);
 
-            StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-                p.dst6, r2, p.dstTileBufWidthBlocks, 1, p.highHalfPartMask);
-            StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-                p.dst7, r3, p.dstTileBufWidthBlocks, 1, p.highHalfPartMask);
-        }
+        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+            p.dst4, r0, p.dstTileBufWidthBlocks, 1, highHalfPartMask);
+        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+            p.dst5, r1, p.dstTileBufWidthBlocks, 1, highHalfPartMask);
+
+        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+            p.dst6, r2, p.dstTileBufWidthBlocks, 1, highHalfPartMask);
+        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+            p.dst7, r3, p.dstTileBufWidthBlocks, 1, highHalfPartMask);
     }
 };
 
@@ -543,9 +541,6 @@ struct Dy {
         const uint16_t wRepeatTimes = params.wRepeatTimes;
         const uint16_t tileH = params.tileH;
 
-        RegTensor<T> value0P5;
-        GetValue0P5(value0P5);
-
         for (uint16_t th = 0; th < tileH; th++) {
             constexpr uint32_t thStride = F23_TRANSFORM_TILE_SIZE_4 * C0<T>();
 
@@ -568,7 +563,7 @@ struct Dy {
 
                 RegTensor<T> d0;
                 RegTensor<T> d1;
-                TransformVf(value0P5, s0, s1, d0, d1, mask);
+                TransformVf(s0, s1, d0, d1, mask);
 
                 __ubuf__ T* dst0 = dst;
 
@@ -606,8 +601,6 @@ struct Dy {
         __ubuf__ T* dst0 = tileBuf;
         __ubuf__ T* dst1 = tileBuf + F23_TRANSFORM_TILE_SIZE_4 * C0<T>();
         MaskReg maskAll = CreateMask<T, MaskPattern::ALL>();
-        RegTensor<T> value0P5;
-        GetValue0P5(value0P5);
 
         for (uint16_t i = 0; i < WRepeatTimes; i++) {
             RegTensor<T> s0, s1, s2, s3, d0, d1, d2, d3;
@@ -617,8 +610,8 @@ struct Dy {
             LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s2, src2, VL<T>());
             LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s3, src3, VL<T>());
 
-            TransformVf(value0P5, s0, s1, d0, d1, maskAll);
-            TransformVf(value0P5, s2, s3, d2, d3, maskAll);
+            TransformVf(s0, s1, d0, d1, maskAll);
+            TransformVf(s2, s3, d2, d3, maskAll);
 
             StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
                 dst0, s0, tileBufWidthBlocks, 1, maskAll);
@@ -650,33 +643,16 @@ struct Dy {
         const uint16_t dstTileBufWidthBlocks = params.dstTileBufWidthBlocks;
         const uint16_t hRepeatTimes = params.hRepeatTimes;
         const uint16_t tileW = params.tileW;
-        const uint16_t tileH = params.tileH;
 
         Unfold16TileHWStorer::StoreInfo<T> s;
         Unfold16TileHWStorer::CreateStoreInfo(s, out, tileW, dstTileBufWidthBlocks);
 
-        uint16_t hTailRepeatTimes;
-        uint16_t hMainRepeatTimes;
-        Unfold16TileHWStorer::CalTileHMainTailRepeatTimes(hRepeatTimes, tileH, hMainRepeatTimes, hTailRepeatTimes);
-
-        UnfoldRowsVf_<false>(s, hMainRepeatTimes, srcTileBufWidth, tileW, buf);
-        UnfoldRowsVf_<true>(s, hTailRepeatTimes, srcTileBufWidth, tileW, buf + hMainRepeatTimes * VL<T>());
-    }
-
-    template <bool TailH>
-    static __simd_callee__ inline void UnfoldRowsVf_(
-        Unfold16TileHWStorer::StoreInfo<T>& s,
-        const uint16_t hRepeatTimes,
-        const uint32_t srcTileBufWidth,
-        const uint16_t tileW,
-        __ubuf__ T* buf)
-    {
-        RegTensor<T> value0P5;
-        GetValue0P5(value0P5);
-
+        uint32_t maskValue = params.hValidElements;
         for (uint16_t i = 0; i < hRepeatTimes; i++) {
-            const uint32_t hOffset = i * VL<T>();
-            __ubuf__ T* src = buf + hOffset;
+            __ubuf__ T* src = buf + i * VL<T>();
+            MaskReg mask = UpdateMask<T>(maskValue);
+            MaskReg storeMask;
+            Unfold16TileHWStorer::GetHighHalfPartMask(s, storeMask, mask);
 
             for (uint16_t th = 0; th < tileW; th++) {
                 RegTensor<T> s0;
@@ -687,34 +663,21 @@ struct Dy {
 
                 RegTensor<T> d0;
                 RegTensor<T> d1;
-                TransformVf(value0P5,s0, s1, d0, d1, s.maskAll);
+                TransformVf(s0, s1, d0, d1, mask);
 
-                Unfold16TileHWStorer::store<true, !TailH>(s, s0, d0, d1, s1);
+                Unfold16TileHWStorer::store(s, s0, d0, d1, s1, storeMask);
             }
-
-            if constexpr (!TailH) {
-                Unfold16TileHWStorer::UpdateStoreInfo(s, tileW);
-            }
+            Unfold16TileHWStorer::UpdateStoreInfo(s, tileW);
         }
     }
 
     static __simd_callee__ inline void TransformVf(
-        RegTensor<T>& value0P5,
         RegTensor<T>& s0, RegTensor<T>& s1,
         RegTensor<T>& d0, RegTensor<T>& d1,
         MaskReg& mask)
     {
-        RegTensor<T> tmp0;
-        RegTensor<T> tmp1;
-        Add(tmp0, s0, s1, mask);
-        Sub(tmp1, s0, s1, mask);
-        Mul(d0, tmp0, value0P5, mask);
-        Mul(d1, tmp1, value0P5, mask);
-    }
-
-    static __simd_callee__ inline void GetValue0P5(RegTensor<T>& t)
-    {
-        Duplicate(t, static_cast<T>(0.5));
+        Add(d0, s0, s1, mask);
+        Sub(d1, s0, s1, mask);
     }
 };
 
@@ -943,46 +906,17 @@ struct Fmap {
         const uint16_t hRepeatTimes = params.hRepeatTimes;
         const uint16_t tileWMainRepeatTimes = params.tileWMainRepeatTimes;
         const uint16_t tileWTailRepeatTimes = params.tileWTailRepeatTimes;
-        const uint16_t tileH = params.tileH;
         const uint16_t tileW = params.tileW;
 
         Unfold16TileHWStorer::StoreInfo<T> s;
         Unfold16TileHWStorer::CreateStoreInfo(s, out, tileW, dstTileBufWidthBlocks);
 
-        uint16_t hTailRepeatTimes;
-        uint16_t hMainRepeatTimes;
-        Unfold16TileHWStorer::CalTileHMainTailRepeatTimes(hRepeatTimes, tileH, hMainRepeatTimes, hTailRepeatTimes);
-
-        UnfoldRowsVf_<false>(
-            s,
-            hMainRepeatTimes,
-            tileW,
-            tileWMainRepeatTimes,
-            tileWTailRepeatTimes,
-            srcTileBufWidth,
-            buf);
-
-        UnfoldRowsVf_<true>(
-            s,
-            hTailRepeatTimes,
-            tileW,
-            tileWMainRepeatTimes,
-            tileWTailRepeatTimes,
-            srcTileBufWidth,
-            buf + hMainRepeatTimes * VL<T>());
-    }
-
-    template <bool TailH>
-    static __simd_callee__ inline void UnfoldRowsVf_(
-        Unfold16TileHWStorer::StoreInfo<T>& s,
-        const uint16_t hRepeatTimes,
-        const uint16_t tileW,
-        const uint16_t tileWMainRepeatTimes,
-        const uint16_t tileWTailRepeatTimes,
-        const uint32_t srcTileBufWidth,
-        __ubuf__ T* buf)
-    {
+        uint32_t maskValue = params.hValidElements;
         for (uint16_t i = 0; i < hRepeatTimes; i++) {
+            MaskReg mask = UpdateMask<T>(maskValue);
+            MaskReg storeMask;
+            Unfold16TileHWStorer::GetHighHalfPartMask(s, storeMask, mask);
+
             RegTensor<T> s0;
             RegTensor<T> s1;
             RegTensor<T> s2;
@@ -1002,30 +936,28 @@ struct Fmap {
                 LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s2, src, srcTileBufWidth);
                 LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s3, src, srcTileBufWidth);
 
-                TransformVf(s0, s1, s2, s3, d0, d1, d2, d3, s.maskAll);
+                TransformVf(s0, s1, s2, s3, d0, d1, d2, d3, mask);
 
-                Unfold16TileHWStorer::store<true, !TailH>(s, d0, d1, d2, d3);
+                Unfold16TileHWStorer::store(s, d0, d1, d2, d3, storeMask);
 
                 LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s0, src, srcTileBufWidth);
                 LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s1, src, srcTileBufWidth);
 
-                TransformVf(s2, s3, s0, s1, d0, d1, d2, d3, s.maskAll);
+                TransformVf(s2, s3, s0, s1, d0, d1, d2, d3, mask);
 
-                Unfold16TileHWStorer::store<true, !TailH>(s, d0, d1, d2, d3);
+                Unfold16TileHWStorer::store(s, d0, d1, d2, d3, storeMask);
             }
 
             for (uint16_t th = 0; th < tileWTailRepeatTimes; th++) {
                 LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s2, src, srcTileBufWidth);
                 LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s3, src, srcTileBufWidth);
 
-                TransformVf(s0, s1, s2, s3, d0, d1, d2, d3, s.maskAll);
+                TransformVf(s0, s1, s2, s3, d0, d1, d2, d3, mask);
 
-                Unfold16TileHWStorer::store<true, !TailH>(s, d0, d1, d2, d3);
+                Unfold16TileHWStorer::store(s, d0, d1, d2, d3, storeMask);
             }
 
-            if constexpr (!TailH) {
-                Unfold16TileHWStorer::UpdateStoreInfo(s, tileW);
-            }
+            Unfold16TileHWStorer::UpdateStoreInfo(s, tileW);
         }
     }
 

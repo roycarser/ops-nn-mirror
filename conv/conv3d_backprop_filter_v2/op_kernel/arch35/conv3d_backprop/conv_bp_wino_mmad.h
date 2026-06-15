@@ -147,14 +147,15 @@ public:
         //不需要baseK循环,L1上左右Tensor在PingPong后最多一共占用256kb
         //除以16后单个点最多16kb,L0上一定能全载,除非singleShapeHW传进来为1
         //然后l0上对齐放大到16这类异常情况,但tiling阶段应该防止这种情况
-        const EventFlag& mte2mte1Flag = mte2mte1Flag_[l1PingPongFlag];
+        const EventFlag mte2mte1Flag = mte2mte1Flag_[l1PingPongFlag];
         WaitFlag<HardEvent::MTE2_MTE1>(mte2mte1Flag.src2dst);
 
+#pragma unroll
         for (uint8_t g = 0; g < L0POINTS.group; g++) {
             //通过奇偶性判断l0PingPong
             const int l0BufFlag = g % L0_BUF_CNT;
 
-            const EventFlag& mte1madFlag = mte1madFlag_[l0BufFlag];
+            const EventFlag mte1madFlag = mte1madFlag_[l0BufFlag];
             WaitFlag<HardEvent::M_MTE1>(mte1madFlag.dst2src);
 
             uint8_t pointGroupOffset = g * L0POINTS.pointPerGroup;
@@ -162,6 +163,7 @@ public:
             LocalTensor<T> l0a = LocalTensor<T>(TPosition::A2, L0POINTS.l0aSize * l0BufFlag, L0POINTS.l0aSize);
             LocalTensor<T> l0b = LocalTensor<T>(TPosition::B2, L0POINTS.l0bSize * l0BufFlag, L0POINTS.l0aSize);
 
+#pragma unroll
             for (uint8_t i = 0; i < L0POINTS.pointPerGroup; i++) {
                 uint8_t pointIdx = pointGroupOffset + i;
                 uint32_t offsetL1 = pointIdx * tiles.elements * C0<T>();
@@ -190,6 +192,7 @@ public:
             SetFlag<HardEvent::MTE1_M>(mte1madFlag.src2dst);
             WaitFlag<HardEvent::MTE1_M>(mte1madFlag.src2dst);
 
+#pragma unroll
             for (uint8_t i = 0; i < L0POINTS.pointPerGroup; i++) {
                 uint8_t pointIdx = pointGroupOffset + i;
 
@@ -218,7 +221,7 @@ public:
         WaitFlag<HardEvent::M_FIX>(mad2fixpipeFlag_.src2dst);
 
         constexpr uint8_t aivNums = AivNumInBlock();
-        constexpr uint32_t invTransSingleBufSize = WinoInvTransformer<T, TilingT>::InvTransBufSize();
+        constexpr uint32_t invTransSingleBufSize = WinoInvBufUtil::InvTransBufSize<TilingT>();
         constexpr uint32_t invTransBufCnt = BlockConfig::InvTransformBufCnt<TilingT>();
         constexpr uint16_t singleBlockCout = BlockConfig::SingleShapeInvTransformCout<TilingT>() * aivNums;
         const auto l0c = LocalTensor<float>(TPosition::CO1, 0, TOTAL_L0C_SIZE);
@@ -238,7 +241,7 @@ public:
             fp.params.ndNum = F23_TRANSFORM_TILE_ELEMENTS_16;
             fp.params.srcNdStride = L0C_SINGLE_POINT_BUF_BYTES / (BLOCK_CUBE * sizeof(float));
             //到UB上按C0对齐
-            fp.params.dstNdStride = WinoInvTransformer<T, TilingT>::InvTransSinglePointBufSize();
+            fp.params.dstNdStride = WinoInvBufUtil::InvTransSinglePointBufSize<TilingT>();
             fp.dualDstCtl = 1;
 
             syncQue.WaitSlot();
