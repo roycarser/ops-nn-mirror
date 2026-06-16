@@ -236,7 +236,7 @@ public:
             FixpipeParamsC310 fp;
             fp.mSize = aivNums == 2 ? coutLength + (coutLength & 1) : coutLength;
             fp.nSize = cin;
-            fp.srcStride = Ops::Base::CeilAlign(coutLength, static_cast<uint16_t>(BLOCK_CUBE));
+            fp.srcStride = cout;
             fp.dstStride = cin;
             fp.params.ndNum = F23_TRANSFORM_TILE_ELEMENTS_16;
             fp.params.srcNdStride = L0C_SINGLE_POINT_BUF_BYTES / (BLOCK_CUBE * sizeof(float));

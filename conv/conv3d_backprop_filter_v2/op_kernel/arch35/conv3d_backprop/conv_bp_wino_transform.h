@@ -29,6 +29,12 @@ struct CSlice {
     uint32_t idx;
     uint32_t length;
     uint16_t c1;
+
+    template <typename T>
+    __aicore__ inline uint32_t C1Idx() const
+    {
+        return idx / C0<T>();
+    }
 };
 
 struct TileBox {
@@ -219,9 +225,10 @@ public:
         uint32_t srcC1 = Ops::Base::CeilDiv(srcC_, C0<T>());
         uint64_t srcWC0 = srcW_ * C0<T>();
         uint64_t srcHWC0 = srcH_ * srcWC0;
+        //nc1hwc0搬入
         uint64_t gmOffset =
             static_cast<uint64_t>(batchIdx) * srcC1 * srcHWC0
-            + static_cast<uint64_t>(box.c.c1) * srcHWC0
+            + static_cast<uint64_t>(box.c.C1Idx<T>()) * srcHWC0
             + static_cast<uint64_t>(src.hIdx) * srcWC0
             + static_cast<uint64_t>(src.wIdx) * C0<T>();
 
@@ -312,7 +319,7 @@ public:
     {
         copyParams.tiles = box.tile.elements;
         copyParams.srcBufWidthBlockStride = WinoTransformDetail::Cal16TileHWBufWidth(box.tile.elements);
-        copyParams.c1Idx = box.c.idx / C0<T>();
+        copyParams.c1Idx = box.c.C1Idx<T>();
         copyParams.c1Length = box.c.c1;
     }
 

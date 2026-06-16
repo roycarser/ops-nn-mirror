@@ -143,10 +143,11 @@ private:
         Duplicate(value0P5, 0.5f);
 
         constexpr uint32_t singlePointSize = INV_TRANS_SINGLE_POINT_BUF_SIZE;
+        //当前正变换结束后点按列优先排列
         __ubuf__ float* src0 = buf;
-        __ubuf__ float* src1 = buf + singlePointSize * F23_TRANSFORM_TILE_SIZE_4;
-        __ubuf__ float* src2 = buf + singlePointSize * F23_TRANSFORM_TILE_SIZE_4 * 2;
-        __ubuf__ float* src3 = buf + singlePointSize * F23_TRANSFORM_TILE_SIZE_4 * 3;
+        __ubuf__ float* src1 = buf + singlePointSize;
+        __ubuf__ float* src2 = buf + singlePointSize * 2;
+        __ubuf__ float* src3 = buf + singlePointSize * 3;
 
         RegTensor<uint32_t> seq;
         RegTensor<uint32_t> tmp9;
@@ -164,13 +165,14 @@ private:
         for (uint16_t i = 0; i < loopCnt; i++) {
             MaskReg mask = UpdateMask<float>(maskValue);
 
+            constexpr uint32_t pointRowStride = singlePointSize * F23_TRANSFORM_TILE_SIZE_4;
             RegTensor<float> col0d0;
             RegTensor<float> col0d1;
             RegTensor<float> col0d2;
             TransformCol(
                 src0, src1, src2, src3,
                 mask, value0P5, col0d0, col0d1, col0d2,
-                singlePointSize);
+                pointRowStride);
 
             RegTensor<float> col1d0;
             RegTensor<float> col1d1;
@@ -178,7 +180,7 @@ private:
             TransformCol(
                 src0, src1, src2, src3,
                 mask, value0P5, col1d0, col1d1, col1d2,
-                singlePointSize);
+                pointRowStride);
 
             RegTensor<float> col2d0;
             RegTensor<float> col2d1;
@@ -186,12 +188,12 @@ private:
             TransformCol(
                 src0, src1, src2, src3,
                 mask, value0P5, col2d0, col2d1, col2d2,
-                singlePointSize);
+                pointRowStride);
 
             RegTensor<float> col3d0;
             RegTensor<float> col3d1;
             RegTensor<float> col3d2;
-            constexpr int32_t nextColStride = -3 * singlePointSize + VL<float>();
+            constexpr int32_t nextColStride = -3 * pointRowStride + VL<float>();
             TransformCol(
                 src0, src1, src2, src3,
                 mask, value0P5, col3d0, col3d1, col3d2,
@@ -336,7 +338,7 @@ private:
         MicroAPI::Mul(tmpAddHalf, tmpAdd, value0P5, mask);
         MicroAPI::Add(d0, s0, tmpAddHalf, mask);
         MicroAPI::Mul(d1, tmpSub, value0P5, mask);
-        MicroAPI::Add(d2, s3, tmpAddHalf, mask);
+        MicroAPI::Sub(d2, tmpAddHalf, s3, mask);
     }
 
 

@@ -294,7 +294,6 @@ public:
                 typename TransformFunctions::GM2L1Ctx gm2l1Ctx = {kIter.BatchIdx(), kIter.TileKIdx(), {gm2l1Que}};
                 gm2l1Que.WaitSlot();
 
-                //TODO 全核轮询执行，而非一直从0核开始
                 ProcessResidentTransform<TensorT1>(
                     tile,
                     gm2l1Ctx,
