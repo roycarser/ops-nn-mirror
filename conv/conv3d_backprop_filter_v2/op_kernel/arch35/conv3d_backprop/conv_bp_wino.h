@@ -127,7 +127,7 @@ template <BlockIterDirection IterDir, typename TilingT>
 class BlockIterator {
 public:
     static constexpr uint16_t SingleShapeCout = BlockConfig::SingleShapeCout<TilingT>();
-    static constexpr uint16_t SingleShapeCin = BlockConfig::SingleShapeCout<TilingT>();
+    static constexpr uint16_t SingleShapeCin = BlockConfig::SingleShapeCin<TilingT>();
 
     inline __aicore__ explicit BlockIterator(
         uint32_t cout,
