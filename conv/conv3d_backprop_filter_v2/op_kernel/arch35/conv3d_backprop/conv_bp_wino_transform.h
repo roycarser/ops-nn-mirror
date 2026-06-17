@@ -253,7 +253,7 @@ public:
         params.srcGap = srcW_ - src.wLength;
         params.dstGap = srcFullLenW - src.wLength;
         //留出位置给pad补0
-        uint32_t hPadOffset = (box.pad.hTop * src.wLength + box.pad.wLeft) * C0<T>();
+        uint32_t hPadOffset = (box.pad.hTop * srcFullLenW + box.pad.wLeft) * C0<T>();
         AscendC::DataCopy(srcBuf[hPadOffset], gm_[gmOffset], params);
 
         if constexpr (BlockConfig::SingleTransformC1<TilingConfigT>() > 1) {
@@ -280,8 +280,6 @@ public:
             return;
         }
 
-        Padding(srcBuf, box);
-
         const auto params = UnfoldPolicy::InitUnfoldParams(box);
         const typename UnfoldPolicy::UnfoldColParamsT& ucp = AscendC::Std::get<0>(params);
         const typename UnfoldPolicy::UnfoldRowParamsT& urp = AscendC::Std::get<1>(params);
@@ -296,16 +294,32 @@ public:
         if constexpr (BlockConfig::SingleTransformC1<TilingConfigT>() == 1) {
             //TODO 当前需要优化的点主要集中在列变换，列变换是不是可以不管尾块统一按标准块处理？
             if (isTail) {
-                UnfoldVf<true>(outBufAddr, tmpBufAddr, srcBufAddr, ucp, urp);
+                UnfoldVf<true>(
+                    outBufAddr, tmpBufAddr, srcBufAddr,
+                    ucp, urp,
+                    box.pad,
+                    src.hLength, src.wLength);
             } else {
-                UnfoldVf<false>(outBufAddr, tmpBufAddr, srcBufAddr, ucp, urp);
+                UnfoldVf<false>(
+                    outBufAddr, tmpBufAddr, srcBufAddr,
+                    ucp, urp,
+                    box.pad,
+                    src.hLength, src.wLength);
             }
         } else {
             for (uint16_t c1Idx = 0; c1Idx < box.c.c1; c1Idx++) {
                 if (isTail) {
-                    UnfoldVf<true>(outBufAddr, tmpBufAddr, srcBufAddr, ucp, urp);
+                    UnfoldVf<true>(
+                        outBufAddr, tmpBufAddr, srcBufAddr,
+                        ucp, urp,
+                        box.pad,
+                        src.hLength, src.wLength);
                 } else {
-                    UnfoldVf<false>(outBufAddr, tmpBufAddr, srcBufAddr, ucp, urp);
+                    UnfoldVf<false>(
+                        outBufAddr, tmpBufAddr, srcBufAddr,
+                        ucp, urp,
+                        box.pad,
+                        src.hLength, src.wLength);
                 }
                 outBufAddr += outBufSizeC0;
                 srcBufAddr += srcBufSizeC0;
@@ -324,9 +338,6 @@ public:
     }
 
 private:
-    static __aicore__ inline void Padding(const LocalTensor<T>& srcBuf, const TileBox& box)
-    {
-    }
 
     template <bool IsTailTile>
     __simd_vf__ static inline void UnfoldVf(
@@ -334,8 +345,15 @@ private:
         __ubuf__ T* colUnfoldBuf,
         __ubuf__ T* srcBuf,
         const typename UnfoldPolicy::UnfoldColParamsT ucp,
-        const typename UnfoldPolicy::UnfoldRowParamsT urp)
+        const typename UnfoldPolicy::UnfoldRowParamsT urp,
+        HWPad pad, uint16_t srcH, uint16_t srcW)
     {
+        Padding(srcBuf, pad, srcH, srcW);
+
+        AscendC::MicroAPI::LocalMemBar<
+            AscendC::MicroAPI::MemType::VEC_STORE,
+            AscendC::MicroAPI::MemType::VEC_LOAD>();
+
         UnfoldPolicy::template UnfoldColsVf<IsTailTile>(colUnfoldBuf, srcBuf, ucp);
 
         AscendC::MicroAPI::LocalMemBar<
@@ -344,6 +362,68 @@ private:
 
         UnfoldPolicy::UnfoldRowsVf(outBuf, colUnfoldBuf, urp);
     }
+
+    __simd_callee__ static inline void Padding(
+        __ubuf__ T* srcBuf, HWPad& pad, uint16_t srcH, uint16_t srcW)
+    {
+        using namespace MicroAPI;
+        RegTensor<T> paddingValue;
+        Duplicate(paddingValue, 0);
+
+        const uint16_t padHTop = pad.hTop;
+        const uint16_t padHButton = pad.hBottom;
+        const uint16_t padWLeft = pad.wLeft;
+        const uint16_t padWRight = pad.wRight;
+
+        const uint16_t wBlocks = srcW + padWLeft + padWRight;
+        const uint32_t wElements = wBlocks * C0<T>();
+
+        const uint32_t hTopElements = wElements * padHTop;
+        const uint16_t hTopRepeatTimes = CeilDivision(hTopElements, VL<T>());
+
+        __ubuf__ T* src = srcBuf;
+        uint32_t hTopMaskValue = hTopElements;
+        for (uint16_t i = 0; i < hTopRepeatTimes; i++) {
+            MaskReg mask = MicroAPI::UpdateMask<T>(hTopMaskValue);
+            StoreAlign<T, PostLiteral::POST_MODE_UPDATE>(src, paddingValue, VL<T>(), mask);
+        }
+
+        const uint32_t hBtnElements = wElements * padHButton;
+        const uint16_t hBtnRepeatTimes = CeilDivision(hBtnElements, VL<T>());
+
+        src = srcBuf + (padHTop + srcH) * wElements;
+        uint32_t hBtnMaskValue = hBtnElements;
+        for (uint16_t i = 0; i < hBtnRepeatTimes; i++) {
+            MaskReg mask = MicroAPI::UpdateMask<T>(hBtnMaskValue);
+            StoreAlign<T, PostLiteral::POST_MODE_UPDATE>(src, paddingValue, VL<T>(), mask);
+        }
+
+        const uint32_t hElements = srcH * C0<T>();
+        const uint16_t hRepeatTimes = CeilDivision(hElements, VL<T>());
+
+        src = srcBuf + padHTop * wElements;
+        for (uint16_t i = 0; i < padWLeft; i++) {
+            uint32_t maskValue = hElements;
+            __ubuf__ T* src0 = src + C0<T>() * i;
+            for (uint16_t h = 0; h < hRepeatTimes; h++) {
+                MaskReg mask = MicroAPI::UpdateMask<T>(maskValue);
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+                    src0, paddingValue, wBlocks, 1, mask);
+            }
+        }
+
+        src = srcBuf + padHTop * wElements + (srcW + padWLeft) * C0<T>();
+        for (uint16_t i = 0; i < padWRight; i++) {
+            uint32_t maskValue = hElements;
+            __ubuf__ T* src0 = src + C0<T>() * i;
+            for (uint16_t h = 0; h < hRepeatTimes; h++) {
+                MaskReg mask = MicroAPI::UpdateMask<T>(maskValue);
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
+                    src0, paddingValue, wBlocks, 1, mask);
+            }
+        }
+    }
+
 
     AscendC::GlobalTensor<T> gm_;
     const uint32_t srcH_;

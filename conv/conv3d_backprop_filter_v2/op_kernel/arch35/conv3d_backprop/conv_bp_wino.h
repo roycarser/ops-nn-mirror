@@ -118,6 +118,158 @@ private:
     bool end_ = false;
 };
 
+
+class SwizzleTopology2D {
+public:
+    //实现简单的Tile和蛇形走位，所有核构成一个blockHW块进行递进，提升L2cache的命中率
+    //尾轮自适应，仅最后一轮才会产生空转
+    //
+    //                         blockW
+    //                   |-----------------------|
+    //                -  +-----+-----+-----+-----+-----+-----+-----+
+    //                |  |core0|core1|core2|core3|     |     |     |
+    //       blockH  -|  +-----+-----+-----+-----+-----+-----+-----+
+    //                |  |core4|core5|core6|core7|     |     |     |
+    //                -  +-----+-----+-----+-----+-----+-----+-----+  HCnt
+    //                   |     |     |     |     |     |     |     |
+    //                   +-----+-----+-----+-----+-----+-----+-----+
+    //                   |     |     |     |     |     |     |     |
+    //                   +-----+-----+-----+-----+-----+-----+-----+
+    //                                      WCnt
+
+    __aicore__ static inline void CalBlockGrid(uint32_t h, uint32_t w, uint16_t& outBlockH, uint16_t& outBlockW)
+    {
+        uint16_t coreNum = GetBlockNum();
+        uint16_t bestH = 1;
+        uint16_t bestW = coreNum;
+
+        //常用核数配置直接写死，不用再去跑一遍循环
+        if (coreNum == 32) {
+            bestH = 4;
+            bestW = 8;
+        } else if (coreNum == 28) {
+            bestH = 4;
+            bestW = 7;
+        } else {
+            for (uint16_t i = 1; i * i <= coreNum; i++) {
+                if (coreNum % i == 0) {
+                    bestH = i;
+                    bestW = coreNum / i;
+                }
+            }
+        }
+
+        // 形状匹配：将较大的维度分配给张量中较大的那个轴，进一步减少跨行/跨列跳跃
+        if (h >= w) {
+            outBlockH = Std::max(bestH, bestW);
+            outBlockW = Std::min(bestH, bestW);
+        } else {
+            outBlockH = Std::min(bestH, bestW);
+            outBlockW = Std::max(bestH, bestW);
+        }
+    }
+
+    __aicore__ inline SwizzleTopology2D(
+        uint32_t h,
+        uint32_t w,
+        uint16_t blockH,
+        uint16_t blockW)
+        : h_(h), w_(w), blockH_(blockH), blockW_(blockW),
+          fullSuperRows_(h / blockH),
+          totalCnt_(h * w)
+    {
+    }
+
+    __aicore__ inline bool GetHW(uint32_t loopIdx, uint16_t coreId, uint32_t& outH, uint32_t& outW) const
+    {
+        uint32_t flattenIdx = loopIdx * GetBlockNum() + coreId;
+
+        // 拦截越界
+        if (unlikely(flattenIdx >= totalCnt_)) {
+            outH = h_;
+            outW = w_;
+            return false;
+        }
+
+        uint32_t dummy;
+        ComputeHW(flattenIdx, outH, outW, dummy);
+        return true;
+    }
+
+    //包围盒计算：计算当前轮次在 H 和 W 方向触达的最远逻辑边界
+    __aicore__ inline void GetBoundHW(uint32_t loopIdx, uint32_t& boundH, uint32_t& boundW) const
+    {
+        uint32_t startIdx = loopIdx * GetBlockNum();
+        if (unlikely(startIdx >= totalCnt_)) {
+            boundH = 0;
+            boundW = 0;
+            return;
+        }
+
+        uint32_t endIdx = Std::min(startIdx + GetBlockNum(), totalCnt_) - 1;
+
+        uint32_t dummyH1, startW, startSuperIdx;
+        ComputeHW(startIdx, dummyH1, startW, startSuperIdx);
+
+        uint32_t dummyH2, endW, endSuperIdx;
+        ComputeHW(endIdx, dummyH2, endW, endSuperIdx);
+
+        // ================= W 轴边界检测,由于存在蛇形走位，需要按照奇偶额外判断 =================
+        if (startSuperIdx == endSuperIdx) {
+            // 1. 未换行：直接取最大值
+            boundW = Std::max(startW, endW);
+        } else if (endSuperIdx - startSuperIdx >= 2) {
+            // 2. 跨越多行：中间必然包含一个完整的偶数行，绝对会撞击右侧墙壁
+            boundW = w_ - 1;
+        } else {
+            // 3. 恰好相邻跨越 1 行
+            if (startSuperIdx % 2 == 0) {
+                // 偶切奇：在右侧墙壁折返，必然触碰 w_ - 1
+                boundW = w_ - 1;
+            } else {
+                // 奇切偶：在左侧墙壁(W=0)折返，极值由起点或终点决定
+                boundW = Std::max(startW, endW);
+            }
+        }
+        // =========================================================
+
+        boundH = endSuperIdx * blockH_ + Std::min(blockH_, h_ - endSuperIdx * blockH_) - 1;
+    }
+
+    __aicore__ inline uint32_t TotalCnt() const
+    {
+        return totalCnt_;
+    }
+
+private:
+    __aicore__ inline void ComputeHW(
+        uint32_t flattenIdx,
+        uint32_t& outH, uint32_t& outW,
+        uint32_t& outSuperIdx) const
+    {
+        const uint32_t superRowElements = blockH_ * w_;
+        const uint32_t fullSuperRowElements = fullSuperRows_ * superRowElements;
+        const uint32_t superIdx = flattenIdx < fullSuperRowElements ? flattenIdx / superRowElements : fullSuperRows_;
+        const uint32_t localIdx = flattenIdx - superIdx * superRowElements;
+        const uint32_t superRowH = superIdx * blockH_;
+        const uint32_t localBlockH = Std::min(blockH_, h_ - superRowH);
+        //每个BlockHW里面按H方向优先递进,也就是连续核的范围为(H0,W0),(H1,W0),(H2,W0)
+        //列H方向优先按当前实现起来较为简单
+        outH = superRowH + localIdx % localBlockH;
+        const uint32_t forwardW = localIdx / localBlockH;
+        //蛇形走位，先从头走到尾，在从尾走到头
+        outW = (superIdx % 2 == 0) ? forwardW : (w_ - 1 - forwardW);
+        outSuperIdx = superIdx;
+    }
+
+    const uint32_t h_;
+    const uint32_t w_;
+    const uint16_t blockH_;
+    const uint16_t blockW_;
+    const uint32_t fullSuperRows_;
+    const uint32_t totalCnt_;
+};
+
 enum BlockIterDirection {
     COUT,
     CIN,
@@ -126,23 +278,12 @@ enum BlockIterDirection {
 template <BlockIterDirection IterDir, typename TilingT>
 class BlockIterator {
 public:
-    static constexpr uint16_t SingleShapeCout = BlockConfig::SingleShapeCout<TilingT>();
-    static constexpr uint16_t SingleShapeCin = BlockConfig::SingleShapeCin<TilingT>();
-
-    inline __aicore__ explicit BlockIterator(
-        uint32_t cout,
-        uint32_t cin)
-        : cout_(cout),
-          cin_(cin),
-          coutCnt_(Ops::Base::CeilDiv(cout, static_cast<uint32_t>(SingleShapeCout))),
-          cinCnt_(Ops::Base::CeilDiv(cin, static_cast<uint32_t>(SingleShapeCin))),
-          totalCnt_(coutCnt_ * cinCnt_)
-    {
-    }
+    static constexpr uint32_t SingleShapeCout = BlockConfig::SingleShapeCout<TilingT>();
+    static constexpr uint32_t SingleShapeCin = BlockConfig::SingleShapeCin<TilingT>();
 
     inline __aicore__ bool More() const
     {
-        return loopIdx_ * GetBlockNum() < totalCnt_;
+        return loopIdx_ * GetBlockNum() < topology_.TotalCnt();
     }
 
     //获取当前aic计算的基本块范围,若当前核无基本块计算则返回false并且将length设置为0
@@ -153,9 +294,11 @@ public:
 
     inline __aicore__ bool GetBlock(uint16_t coreId, CoutCinRange& cRange) const
     {
-        uint32_t coutBlockIdx;
-        uint32_t cinBlockIdx;
-        bool valid = GetCBlockOfCore(coreId, coutBlockIdx, cinBlockIdx);
+        uint32_t topoH, topoW;
+        bool valid = topology_.GetHW(loopIdx_, coreId, topoH, topoW);
+
+        uint32_t coutBlockIdx = (IterDir == CIN) ? topoH : topoW;
+        uint32_t cinBlockIdx = (IterDir == CIN) ? topoW : topoH;
 
         cRange.coutIdx = coutBlockIdx * SingleShapeCout;
         cRange.cinIdx = cinBlockIdx * SingleShapeCin;
@@ -168,26 +311,16 @@ public:
     //获取本轮全核计算涉及基本块的cout/cin范围最大值
     inline __aicore__ void GetClusterBlockUpperBound(uint32_t& outCoutBound, uint32_t& outCinBound) const
     {
-        uint32_t minCoutBlockIdx, minCinBlockIdx;
-        GetCBlockOfCore(0, minCoutBlockIdx, minCinBlockIdx);
+        uint32_t boundH, boundW;
+        topology_.GetBoundHW(loopIdx_, boundH, boundW);
 
-        uint32_t maxCoutBlockIdx, maxCinBlockIdx;
-        GetCBlockOfCore(GetBlockNum() - 1, maxCoutBlockIdx, maxCinBlockIdx);
+        // 边界反向映射
+        uint32_t boundCoutBlockIdx = (IterDir == CIN) ? boundH : boundW;
+        uint32_t boundCinBlockIdx = (IterDir == CIN) ? boundW : boundH;
 
-        uint32_t maxCoutIdx = maxCoutBlockIdx * SingleShapeCout;
-        uint32_t maxCinIdx = maxCinBlockIdx * SingleShapeCin;
-
-        if constexpr (IterDir == CIN) {
-            outCoutBound = Std::min(maxCoutIdx + SingleShapeCout, cout_);
-            outCinBound = maxCoutBlockIdx > minCoutBlockIdx ?
-                              cin_ :
-                              Std::min(maxCinIdx + SingleShapeCin, cin_);
-        } else {
-            outCinBound = Std::min(maxCinIdx + SingleShapeCin, cin_);
-            outCoutBound = maxCinBlockIdx > minCinBlockIdx ?
-                               cout_ :
-                               Std::min(maxCoutIdx + SingleShapeCout, cout_);
-        }
+        // 转化为实际的空间维度绝对边界
+        outCoutBound = Std::min((boundCoutBlockIdx + 1) * SingleShapeCout, cout_);
+        outCinBound = Std::min((boundCinBlockIdx + 1) * SingleShapeCin, cin_);
     }
 
     inline __aicore__ void Next()
@@ -195,30 +328,34 @@ public:
         loopIdx_++;
     }
 
-private:
-    inline __aicore__ bool GetCBlockOfCore(
-        uint16_t coreId,
-        uint32_t& outputCoutIdx,
-        uint32_t& outputCinIdx) const
+    static inline __aicore__ BlockIterator Create(uint32_t cout, uint32_t cin)
     {
-        uint32_t flattenIdx = loopIdx_ * GetBlockNum() + coreId;
-        if constexpr (IterDir == CIN) {
-            //沿着cin方向递进
-            outputCoutIdx = flattenIdx / cinCnt_;
-            outputCinIdx = flattenIdx - outputCoutIdx * cinCnt_;
-        } else {
-            //沿着cout方向递进
-            outputCinIdx = flattenIdx / coutCnt_;
-            outputCoutIdx = flattenIdx - outputCinIdx * coutCnt_;
-        }
-        return flattenIdx < totalCnt_;
+        uint32_t coutCnt = Ops::Base::CeilDiv(cout, SingleShapeCout);
+        uint32_t cinCnt = Ops::Base::CeilDiv(cin, SingleShapeCin);
+        uint32_t topologyH = (IterDir == CIN) ? coutCnt : cinCnt;
+        uint32_t topologyW = (IterDir == CIN) ? cinCnt : coutCnt;
+        uint16_t blockH, blockW;
+        SwizzleTopology2D::CalBlockGrid(topologyH, topologyW, blockH, blockW);
+        return BlockIterator(cout, cin, topologyH, topologyW, blockH, blockW);
+    }
+
+private:
+    inline __aicore__ explicit BlockIterator(
+        uint32_t cout,
+        uint32_t cin,
+        uint32_t topologyH,
+        uint32_t topologyW,
+        uint16_t topologyBlockH,
+        uint16_t topologyBlockW)
+        : cout_(cout),
+          cin_(cin),
+          topology_(topologyH, topologyW, topologyBlockH, topologyBlockW)
+    {
     }
 
     const uint32_t cout_;
     const uint32_t cin_;
-    const uint32_t coutCnt_;
-    const uint32_t cinCnt_;
-    const uint32_t totalCnt_;
+    const SwizzleTopology2D topology_;
     uint32_t loopIdx_ = 0;
 };
 
@@ -951,11 +1088,9 @@ public:
     inline void __aicore__ IterateAll()
     {
         using namespace WinoDetail;
-        //TODO 调整block遍历方式
-        constexpr BlockIterDirection BasicBlockDir = ResidentFmap ? CIN : COUT;
-        BlockIterator<BasicBlockDir, TilingT> blockIter(
-            cout_,
-            cin_);
+        //驻留fmap就往cout方向循环,减少执行驻留带来的全局同步影响
+        constexpr BlockIterDirection BasicBlockIterDir = ResidentFmap ? COUT : CIN;
+        auto blockIter = BlockIterator<BasicBlockIterDir, TilingT>::Create(cout_, cin_);
 
         uint32_t watermarkResidentC = 0;
 
