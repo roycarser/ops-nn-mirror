@@ -122,6 +122,8 @@ uint64_t Conv3DBackpropFilterV2WinogradTiling::GetTilingKey() const
         tilingFlag = 1;
     } else if (singleShapeTile_ == B16H8W8_B32H4W8) {
         tilingFlag = 2;
+    }else if (singleShapeTile_ == B16H4W16_B32H2W16) {
+        tilingFlag = 3;
     }
     const uint64_t tilingKey = GET_TPL_TILING_KEY(1, 0, 0,tilingFlag);
     OP_LOGD(context_->GetNodeName(), "tilingKey is: [%lu] , use winograd tiling flag [%lu]", tilingKey, tilingFlag);
@@ -131,11 +133,17 @@ uint64_t Conv3DBackpropFilterV2WinogradTiling::GetTilingKey() const
 
 Conv3DBackpropFilterV2WinogradTiling::SingleShapeTile SelectTemplate(uint32_t tileH, uint32_t tileW, bool isFp32)
 {
+    //B16H2W32_B32H2W16
     uint32_t singleShapeTileH0 = 2;
     uint32_t singleShapeTileW0 = isFp32 ? 16 : 32;
 
+    //B16H8W8_B32H4W8
     uint32_t singleShapeTileH1 = isFp32 ? 4 : 8;
     uint32_t singleShapeTileW1 = 8;
+
+    //B16H4W16_B32H2W16
+    uint32_t singleShapeTileH2 = isFp32 ? 2 : 4;
+    uint32_t singleShapeTileW2 = 16;
 
     uint32_t clusters0 = Ops::Base::CeilDiv(tileH, singleShapeTileH0) *
                         Ops::Base::CeilDiv(tileW, singleShapeTileW0);
@@ -143,14 +151,25 @@ Conv3DBackpropFilterV2WinogradTiling::SingleShapeTile SelectTemplate(uint32_t ti
     uint32_t clusters1 = Ops::Base::CeilDiv(tileH, singleShapeTileH1) *
                             Ops::Base::CeilDiv(tileW, singleShapeTileW1);
 
-    //谁的空转块更少选谁,计算块一样多时，当前选择8*8降低带宽数据量
-    if (clusters0 < clusters1) {
+    uint32_t clusters2 = Ops::Base::CeilDiv(tileH, singleShapeTileH2) *
+                                Ops::Base::CeilDiv(tileW, singleShapeTileW2);
+
+    //谁的空转块更少选谁,计算块一样多时，当前选择H4W16,冗余数据量相比H2W32小，同时内轴更大，16个C0应该能用一个outstanding发出去
+    if (clusters0 == clusters1 && clusters1 == clusters2) {
+        return Conv3DBackpropFilterV2WinogradTiling::B16H4W16_B32H2W16;
+    }
+    if (clusters0 == std::min({clusters0, clusters1, clusters2})) {
         return Conv3DBackpropFilterV2WinogradTiling::B16H2W32_B32H2W16;
     }
-    if (clusters0 > clusters1) {
+    if (clusters1 == std::min({clusters0, clusters1, clusters2})) {
         return Conv3DBackpropFilterV2WinogradTiling::B16H8W8_B32H4W8;
     }
-    return Conv3DBackpropFilterV2WinogradTiling::B16H8W8_B32H4W8;
+    if (clusters2 == std::min({clusters0, clusters1, clusters2})) {
+        return Conv3DBackpropFilterV2WinogradTiling::B16H4W16_B32H2W16;
+    }
+
+    //should not reach here
+    return Conv3DBackpropFilterV2WinogradTiling::B16H4W16_B32H2W16;
 }
 
 
@@ -178,8 +197,11 @@ ge::graphStatus Conv3DBackpropFilterV2WinogradTiling::GetWorkspaceSize()
     } else if (singleShapeTile_ == B16H8W8_B32H4W8) {
         singleShapeTileH = runInfo_.a_dtype_bytes == 2 ? 8 : 4;
         singleShapeTileW = 8;
-    }else {
-       return ge::GRAPH_FAILED;
+    } else if (singleShapeTile_ == B16H4W16_B32H2W16) {
+        singleShapeTileH = runInfo_.a_dtype_bytes == 2 ? 4 : 2;
+        singleShapeTileW = 16;
+    } else {
+        return ge::GRAPH_FAILED;
     }
 
     uint32_t tileH = Ops::Base::CeilDiv(runInfo_.ho, 2);

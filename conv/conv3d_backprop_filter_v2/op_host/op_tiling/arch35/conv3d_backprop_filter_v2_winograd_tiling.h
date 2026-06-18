@@ -34,7 +34,8 @@ public:
 
     enum SingleShapeTile {
         B16H2W32_B32H2W16,
-        B16H8W8_B32H4W8
+        B16H8W8_B32H4W8,
+        B16H4W16_B32H2W16,
     };
 
 protected:
