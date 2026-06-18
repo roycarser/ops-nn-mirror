@@ -15,7 +15,7 @@
 
 #ifndef CONV2D_BACKPROP_FILTER_WINOGRAD_H
 #define CONV2D_BACKPROP_FILTER_WINOGRAD_H
-#endif
+
 
 #include "conv3d_backprop_filter_v2_tiling_data.h"
 #include "../conv3d_backprop/conv_bp_wino.h"
@@ -69,26 +69,55 @@ public:
     }
 
 private:
+
+    struct SingleShapeTile {
+        uint16_t H,W;
+
+        constexpr static __aicore__ inline SingleShapeTile Get()
+        {
+            //TileHTileW组合:
+            //flag1:B16H2W32 B32H2W16
+            //flag2:B16H8W8 B32H4W8
+            //flag3:B16H4W16 B32H2W16
+            constexpr bool isB32 = Std::is_same_v<SrcT, float>;
+            if constexpr (WinoTilingFlag == TPL_WINOGRAD_TILING1) {
+                if constexpr (isB32) {
+                    return {2, 16};
+                } else {
+                    return {2, 32};
+                }
+            } else if constexpr (WinoTilingFlag == TPL_WINOGRAD_TILING2) {
+                if constexpr (isB32) {
+                    return {4, 8};
+                } else {
+                    return {8, 8};
+                }
+            } else if constexpr(WinoTilingFlag==TPL_WINOGRAD_TILING3) {
+                if constexpr (isB32) {
+                    return {2, 16};
+                } else {
+                    return {4, 16};
+                }
+            }
+        }
+    };
+
     static __aicore__ inline constexpr auto BuildTilingType()
     {
         constexpr uint32_t singleShapeCout = 64;
         constexpr uint32_t singleShapeCin = 64;
-        constexpr uint32_t singleShapeTransformC = 16;
+        constexpr uint32_t singleShapeTransformC1 = 1;
         constexpr uint32_t singleShapeResidentC = 32;
-        //TODO实测 4更好？
         constexpr uint32_t fwdBufCnt = 4;
         constexpr uint32_t invTransBufCnt = 4;
         constexpr uint32_t invTransCout = 8;
-
-        //TODO set by dtype and tilingFlag
-        constexpr uint32_t singleShapeTileH = 2;
-        constexpr uint32_t singleShapeTileW = 32;
+        constexpr SingleShapeTile singleShapeTile = SingleShapeTile::Get();
 
         return BlockConfig::Tiling<singleShapeCout,
             singleShapeCin,
-            singleShapeTransformC / C0<SrcT>(),
-            singleShapeTileH,
-            singleShapeTileW,
+            singleShapeTransformC1,
+            singleShapeTile.H,
+            singleShapeTile.W,
             fwdBufCnt,
             singleShapeResidentC,
             BlockConfig::InputTensor::FMAP,
@@ -112,3 +141,5 @@ private:
     uint32_t dyW_ = 0;
     bool hf32_ = false;
 };
+
+#endif

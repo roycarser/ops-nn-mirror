@@ -442,11 +442,11 @@ public:
             typename TransformFunctions::UB2L1Ctx ub2l1Ctx = {kIter.BatchIdx(), kIter.TileKIdx(), {ub2l1Que, 0}};
             ub2l1Que.WaitSlot();
 
-            ProcessStreamingTransform<TensorT0>(
-                tile, ub2l1Ctx, streamT0);
-
             ProcessStreamingTransform<TensorT1>(
                 tile, ub2l1Ctx, streamT1);
+
+            ProcessStreamingTransform<TensorT0>(
+                tile, ub2l1Ctx, streamT0);
 
             ub2l1Que.EnQue();
 
