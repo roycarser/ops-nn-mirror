@@ -117,7 +117,7 @@ bool Conv3DBackpropFilterV2WinogradTiling::CheckFormat()
 
 uint64_t Conv3DBackpropFilterV2WinogradTiling::GetTilingKey() const
 {
-    uint32_t tilingFlag = 1;
+    uint8_t tilingFlag = 1;
     if (singleShapeTile_ == B16H2W32_B32H2W16) {
         tilingFlag = 1;
     } else if (singleShapeTile_ == B16H8W8_B32H4W8) {
