@@ -118,18 +118,48 @@ bool Conv3DBackpropFilterV2WinogradTiling::CheckFormat()
 uint64_t Conv3DBackpropFilterV2WinogradTiling::GetTilingKey() const
 {
     uint32_t tilingFlag = 1;
-    if (singleShapeTile_ == B16_H2W32_B32_H2W16) {
+    if (singleShapeTile_ == B16H2W32_B32H2W16) {
         tilingFlag = 1;
+    } else if (singleShapeTile_ == B16H8W8_B32H4W8) {
+        tilingFlag = 2;
     }
-    //TODO impl small w
     const uint64_t tilingKey = GET_TPL_TILING_KEY(1, 0, 0,tilingFlag);
     OP_LOGD(context_->GetNodeName(), "tilingKey is: [%lu] , use winograd tiling flag [%lu]", tilingKey, tilingFlag);
     return tilingKey;
 }
 
+
+Conv3DBackpropFilterV2WinogradTiling::SingleShapeTile SelectTemplate(uint32_t tileH, uint32_t tileW, bool isFp32)
+{
+    uint32_t singleShapeTileH0 = 2;
+    uint32_t singleShapeTileW0 = isFp32 ? 16 : 32;
+
+    uint32_t singleShapeTileH1 = isFp32 ? 4 : 8;
+    uint32_t singleShapeTileW1 = 8;
+
+    uint32_t clusters0 = Ops::Base::CeilDiv(tileH, singleShapeTileH0) *
+                        Ops::Base::CeilDiv(tileW, singleShapeTileW0);
+
+    uint32_t clusters1 = Ops::Base::CeilDiv(tileH, singleShapeTileH1) *
+                            Ops::Base::CeilDiv(tileW, singleShapeTileW1);
+
+    //谁的空转块更少选谁,计算块一样多时，当前选择8*8降低带宽数据量
+    if (clusters0 < clusters1) {
+        return Conv3DBackpropFilterV2WinogradTiling::B16H2W32_B32H2W16;
+    }
+    if (clusters0 > clusters1) {
+        return Conv3DBackpropFilterV2WinogradTiling::B16H8W8_B32H4W8;
+    }
+    return Conv3DBackpropFilterV2WinogradTiling::B16H8W8_B32H4W8;
+}
+
+
 ge::graphStatus Conv3DBackpropFilterV2WinogradTiling::DoOpTiling()
 {
-    singleShapeTile_ = SingleShapeTile::B16_H2W32_B32_H2W16;
+    uint32_t tileH = Ops::Base::CeilDiv(runInfo_.ho, 2);
+    uint32_t tileW = Ops::Base::CeilDiv(runInfo_.wo, 2);
+
+    singleShapeTile_ = SelectTemplate(tileH, tileW, runInfo_.a_dtype_bytes == 4);
     return ge::GRAPH_SUCCESS;
 }
 
@@ -139,27 +169,31 @@ ge::graphStatus Conv3DBackpropFilterV2WinogradTiling::GetWorkspaceSize()
     size_t* workspaces = context_->GetWorkspaceSizes(1);
     OP_CHECK_NULL_WITH_CONTEXT(context_, workspaces);
     size_t userWorkSpaceSize = 0;
-    if (singleShapeTile_==B16_H2W32_B32_H2W16) {
 
-        uint32_t singleShapeTileH = 2;
-        uint32_t singleShapeTileW = dtypeByte_ == 2 ? 32 : 16;
-        uint32_t tileH = Ops::Base::CeilDiv(runInfo_.ho, 2);
-        uint32_t tileW = Ops::Base::CeilDiv(runInfo_.wo, 2);
-
-        uint32_t k1 = Ops::Base::CeilDiv(tileH, singleShapeTileH) *
-                      Ops::Base::CeilDiv(tileW, singleShapeTileW);
-
-        uint32_t k0 = singleShapeTileH * singleShapeTileW * 16;
-        uint32_t c0Byte = 32;
-        uint32_t c1c0Fmap = Ops::Base::CeilAlign(static_cast<uint32_t>(runInfo_.ci * runInfo_.a_dtype_bytes), c0Byte);
-        uint32_t c1c0Dy = Ops::Base::CeilAlign(static_cast<uint32_t>(runInfo_.co * runInfo_.b_dtype_bytes), c0Byte);
-
-        userWorkSpaceSize = std::max(c1c0Fmap, c1c0Dy) * k0 * k1 * runInfo_.batch;
-
+    uint32_t singleShapeTileH;
+    uint32_t singleShapeTileW;
+    if (singleShapeTile_ == B16H2W32_B32H2W16) {
+        singleShapeTileH = 2;
+        singleShapeTileW = runInfo_.a_dtype_bytes == 2 ? 32 : 16;
+    } else if (singleShapeTile_ == B16H8W8_B32H4W8) {
+        singleShapeTileH = runInfo_.a_dtype_bytes == 2 ? 8 : 4;
+        singleShapeTileW = 8;
     }else {
-        return ge::GRAPH_FAILED;
+       return ge::GRAPH_FAILED;
     }
 
+    uint32_t tileH = Ops::Base::CeilDiv(runInfo_.ho, 2);
+    uint32_t tileW = Ops::Base::CeilDiv(runInfo_.wo, 2);
+
+    uint32_t k1 = Ops::Base::CeilDiv(tileH, singleShapeTileH) *
+                  Ops::Base::CeilDiv(tileW, singleShapeTileW);
+
+    uint32_t k0 = singleShapeTileH * singleShapeTileW * 16;
+    uint32_t c0Byte = 32;
+    uint32_t c1c0Fmap = Ops::Base::CeilAlign(static_cast<uint32_t>(runInfo_.ci * runInfo_.a_dtype_bytes), c0Byte);
+    uint32_t c1c0Dy = Ops::Base::CeilAlign(static_cast<uint32_t>(runInfo_.co * runInfo_.b_dtype_bytes), c0Byte);
+
+    userWorkSpaceSize = std::max(c1c0Fmap, c1c0Dy) * k0 * k1 * runInfo_.batch;
 
     workspaces[0] = WORKSPACE + userWorkSpaceSize;
     return ge::GRAPH_SUCCESS;

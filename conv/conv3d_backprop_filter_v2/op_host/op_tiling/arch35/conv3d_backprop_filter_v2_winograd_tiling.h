@@ -32,6 +32,11 @@ public:
 
     ~Conv3DBackpropFilterV2WinogradTiling() override = default;
 
+    enum SingleShapeTile {
+        B16H2W32_B32H2W16,
+        B16H8W8_B32H4W8
+    };
+
 protected:
     bool IsCapable() override;
 
@@ -42,10 +47,7 @@ protected:
     ge::graphStatus GetWorkspaceSize() override;
 
 private:
-    enum SingleShapeTile {
-        B16_H2W32_B32_H2W16
-        //TODO  补充w轴较小下的8*8
-    };
+
 
     bool CheckFormat();
 
