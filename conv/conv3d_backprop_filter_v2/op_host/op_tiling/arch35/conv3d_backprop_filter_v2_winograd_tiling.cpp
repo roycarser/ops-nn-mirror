@@ -44,7 +44,6 @@ bool Conv3DBackpropFilterV2WinogradTiling::IsCapable()
     }
 
     if (runInfo_.a_dtype != runInfo_.b_dtype) {
-        //TODO 适配通路里ctype为假的fp32
         OP_LOGD(opName_, "Winograd tiling is not support different dtype");
         return false;
     }
@@ -76,9 +75,14 @@ bool Conv3DBackpropFilterV2WinogradTiling::IsCapable()
         return false;
     }
 
-    if ((runInfo_.ho / 2) * (runInfo_.wo / 2) * runInfo_.batch > 65536) {
-        //累加轴过大暂时不处理，winograd累加轴比常规实现少了4倍，应该能囊括绝大部分case
-        //有需要可以适当放大
+    if (runInfo_.pad_u > RECOMMEND_PAD_LIMIT || runInfo_.pad_l > RECOMMEND_PAD_LIMIT) {
+        OP_LOGD(opName_, "pad is too large for winograd");
+        return false;
+    }
+
+    uint64_t tileH = Ops::Base::CeilDiv(runInfo_.ho, 2);
+    uint64_t tileW = Ops::Base::CeilDiv(runInfo_.wo, 2);
+    if (tileH * tileW * runInfo_.batch > RECOMMEND_K_MAX_SIZE) {
         OP_LOGD(opName_, "current reduce asix is too large for Winograd impl");
         return false;
     }
@@ -187,7 +191,6 @@ ge::graphStatus Conv3DBackpropFilterV2WinogradTiling::GetWorkspaceSize()
     constexpr uint64_t WORKSPACE = 16777216; // 16777216 : 16 * 1024 * 1024 libapiworkspace
     size_t* workspaces = context_->GetWorkspaceSizes(1);
     OP_CHECK_NULL_WITH_CONTEXT(context_, workspaces);
-    size_t userWorkSpaceSize = 0;
 
     uint32_t singleShapeTileH;
     uint32_t singleShapeTileW;
@@ -215,7 +218,10 @@ ge::graphStatus Conv3DBackpropFilterV2WinogradTiling::GetWorkspaceSize()
     uint32_t c1c0Fmap = Ops::Base::CeilAlign(static_cast<uint32_t>(runInfo_.ci * runInfo_.a_dtype_bytes), c0Byte);
     uint32_t c1c0Dy = Ops::Base::CeilAlign(static_cast<uint32_t>(runInfo_.co * runInfo_.b_dtype_bytes), c0Byte);
 
-    userWorkSpaceSize = std::max(c1c0Fmap, c1c0Dy) * k0 * k1 * runInfo_.batch;
+    size_t userWorkSpaceSize = static_cast<size_t>(runInfo_.batch) * std::max(c1c0Fmap, c1c0Dy) * k0 * k1;
+    //追加nc1hwc0转换的空间
+    userWorkSpaceSize += static_cast<size_t>(runInfo_.batch) * c1c0Fmap * runInfo_.hi * runInfo_.wi;
+    userWorkSpaceSize += static_cast<size_t>(runInfo_.batch) * c1c0Dy * runInfo_.ho * runInfo_.wo;
 
     workspaces[0] = WORKSPACE + userWorkSpaceSize;
     return ge::GRAPH_SUCCESS;

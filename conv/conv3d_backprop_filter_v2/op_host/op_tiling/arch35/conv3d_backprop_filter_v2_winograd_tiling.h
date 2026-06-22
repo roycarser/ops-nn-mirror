@@ -24,6 +24,13 @@ namespace NN {
 namespace Conv {
 class Conv3DBackpropFilterV2WinogradTiling : public Conv3DDWV2BasicBlockTilingArch35 {
 public:
+    //不去支持超大pad这类场景，kernel当前本身实现无限制，但是pad过大性能可能不比实现了pad跳过的基本块kernel好
+    static constexpr uint32_t RECOMMEND_PAD_LIMIT = 8;
+
+    //累加轴过大暂时不处理，winograd累加轴比常规实现少了4倍，应该能囊括绝大部分case
+    //有需要可以适当放大
+    static constexpr uint32_t RECOMMEND_K_MAX_SIZE = 65536;
+
     explicit Conv3DBackpropFilterV2WinogradTiling(gert::TilingContext* context) : Conv3DDWV2BasicBlockTilingArch35(
         context)
     {
