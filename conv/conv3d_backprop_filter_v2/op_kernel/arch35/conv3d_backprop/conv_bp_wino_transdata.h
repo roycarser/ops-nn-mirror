@@ -56,7 +56,7 @@ public:
         GlobalTensor<T> src, dst;
         src.SetGlobalBuffer(in);
         if constexpr (DisableInputL2Cache) {
-            src.SetL2CacheHint(false);
+            src.SetL2CacheHint(CacheMode::CACHE_MODE_DISABLE);
         }
         dst.SetGlobalBuffer(out);
 
