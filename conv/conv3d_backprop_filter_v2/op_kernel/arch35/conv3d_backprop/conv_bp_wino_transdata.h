@@ -56,7 +56,8 @@ public:
         GlobalTensor<T> src, dst;
         src.SetGlobalBuffer(in);
         if constexpr (DisableInputL2Cache) {
-            src.SetL2CacheHint(CacheMode::CACHE_MODE_DISABLE);
+            // TODO先打开测性能核常规kernel保持一致
+            // src.SetL2CacheHint(CacheMode::CACHE_MODE_DISABLE);
         }
         dst.SetGlobalBuffer(out);
 
