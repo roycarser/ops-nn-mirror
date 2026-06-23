@@ -907,8 +907,6 @@ struct Fmap {
         constexpr uint16_t tileBufWidthBlocks = CalColUnfoldBufWidth(TileH);
         constexpr uint32_t DstStride = tileBufWidthBlocks * (VL<T>() / C0<T>()) - F23_TRANSFORM_TILE_SIZE_4 + 1;
 
-        static_assert((TileH == 2 && SrcH == 6) || (TileH == 4 && SrcH == 10), "unsupported tileH");
-
         //vf里面直接用pragma roll发现会有编译失败，不展开循环似乎没法用数组，所以手动用模板把代码展开
         using HelperT = TileHUnRollHelper<TileH, SrcH, WElements, tileBufWidthBlocks, DstStride>;
         HelperT helper;

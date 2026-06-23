@@ -168,6 +168,11 @@ static constexpr __aicore__ inline uint32_t AlignUp(const uint32_t a, const uint
     return AscendC::AlignUp(a, b);
 }
 
+static constexpr __aicore__ inline uint32_t AlignDown(const uint32_t a, const uint32_t b)
+{
+    return a / b * b;
+}
+
 static constexpr __aicore__ inline uint32_t CeilDiv(const uint32_t a, const uint32_t b)
 {
     return AscendC::ConstCeil(a, b);

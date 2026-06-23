@@ -19,6 +19,7 @@
 
 #include "conv3d_backprop_filter_v2_tiling_data.h"
 #include "../conv3d_backprop/conv_bp_wino.h"
+#include "../conv3d_backprop/conv_bp_wino_transdata.h"
 
 using namespace AscendC ;
 
@@ -48,9 +49,22 @@ public:
 
     __aicore__ inline void Process()
     {
+        uint32_t cin1 = Ops::Base::CeilDiv(cin_, C0<SrcT>());
+        uint32_t cout1 = Ops::Base::CeilDiv(cout_, C0<SrcT>());
+
+        __gm__ SrcT* transX = workspace_;
+        __gm__ SrcT* transDy = transX + static_cast<uint64_t>(batch_) * cin1 * fmapH_ * fmapW_ * C0<SrcT>();
+        __gm__ SrcT* nk1c1k0c0 = transDy + static_cast<uint64_t>(batch_) * cout1 * dyH_ * dyW_ * C0<SrcT>();
+
+        WinoPreTransData<SrcT> transData;
+        transData.Init();
+        transData.TransData2NC1HWC0<true>(x_, transX, batch_, cin_, fmapH_, fmapW_);
+        transData.TransData2NC1HWC0<true>(dy_, transDy, batch_, cout_, dyH_, dyW_);
+        transData.End();
+
         using TilingT = decltype( BuildTilingType());
-        WinoFmapFwdTransformer<SrcT, TilingT> fmapFwd(x_, fmapH_, fmapW_, cin_, padH_, padW_);
-        WinoDyFwdTransformer<SrcT, TilingT> dyFwd(dy_, dyH_, dyW_, cout_, 0, 0);
+        WinoFmapFwdTransformer<SrcT, TilingT> fmapFwd(transX, fmapH_, fmapW_, cin_, padH_, padW_);
+        WinoDyFwdTransformer<SrcT, TilingT> dyFwd(transDy, dyH_, dyW_, cout_, 0, 0);
         WinoMMAD<SrcT, TilingT> winoMmad(hf32_);
 
         uint32_t tileH = WinoDyFwdTransformer<SrcT, TilingT>::SlideWin::SrcLength2Tiles(dyH_);
@@ -58,7 +72,7 @@ public:
 
         ConvBackpropFilterWinograd<SrcT, DstT, TilingT> winograd(
             fmapFwd, dyFwd,
-            workspace_, y_,
+            nk1c1k0c0, y_,
             winoMmad,
             tileH, tileW,
             batch_);
@@ -71,7 +85,7 @@ public:
 private:
 
     struct SingleShapeTile {
-        uint16_t H,W;
+        uint16_t H, W;
 
         constexpr static __aicore__ inline SingleShapeTile Get()
         {
@@ -92,7 +106,7 @@ private:
                 } else {
                     return {8, 8};
                 }
-            } else if constexpr(WinoTilingFlag==TPL_WINOGRAD_TILING3) {
+            } else if constexpr (WinoTilingFlag == TPL_WINOGRAD_TILING3) {
                 if constexpr (isB32) {
                     return {2, 16};
                 } else {
