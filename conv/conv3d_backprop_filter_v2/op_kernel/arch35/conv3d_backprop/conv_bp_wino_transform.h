@@ -93,7 +93,6 @@ template <typename TransformConfig>
 constexpr __aicore__ static inline uint32_t GetInputBufSize()
 {
     using TilingConfigT = typename TransformConfig::TilingT;
-    using T = typename TransformConfig::T;
     return GetInputBufSizeC0<TransformConfig>() * BlockConfig::SingleTransformC1<TilingConfigT>();
 }
 
@@ -364,7 +363,7 @@ private:
     }
 
     __simd_callee__ static inline void Padding(
-        __ubuf__ T* srcBuf, HWPad& pad, uint16_t srcH, uint16_t srcW)
+        __ubuf__ T* srcBuf, const HWPad& pad, uint16_t srcH, uint16_t srcW)
     {
         using namespace MicroAPI;
         RegTensor<T> paddingValue;
@@ -400,6 +399,7 @@ private:
 
         const uint32_t hElements = srcH * C0<T>();
         const uint16_t hRepeatTimes = CeilDivision(hElements, VL<T>());
+        const uint16_t wPadStride = (VL<T>() / C0<T>()) * wBlocks;
 
         src = srcBuf + padHTop * wElements;
         for (uint16_t i = 0; i < padWLeft; i++) {
@@ -408,7 +408,7 @@ private:
             for (uint16_t h = 0; h < hRepeatTimes; h++) {
                 MaskReg mask = MicroAPI::UpdateMask<T>(maskValue);
                 StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-                    src0, paddingValue, wBlocks, 1, mask);
+                    src0, paddingValue, wBlocks, wPadStride, mask);
             }
         }
 
@@ -419,7 +419,7 @@ private:
             for (uint16_t h = 0; h < hRepeatTimes; h++) {
                 MaskReg mask = MicroAPI::UpdateMask<T>(maskValue);
                 StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-                    src0, paddingValue, wBlocks, 1, mask);
+                    src0, paddingValue, wBlocks, wPadStride, mask);
             }
         }
     }
@@ -650,7 +650,8 @@ struct Dy {
 
                 RegTensor<T> d0;
                 RegTensor<T> d1;
-                TransformVf(s0, s1, d0, d1, mask);
+                RegTensor<T> d2;
+                TransformVf(s0, s1, d0, d1, d2, mask);
 
                 StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
                     dst, s0, tileBufWidthBlocks, 1, mask);
@@ -659,7 +660,7 @@ struct Dy {
                 StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
                     dst, d1, tileBufWidthBlocks, 1, mask);
                 StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-                    dst, s1, tileBufWidthBlocks, dstStride, mask);
+                    dst, d2, tileBufWidthBlocks, dstStride, mask);
             }
         }
     }
@@ -682,12 +683,12 @@ struct Dy {
             __ubuf__ T* dst = tileBuf + tileBufWidthBlocks * VL<T>() * w;
 
             for (uint16_t i = 0; i < tileH; i++) {
-                RegTensor<T> s0, s1, d0, d1;
+                RegTensor<T> s0, s1, d0, d1, d2;
 
                 LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s0, src, wValidElements);
                 LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s1, src, wValidElements);
 
-                TransformVf(s0, s1, d0, d1, mask);
+                TransformVf(s0, s1, d0, d1, d2, mask);
 
                 StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
                     dst, s0, tileBufWidthBlocks, 1, mask);
@@ -696,7 +697,7 @@ struct Dy {
                 StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
                     dst, d1, tileBufWidthBlocks, 1, mask);
                 StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-                    dst, s1, tileBufWidthBlocks, 1, mask);
+                    dst, d2, tileBufWidthBlocks, 1, mask);
             }
         }
     }
@@ -730,9 +731,10 @@ struct Dy {
 
                 RegTensor<T> d0;
                 RegTensor<T> d1;
-                TransformVf(s0, s1, d0, d1, mask);
+                RegTensor<T> d2;
+                TransformVf(s0, s1, d0, d1, d2, mask);
 
-                Unfold16TileHWStorer::store(s, s0, d0, d1, s1, storeMask);
+                Unfold16TileHWStorer::store(s, s0, d0, d1, d2, storeMask);
             }
             Unfold16TileHWStorer::UpdateStoreInfo(s, tileW);
         }
@@ -740,11 +742,12 @@ struct Dy {
 
     static __simd_callee__ inline void TransformVf(
         RegTensor<T>& s0, RegTensor<T>& s1,
-        RegTensor<T>& d0, RegTensor<T>& d1,
+        RegTensor<T>& d0, RegTensor<T>& d1, RegTensor<T>& d2,
         MaskReg& mask)
     {
         Add(d0, s0, s1, mask);
         Sub(d1, s0, s1, mask);
+        Neg(d2, s1, mask);
     }
 };
 

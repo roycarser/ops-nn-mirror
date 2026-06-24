@@ -58,8 +58,8 @@ public:
 
         WinoPreTransData<SrcT> transData;
         transData.Init();
-        transData.template TransData2NC1HWC0<true>(x_, transX, batch_, cin_, fmapH_, fmapW_);
-        transData.template TransData2NC1HWC0<true>(dy_, transDy, batch_, cout_, dyH_, dyW_);
+        transData.TransData2NC1HWC0(x_, transX, batch_, cin_, fmapH_, fmapW_);
+        transData.TransData2NC1HWC0(dy_, transDy, batch_, cout_, dyH_, dyW_);
         transData.End();
 
         using TilingT = decltype( BuildTilingType());

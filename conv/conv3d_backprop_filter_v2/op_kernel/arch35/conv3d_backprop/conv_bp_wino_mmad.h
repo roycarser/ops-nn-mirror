@@ -242,7 +242,9 @@ public:
             fp.params.srcNdStride = L0C_SINGLE_POINT_BUF_BYTES / (BLOCK_CUBE * sizeof(float));
             //到UB上按C0对齐
             fp.params.dstNdStride = WinoInvBufUtil::InvTransSinglePointBufSize<TilingT>();
-            fp.dualDstCtl = 1;
+            if constexpr (aivNums == 2) {
+                fp.dualDstCtl = 1;
+            }
 
             syncQue.WaitSlot();
             static constexpr FixpipeConfig cfg = {CO2Layout::ROW_MAJOR, true};

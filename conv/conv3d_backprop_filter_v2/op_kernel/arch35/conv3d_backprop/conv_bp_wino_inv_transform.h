@@ -338,7 +338,7 @@ private:
         MicroAPI::Mul(tmpAddHalf, tmpAdd, value0P5, mask);
         MicroAPI::Add(d0, s0, tmpAddHalf, mask);
         MicroAPI::Mul(d1, tmpSub, value0P5, mask);
-        MicroAPI::Sub(d2, tmpAddHalf, s3, mask);
+        MicroAPI::Add(d2, tmpAddHalf, s3, mask);
     }
 
 
