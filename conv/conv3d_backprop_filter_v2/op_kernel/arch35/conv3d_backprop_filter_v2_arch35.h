@@ -30,7 +30,8 @@ using namespace AscendC;
         op.Process();                                    \
     } while (0)
 
-template <uint32_t conv3DDWTemplateId, bool isSplitKernelHW, bool groupEnlarge, uint32_t winogradTilingFlag>
+template <uint32_t conv3DDWTemplateId, bool isSplitKernelHW, bool groupEnlarge,
+          uint32_t winogradTilingFlag, bool winogradResidentFlag>
 __global__ __aicore__ void conv3d_backprop_filter_v2_arch35(GM_ADDR x, GM_ADDR filter_size, GM_ADDR out_backprop,
                                                             GM_ADDR y, GM_ADDR workSpace, GM_ADDR tiling)
 {
@@ -55,7 +56,7 @@ __global__ __aicore__ void conv3d_backprop_filter_v2_arch35(GM_ADDR x, GM_ADDR f
 
     if constexpr (winogradTilingFlag != TPL_WINOGRAD_DISABLE) {
         TPipe pipe;
-        CONV3D_DX_INPUT_RUN_OP(Conv2dDwWinograd<DTYPE_X, DTYPE_Y, winogradTilingFlag>);
+        CONV3D_DX_INPUT_RUN_OP(Conv2dDwWinograd<DTYPE_X, DTYPE_Y, winogradTilingFlag, winogradResidentFlag>);
     } else {
         Conv3dDwInitOutput<DTYPE_Y> opInitOutput;
         opInitOutput.Init(y, &tilingData);

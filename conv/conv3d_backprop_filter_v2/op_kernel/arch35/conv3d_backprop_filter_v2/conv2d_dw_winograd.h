@@ -23,7 +23,7 @@
 
 using namespace AscendC ;
 
-template <typename SrcT, typename DstT, uint32_t WinoTilingFlag>
+template <typename SrcT, typename DstT, uint32_t WinoTilingFlag, bool WinoResidentFlag>
 class Conv2dDwWinograd {
 public:
     __aicore__ inline void Init(
@@ -90,23 +90,16 @@ private:
         constexpr static __aicore__ inline SingleShapeTile Get()
         {
             //TileHTileW组合:
-            //flag1:B16H2W32 B32H2W16
-            //flag2:B16H8W8 B32H4W8
-            //flag3:B16H4W16 B32H2W16
+            //flag1:B16H8W8 B32H4W8
+            //flag2:B16H4W16 B32H2W16
             constexpr bool isB32 = Std::is_same_v<SrcT, float>;
             if constexpr (WinoTilingFlag == TPL_WINOGRAD_TILING1) {
-                if constexpr (isB32) {
-                    return {2, 16};
-                } else {
-                    return {2, 32};
-                }
-            } else if constexpr (WinoTilingFlag == TPL_WINOGRAD_TILING2) {
                 if constexpr (isB32) {
                     return {4, 8};
                 } else {
                     return {8, 8};
                 }
-            } else if constexpr (WinoTilingFlag == TPL_WINOGRAD_TILING3) {
+            } else if constexpr (WinoTilingFlag == TPL_WINOGRAD_TILING2) {
                 if constexpr (isB32) {
                     return {2, 16};
                 } else {
@@ -126,6 +119,10 @@ private:
         constexpr uint32_t invTransBufCnt = 4;
         constexpr uint32_t invTransCout = 8;
         constexpr SingleShapeTile singleShapeTile = SingleShapeTile::Get();
+        constexpr BlockConfig::InputTensor ResidentTensor =
+            WinoResidentFlag == TPL_WINOGRAD_RESIDENT_FMAP ?
+                BlockConfig::InputTensor::FMAP :
+                BlockConfig::InputTensor::DY;
 
         return BlockConfig::Tiling<singleShapeCout,
             singleShapeCin,
@@ -134,7 +131,7 @@ private:
             singleShapeTile.W,
             fwdBufCnt,
             singleShapeResidentC,
-            BlockConfig::InputTensor::FMAP,
+            ResidentTensor,
             invTransBufCnt,
             invTransCout>{};
     }
