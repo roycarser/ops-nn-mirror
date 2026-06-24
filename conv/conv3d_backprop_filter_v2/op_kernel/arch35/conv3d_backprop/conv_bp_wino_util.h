@@ -324,7 +324,7 @@ static inline constexpr uint32_t __aicore__ AivNumInBlock()
 {
 #if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
     return 2;
-#elif
+#else
     return 1;
 #endif
 }

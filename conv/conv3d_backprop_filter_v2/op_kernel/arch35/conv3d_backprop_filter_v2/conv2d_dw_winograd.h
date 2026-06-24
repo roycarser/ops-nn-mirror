@@ -57,9 +57,10 @@ public:
         __gm__ SrcT* nk1c1k0c0 = transDy + static_cast<uint64_t>(batch_) * cout1 * dyH_ * dyW_ * C0<SrcT>();
 
         WinoPreTransData<SrcT> transData;
+        bool disableL2 = ShouldDisableTransDataL2();
         transData.Init();
-        transData.TransData2NC1HWC0(x_, transX, batch_, cin_, fmapH_, fmapW_);
-        transData.TransData2NC1HWC0(dy_, transDy, batch_, cout_, dyH_, dyW_);
+        transData.TransData2NC1HWC0(x_, transX, batch_, cin_, fmapH_, fmapW_, disableL2);
+        transData.TransData2NC1HWC0(dy_, transDy, batch_, cout_, dyH_, dyW_, disableL2);
         transData.End();
 
         using TilingT = decltype( BuildTilingType());
@@ -83,6 +84,23 @@ public:
     }
 
 private:
+    __aicore__ inline bool ShouldDisableTransDataL2() const
+    {
+#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
+        constexpr uint32_t L2CacheBytes = 128 * 1024 * 1024;
+#else
+        constexpr uint32_t L2CacheBytes = 112*1024*1024;
+#endif
+
+        uint64_t inputBytes = batch_ * sizeof(SrcT) * (
+                                  static_cast<uint64_t>(cin_) * fmapH_ * fmapW_ +
+                                  static_cast<uint64_t>(cout_) * dyH_ * dyW_);
+        //简单实现的判断，没太多考虑，不一定真的有价值
+        //当输出+输入的两倍(原始数据+转置数据) > L2cache的0.85倍(冗余一些，可能有其他的东西占用)就关掉原始数据的L2
+        //有问题在调
+        uint64_t outputBytes = static_cast<uint64_t>(cin_) * cout_ * 3 * 3 * sizeof(DstT);
+        return (outputBytes + inputBytes * 2) > (L2CacheBytes * 0.85);
+    }
 
     struct SingleShapeTile {
         uint16_t H, W;

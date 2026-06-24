@@ -51,10 +51,14 @@ public:
     __aicore__ inline void TransData2NC1HWC0(
         __gm__ T* in,
         __gm__ T* out,
-        uint32_t n, uint32_t c, uint32_t h, uint32_t w)
+        uint32_t n, uint32_t c, uint32_t h, uint32_t w,
+        bool disableInputL2Cache)
     {
         GlobalTensor<T> src, dst;
         src.SetGlobalBuffer(in);
+        if (disableInputL2Cache) {
+            src.SetL2CacheHint(CacheMode::CACHE_MODE_DISABLE);
+        }
         dst.SetGlobalBuffer(out);
 
         uint32_t blockC0, blockHW;
