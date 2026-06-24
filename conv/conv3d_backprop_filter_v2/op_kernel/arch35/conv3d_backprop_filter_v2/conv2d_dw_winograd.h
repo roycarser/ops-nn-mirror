@@ -92,6 +92,7 @@ private:
         constexpr uint32_t L2CacheBytes = 112*1024*1024;
 #endif
 
+        constexpr uint32_t L2CacheLimit = L2CacheBytes * 0.85f;
         uint64_t inputBytes = batch_ * sizeof(SrcT) * (
                                   static_cast<uint64_t>(cin_) * fmapH_ * fmapW_ +
                                   static_cast<uint64_t>(cout_) * dyH_ * dyW_);
@@ -99,7 +100,7 @@ private:
         //当输出+输入的两倍(原始数据+转置数据) > L2cache的0.85倍(冗余一些，可能有其他的东西占用)就关掉原始数据的L2
         //有问题在调
         uint64_t outputBytes = static_cast<uint64_t>(cin_) * cout_ * 3 * 3 * sizeof(DstT);
-        return (outputBytes + inputBytes * 2) > (L2CacheBytes * 0.85);
+        return (outputBytes + inputBytes * 2) > L2CacheLimit;
     }
 
     struct SingleShapeTile {
