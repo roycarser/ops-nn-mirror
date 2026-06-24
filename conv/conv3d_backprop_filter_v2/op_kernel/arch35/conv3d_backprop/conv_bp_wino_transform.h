@@ -632,6 +632,11 @@ struct Dy {
         const uint16_t tileH = params.tileH;
         const uint16_t dstStride = tileBufWidthBlocks * (VL<T>() / C0<T>()) - F23_TRANSFORM_TILE_SIZE_4 + 1;
 
+        RegTensor<bfloat16_t> bf16NegativeOne;
+        if constexpr (Std::is_same_v<T,bfloat16_t>) {
+            Duplicate(bf16NegativeOne, -1);
+        }
+
         for (uint16_t th = 0; th < tileH; th++) {
             constexpr uint32_t thStride = F23_TRANSFORM_TILE_SIZE_4 * C0<T>();
 
@@ -651,7 +656,7 @@ struct Dy {
                 RegTensor<T> d0;
                 RegTensor<T> d1;
                 RegTensor<T> d2;
-                TransformVf(s0, s1, d0, d1, d2, mask);
+                TransformVf(bf16NegativeOne,s0, s1, d0, d1, d2, mask);
 
                 StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
                     dst, s0, tileBufWidthBlocks, 1, mask);
@@ -675,6 +680,11 @@ struct Dy {
         const uint16_t wRepeatTimes = params.wRepeatTimes;
         const uint16_t tileH = params.tileH;
 
+        RegTensor<bfloat16_t> bf16NegativeOne;
+        if constexpr (Std::is_same_v<T, bfloat16_t>) {
+            Duplicate(bf16NegativeOne, -1);
+        }
+
         uint32_t maskValue = wValidElements;
         for (uint16_t w = 0; w < wRepeatTimes; w++) {
             MaskReg mask = UpdateMask<T>(maskValue);
@@ -688,7 +698,7 @@ struct Dy {
                 LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s0, src, wValidElements);
                 LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s1, src, wValidElements);
 
-                TransformVf(s0, s1, d0, d1, d2, mask);
+                TransformVf(bf16NegativeOne, s0, s1, d0, d1, d2, mask);
 
                 StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
                     dst, s0, tileBufWidthBlocks, 1, mask);
@@ -712,6 +722,11 @@ struct Dy {
         const uint16_t hRepeatTimes = params.hRepeatTimes;
         const uint16_t tileW = params.tileW;
 
+        RegTensor<bfloat16_t> bf16NegativeOne;
+        if constexpr (Std::is_same_v<T, bfloat16_t>) {
+            Duplicate(bf16NegativeOne, -1);
+        }
+
         Unfold16TileHWStorer::StoreInfo<T> s;
         Unfold16TileHWStorer::CreateStoreInfo(s, out, tileW, dstTileBufWidthBlocks);
 
@@ -732,7 +747,7 @@ struct Dy {
                 RegTensor<T> d0;
                 RegTensor<T> d1;
                 RegTensor<T> d2;
-                TransformVf(s0, s1, d0, d1, d2, mask);
+                TransformVf(bf16NegativeOne, s0, s1, d0, d1, d2, mask);
 
                 Unfold16TileHWStorer::store(s, s0, d0, d1, d2, storeMask);
             }
@@ -741,13 +756,20 @@ struct Dy {
     }
 
     static __simd_callee__ inline void TransformVf(
+        RegTensor<bfloat16_t>& negativeOne,
         RegTensor<T>& s0, RegTensor<T>& s1,
         RegTensor<T>& d0, RegTensor<T>& d1, RegTensor<T>& d2,
         MaskReg& mask)
     {
         Add(d0, s0, s1, mask);
         Sub(d1, s0, s1, mask);
-        Neg(d2, s1, mask);
+        if constexpr (Std::is_same_v<bfloat16_t, T>) {
+            //bf16不支持Neg指令，用乘-1替代
+            Mul(d2, s1, negativeOne, mask);
+        } else {
+            Neg(d2, s1, mask);
+        }
+
     }
 };
 
