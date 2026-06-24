@@ -25,7 +25,6 @@
 namespace Ops {
 namespace NN {
 namespace Conv {
-
 bool Conv3DBackpropFilterV2WinogradTiling::IsCapable()
 {
     if (!IsSocVersion91095()) {
@@ -36,7 +35,7 @@ bool Conv3DBackpropFilterV2WinogradTiling::IsCapable()
         dtypeByte_ != ge::GetSizeByDataType(ge::DT_FLOAT)) {
         OP_LOGD(opName_, "Winograd tiling is only supported for bf16/fp16/fp32/hf32 dataType.");
         return false;
-        }
+    }
 
     if (!CheckFormat()) {
         OP_LOGD(opName_, "current format is not support by winograd tiling");
@@ -70,7 +69,7 @@ bool Conv3DBackpropFilterV2WinogradTiling::IsCapable()
         return false;
     }
 
-    if (runInfo_.kh != 3 ||runInfo_.kw != 3 ) {
+    if (runInfo_.kh != 3 || runInfo_.kw != 3) {
         OP_LOGD(opName_, "Winograd tiling only support 3*3 kernel");
         return false;
     }
@@ -87,6 +86,10 @@ bool Conv3DBackpropFilterV2WinogradTiling::IsCapable()
         return false;
     }
 
+    if ((runInfo_.co / 64) * (runInfo_.ci / 64) < platformInfo_.core_num / 2) {
+        OP_LOGD(opName_, "the cout/cin is too small for winograd");
+        return false;
+    }
     return true;
 }
 
@@ -99,23 +102,34 @@ bool Conv3DBackpropFilterV2WinogradTiling::CheckFormat()
     const auto fmapDesc = context_->GetInputDesc(OUTPUT_BP_INDEX);
     OP_TILING_CHECK(
         fmapDesc == nullptr, CUBE_INNER_ERR_REPORT("Conv3DBackpropFilterV2", "fmap_desc is null"),
-        return false);
+
+
+    return false
+    )
+    ;
     auto fmapFormat = static_cast<ge::Format>(ge::GetPrimaryFormat(fmapDesc->GetStorageFormat()));
     const auto dedyDesc = context_->GetInputDesc(Y_INDEX);
     OP_TILING_CHECK(
         dedyDesc == nullptr, CUBE_INNER_ERR_REPORT("Conv3DBackpropFilterV2", "dedyDesc is null"),
-        return false);
+
+
+    return false
+    )
+    ;
     auto dedyFormat = static_cast<ge::Format>(ge::GetPrimaryFormat(dedyDesc->GetStorageFormat()));
     const auto filterDesc = context_->GetOutputDesc(FILTER_INDEX);
     OP_TILING_CHECK(
         filterDesc == nullptr, CUBE_INNER_ERR_REPORT("Conv3DBackpropFilterV2", "filterDesc is null"),
-        return false);
+
+
+    return false
+    )
+    ;
     auto filter_format = static_cast<ge::Format>(ge::GetPrimaryFormat(filterDesc->GetStorageFormat()));
 
     return fmapFormat == ge::FORMAT_NCDHW &&
            dedyFormat == ge::FORMAT_NCDHW &&
            filter_format == ge::FORMAT_NCDHW;
-
 }
 
 
@@ -126,10 +140,10 @@ uint64_t Conv3DBackpropFilterV2WinogradTiling::GetTilingKey() const
         tilingFlag = 1;
     } else if (singleShapeTile_ == B16H8W8_B32H4W8) {
         tilingFlag = 2;
-    }else if (singleShapeTile_ == B16H4W16_B32H2W16) {
+    } else if (singleShapeTile_ == B16H4W16_B32H2W16) {
         tilingFlag = 3;
     }
-    const uint64_t tilingKey = GET_TPL_TILING_KEY(1, 0, 0,tilingFlag);
+    const uint64_t tilingKey = GET_TPL_TILING_KEY(1, 0, 0, tilingFlag);
     OP_LOGD(context_->GetNodeName(), "tilingKey is: [%lu] , use winograd tiling flag [%lu]", tilingKey, tilingFlag);
     return tilingKey;
 }
@@ -150,30 +164,25 @@ Conv3DBackpropFilterV2WinogradTiling::SingleShapeTile SelectTemplate(uint32_t ti
     uint32_t singleShapeTileW2 = 16;
 
     uint32_t clusters0 = Ops::Base::CeilDiv(tileH, singleShapeTileH0) *
-                        Ops::Base::CeilDiv(tileW, singleShapeTileW0);
+                         Ops::Base::CeilDiv(tileW, singleShapeTileW0);
 
     uint32_t clusters1 = Ops::Base::CeilDiv(tileH, singleShapeTileH1) *
-                            Ops::Base::CeilDiv(tileW, singleShapeTileW1);
+                         Ops::Base::CeilDiv(tileW, singleShapeTileW1);
 
     uint32_t clusters2 = Ops::Base::CeilDiv(tileH, singleShapeTileH2) *
-                                Ops::Base::CeilDiv(tileW, singleShapeTileW2);
+                         Ops::Base::CeilDiv(tileW, singleShapeTileW2);
 
     //谁的空转块更少选谁,计算块一样多时，当前选择H4W16,冗余数据量相比H2W32小，同时内轴更大，16个C0应该能用一个outstanding发出去
-    if (clusters0 == clusters1 && clusters1 == clusters2) {
-        return Conv3DBackpropFilterV2WinogradTiling::B16H4W16_B32H2W16;
-    }
-    if (clusters0 == std::min({clusters0, clusters1, clusters2})) {
-        return Conv3DBackpropFilterV2WinogradTiling::B16H2W32_B32H2W16;
-    }
-    if (clusters1 == std::min({clusters0, clusters1, clusters2})) {
-        return Conv3DBackpropFilterV2WinogradTiling::B16H8W8_B32H4W8;
-    }
-    if (clusters2 == std::min({clusters0, clusters1, clusters2})) {
+    uint32_t minClusters = std::min({clusters0, clusters1, clusters2});
+    if (minClusters == clusters2) {
         return Conv3DBackpropFilterV2WinogradTiling::B16H4W16_B32H2W16;
     }
 
-    //should not reach here
-    return Conv3DBackpropFilterV2WinogradTiling::B16H4W16_B32H2W16;
+    if (minClusters == clusters0) {
+        return Conv3DBackpropFilterV2WinogradTiling::B16H2W32_B32H2W16;
+    }
+
+    return Conv3DBackpropFilterV2WinogradTiling::B16H8W8_B32H4W8;
 }
 
 
@@ -227,7 +236,14 @@ ge::graphStatus Conv3DBackpropFilterV2WinogradTiling::GetWorkspaceSize()
     return ge::GRAPH_SUCCESS;
 }
 
-REGISTER_TILING_TEMPLATE("Conv3DBackpropFilterV2", Conv3DBackpropFilterV2WinogradTiling, 2);
+REGISTER_TILING_TEMPLATE (
+
+"Conv3DBackpropFilterV2"
+,
+Conv3DBackpropFilterV2WinogradTiling
+,
+2
+);
 }
 }
 }
