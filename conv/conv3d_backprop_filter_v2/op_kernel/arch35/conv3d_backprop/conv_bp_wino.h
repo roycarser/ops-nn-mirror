@@ -124,16 +124,14 @@ public:
     //实现简单的Tile和蛇形走位，所有核构成一个blockHW块进行递进，提升L2cache的命中率
     //尾轮自适应，仅最后一轮才会产生空转
     //
-    //                         blockW
+    //                         blockW(4)
     //                   |-----------------------|
     //                -  +-----+-----+-----+-----+-----+-----+-----+
-    //                |  |core0|core1|core2|core3|     |     |     |
-    //       blockH  -|  +-----+-----+-----+-----+-----+-----+-----+
-    //                |  |core4|core5|core6|core7|     |     |     |
+    //                |  |core0|core2|core4|core6|core0|core2|core4|
+    //      blockH(2)-|  +-----+-----+-----+-----+-----+-----+-----+
+    //                |  |core1|core3|core5|core7|core1|core3|core5|
     //                -  +-----+-----+-----+-----+-----+-----+-----+  HCnt
-    //                   |     |     |     |     |     |     |     |
-    //                   +-----+-----+-----+-----+-----+-----+-----+
-    //                   |     |     |     |     |     |     |     |
+    //                   |core4|core3|core2|core1|core0|core7|core6|
     //                   +-----+-----+-----+-----+-----+-----+-----+
     //                                      WCnt
 
@@ -150,6 +148,9 @@ public:
         } else if (coreNum == 28) {
             bestH = 4;
             bestW = 7;
+        } else if (coreNum == 36) {
+            bestH = 6;
+            bestW = 6;
         } else {
             for (uint16_t i = 1; i * i <= coreNum; i++) {
                 if (coreNum % i == 0) {
