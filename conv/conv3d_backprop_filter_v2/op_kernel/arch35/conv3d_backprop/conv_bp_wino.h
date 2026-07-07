@@ -52,12 +52,33 @@ using InvTransformL0C2UBSyncQueue = CVSyncQue<CVSyncQueConfig<PIPE_FIX, PIPE_V, 
 template <typename TilingT>
 class BatchTileKIterator {
 public:
+    //支持切K,K的维度为[batch,CeilDiv(tileH,SingleShapeTileH)]
+    //当前简单点不切tileW
+    __aicore__ inline explicit BatchTileKIterator(
+        uint32_t batch, uint32_t tilesH, uint32_t tilesW,
+        uint32_t kBegin, uint32_t kLength)
+        : batch_(batch),
+          tilesH_(tilesH),
+          tilesW_(tilesW),
+          hSteps_(Ops::Base::CeilDiv(tilesH, SingleShapeTileH)),
+          wSteps_(Ops::Base::CeilDiv(tilesW, SingleShapeTileW)),
+          kBegin_(kBegin),
+          kLength_(kLength)
+    {
+        Update(0, 0);
+    }
+
     __aicore__ inline explicit BatchTileKIterator(
         uint32_t batch, uint32_t tilesH, uint32_t tilesW)
         : batch_(batch),
           tilesH_(tilesH),
-          tilesW_(tilesW)
+          tilesW_(tilesW),
+          hSteps_(Ops::Base::CeilDiv(tilesH, SingleShapeTileH)),
+          wSteps_(Ops::Base::CeilDiv(tilesW, SingleShapeTileW)),
+          kBegin_(0),
+          kLength_(batch * hSteps_)
     {
+        Update(0, 0);
     }
 
     __aicore__ inline HWBox TileBox() const
@@ -65,28 +86,25 @@ public:
         HWBox tile = {};
         tile.hIdx = tileHIdx_;
         tile.wIdx = tileWIdx_;
-        tile.hLength = Std::min(static_cast<uint32_t>(SingleShapeTileH), tilesH_ - tileHIdx_);
-        tile.wLength = Std::min(static_cast<uint32_t>(SingleShapeTileW), tilesW_ - tileWIdx_);
+        tile.hLength = Std::min(SingleShapeTileH, tilesH_ - tileHIdx_);
+        tile.wLength = Std::min(SingleShapeTileW, tilesW_ - tileWIdx_);
         tile.elements = tile.hLength * tile.wLength;
         return tile;
     }
 
+
     __aicore__ inline void Next()
     {
-        tileKIdx_++;
-
         tileWIdx_ += SingleShapeTileW;
-
         if (tileWIdx_ >= tilesW_) {
-            tileWIdx_ = 0;
-            tileHIdx_ += SingleShapeTileH;
-
-            if (tileHIdx_ >= tilesH_) {
-                tileHIdx_ = 0;
-                batchIdx_++;
-                tileKIdx_ = 0;
-                end_ = batchIdx_ >= batch_;
+            processedKStep_++;
+            if (processedKStep_ >= kLength_) {
+                end_ = true;
+            } else {
+                Update(processedKStep_, 0);
             }
+        } else {
+            Update(processedKStep_, tileWIdx_);
         }
     }
 
@@ -106,15 +124,31 @@ public:
     }
 
 private:
-    constexpr static uint16_t SingleShapeTileH = BlockConfig::SingleShapeTileH<TilingT>();
-    constexpr static uint16_t SingleShapeTileW = BlockConfig::SingleShapeTileW<TilingT>();
+    __aicore__ inline void Update(uint32_t processedSteps, uint32_t tileWIdx)
+    {
+        uint32_t kStep = processedSteps + kBegin_;
+        batchIdx_ = kStep / hSteps_;
+        uint32_t singleShapeTileHIdx = kStep - batchIdx_ * hSteps_;
+        tileHIdx_ = singleShapeTileHIdx * SingleShapeTileH;
+        tileWIdx_ = tileWIdx;
+        uint32_t singleShapeTileWIdx = tileWIdx_ / SingleShapeTileW;
+        tileKIdx_ = singleShapeTileHIdx * wSteps_ + singleShapeTileWIdx;
+    }
+
+    constexpr static uint32_t SingleShapeTileH = BlockConfig::SingleShapeTileH<TilingT>();
+    constexpr static uint32_t SingleShapeTileW = BlockConfig::SingleShapeTileW<TilingT>();
     const uint32_t tilesH_;
     const uint32_t tilesW_;
     const uint32_t batch_;
+    const uint32_t hSteps_;
+    const uint32_t wSteps_;
+    const uint32_t kBegin_;
+    const uint32_t kLength_;
     uint32_t tileHIdx_ = 0;
     uint32_t tileWIdx_ = 0;
     uint32_t batchIdx_ = 0;
     uint32_t tileKIdx_ = 0;
+    uint32_t processedKStep_ = 0;
     bool end_ = false;
 };
 
@@ -276,7 +310,29 @@ enum BlockIterDirection {
     CIN,
 };
 
-template <BlockIterDirection IterDir, typename TilingT>
+template <BlockIterDirection IterDir>
+static __aicore__ inline bool GetBlockFromSwizzle2D(
+    const SwizzleTopology2D& topology, uint32_t loopIdx,
+    uint16_t coreId,
+    uint32_t singleShapeCout, uint32_t singleShapeCin,
+    uint32_t cout, uint32_t cin,
+    CoutCinRange& cRange)
+{
+    uint32_t topoH, topoW;
+    bool valid = topology.GetHW(loopIdx, coreId, topoH, topoW);
+
+    uint32_t coutBlockIdx = (IterDir == CIN) ? topoH : topoW;
+    uint32_t cinBlockIdx = (IterDir == CIN) ? topoW : topoH;
+
+    cRange.coutIdx = coutBlockIdx * singleShapeCout;
+    cRange.cinIdx = cinBlockIdx * singleShapeCin;
+    cRange.coutLength = valid ? Std::min(singleShapeCout, cout - cRange.coutIdx) : 0;
+    cRange.cinLength = valid ? Std::min(singleShapeCin, cin - cRange.cinIdx) : 0;
+
+    return valid;
+}
+
+template <BlockIterDirection IterDir, typename TilingT, bool OnlyIterMainBlocks = false>
 class BlockIterator {
 public:
     static constexpr uint32_t SingleShapeCout = BlockConfig::SingleShapeCout<TilingT>();
@@ -284,7 +340,7 @@ public:
 
     inline __aicore__ bool More() const
     {
-        return loopIdx_ * GetBlockNum() < topology_.TotalCnt();
+        return loopIdx_ < blocksIterCnt_;
     }
 
     //获取当前aic计算的基本块范围,若当前核无基本块计算则返回false并且将length设置为0
@@ -295,18 +351,11 @@ public:
 
     inline __aicore__ bool GetBlock(uint16_t coreId, CoutCinRange& cRange) const
     {
-        uint32_t topoH, topoW;
-        bool valid = topology_.GetHW(loopIdx_, coreId, topoH, topoW);
-
-        uint32_t coutBlockIdx = (IterDir == CIN) ? topoH : topoW;
-        uint32_t cinBlockIdx = (IterDir == CIN) ? topoW : topoH;
-
-        cRange.coutIdx = coutBlockIdx * SingleShapeCout;
-        cRange.cinIdx = cinBlockIdx * SingleShapeCin;
-        cRange.coutLength = valid ? Std::min(SingleShapeCout, cout_ - cRange.coutIdx) : 0;
-        cRange.cinLength = valid ? Std::min(SingleShapeCin, cin_ - cRange.cinIdx) : 0;
-
-        return valid;
+        return GetBlockFromSwizzle2D<IterDir>(
+            topology_, loopIdx_, coreId,
+            SingleShapeCout, SingleShapeCin,
+            cout_, cin_,
+            cRange);
     }
 
     //获取本轮全核计算涉及基本块的cout/cin范围最大值
@@ -327,6 +376,17 @@ public:
     inline __aicore__ void Next()
     {
         loopIdx_++;
+    }
+
+    inline __aicore__ const SwizzleTopology2D& GetSwizzleTopology() const
+    {
+        return topology_;
+    }
+
+    inline __aicore__ uint32_t GetTailBlockCnt() const
+    {
+        const uint32_t mainBlockNum = blocksIterCnt_ * GetBlockNum();
+        return topology_.TotalCnt() > mainBlockNum ? topology_.TotalCnt() - mainBlockNum : 0;
     }
 
     static inline __aicore__ BlockIterator Create(uint32_t cout, uint32_t cin)
@@ -350,14 +410,128 @@ private:
         uint16_t topologyBlockW)
         : cout_(cout),
           cin_(cin),
-          topology_(topologyH, topologyW, topologyBlockH, topologyBlockW)
+          topology_(topologyH, topologyW, topologyBlockH, topologyBlockW),
+          blocksIterCnt_(GetBlockIterCnt(topology_.TotalCnt()))
     {
+    }
+
+    inline __aicore__ static uint32_t GetBlockIterCnt(uint32_t totalBlocks)
+    {
+        uint16_t blockNum = GetBlockNum();
+        uint32_t mainIterCnt = totalBlocks / blockNum;
+        uint32_t tailBlocks = totalBlocks - mainIterCnt * blockNum;
+
+        if constexpr (OnlyIterMainBlocks) {
+            //尾轮空闲核超过一半时，将这些block留到后续切k处理
+            return tailBlocks > (blockNum / 2) ? mainIterCnt + 1 : mainIterCnt;
+        } else {
+            return mainIterCnt + (tailBlocks > 0 ? 1 : 0);
+        }
     }
 
     const uint32_t cout_;
     const uint32_t cin_;
     const SwizzleTopology2D topology_;
+    const uint32_t blocksIterCnt_;
     uint32_t loopIdx_ = 0;
+};
+
+struct SplitKState {
+    uint32_t kBegin = 0;
+    uint32_t kLength = 0;
+    //单个kGroup最多会被分到几个k
+    uint32_t kMaxLength = 0;
+    //k轴被切分成几个组
+    uint16_t kGroups = 0;
+    //当前核所在的kGroup的索引
+    uint16_t kGroupIdx = 0;
+    //当前kGroup的核数
+    uint16_t kGroupStartCoreId = 0;
+    uint16_t kGroupCoreNum = 0;
+};
+
+template <BlockIterDirection MainBlockIterDir, typename TilingT>
+class TailBlockSplitKIterator {
+public:
+    // 由于主轮的走位不是按照固定的矩形方式走的，TailBlocks在整个基本块里的形状不一定能用一个矩形表示，所以构造函数里需要
+    // 传入主轮使用的SwizzleTopology2D解算实际坐标
+    //
+    inline __aicore__ TailBlockSplitKIterator(
+        uint32_t tailBlockCnt, const SwizzleTopology2D& topology, uint32_t totalK,
+        uint32_t cout, uint32_t cin)
+        : topology_(topology),
+          tailBlockCnt_(tailBlockCnt),
+          topologyTailIter_((topology.TotalCnt() - tailBlockCnt) / GetBlockNum()),
+          totalK_(totalK),
+          cout_(cout),
+          cin_(cin)
+    {
+    }
+
+    //将尾块按k轴平分到核上，要求尾轮基本块不超过核数一半
+    //所有核会被拆分成kGroup个组，每个组处理所有尾块的相同k段
+    //这样可以保证kGroup内的逻辑应当和主轮相同，本质是处理TailBlocks个基本块，只是k轴缩短
+    //分不进kGroup的尾核统一塞进最后一个kGroup，这样子外层不用单独适配尾轮的空跑代码，所以最后一个kGroup的核可能会多一些
+    //
+    //  kGroup = Std::min(totalCoreNum / tailBlockCnt_, totalK_)
+    //  kCores = CoreNums/kGroup
+    //
+    //                                KGroup(2)
+    //                -  +--------------+---------------+
+    //                |  |core0         |kCore          |
+    //   TailBlocks  -|  +--------------+---------------+
+    //                |  |core1         |kCore1         |
+    //                -  +--------------+---------------+
+    //                   |core2(idle)   |kCore2(idle)   |
+    //                   +--------------+---------------+
+    //                   |..............|...............|
+    //                   +--------------+---------------+
+    //                   |kCore-1(idle) |kCore*2-1(idle)|
+    //                   +--------------+---------------+
+    //                                  |...............|
+    //                                  +---------------+
+    //                                  |LastCore(idle) |
+    //                                  +---------------+
+    //
+    inline __aicore__ void GetLocalBlock(CoutCinRange& cRange, SplitKState& k) const
+    {
+        uint16_t totalCoreNum = GetBlockNum();
+
+        //最多多少个core去切分同一个基本块的k
+        k.kGroups = Std::min(totalCoreNum / tailBlockCnt_, totalK_);
+        //每个kGroup里有几个core
+        uint32_t kCores = totalCoreNum / k.kGroups;
+
+        uint32_t coreId = AicCoreId();
+        //不在任意一个kGroup里的尾核统统塞进最后一个kGroup里面，不能完全不管，得参与全核同步
+        k.kGroupIdx = Std::min(coreId / kCores, k.kGroups - 1);
+        k.kGroupCoreNum = kCores;
+        k.kGroupStartCoreId = kCores * k.kGroupIdx;
+        if (k.kGroupIdx == k.kGroups - 1) {
+            k.kGroupCoreNum = totalCoreNum - k.kGroupStartCoreId;
+        }
+
+        RemainderDistributionSpliter splitter(totalK_, k.kGroups);
+        splitter.GetSplit(k.kGroupIdx, k.kBegin, k.kLength);
+        k.kMaxLength = splitter.GetMaxLength();
+
+        uint16_t tailBlockIdx = coreId - k.kGroupStartCoreId;
+        GetBlockFromSwizzle2D<MainBlockIterDir>(
+            topology_, topologyTailIter_, tailBlockIdx,
+            SingleShapeCout, SingleShapeCin,
+            cout_, cin_,
+            cRange);
+    }
+
+private:
+    static constexpr uint32_t SingleShapeCout = BlockConfig::SingleShapeCout<TilingT>();
+    static constexpr uint32_t SingleShapeCin = BlockConfig::SingleShapeCin<TilingT>();
+    const SwizzleTopology2D topology_;
+    const uint16_t tailBlockCnt_;
+    const uint32_t topologyTailIter_;
+    const uint32_t totalK_;
+    const uint32_t cout_;
+    const uint32_t cin_;
 };
 
 template <typename T, typename TilingT>
@@ -406,7 +580,9 @@ public:
         FwdTransformGM2L1Queue<T>& gm2l1Que,
         FwdTransformUB2L1Queue<T>& ub2l1Que,
         uint32_t watermarkResidentC,
-        uint32_t residentCBound)
+        uint32_t residentCBound,
+        uint16_t residentKGroupStartCoreIdx,
+        uint16_t residentKGroupCoreNum)
     {
         using BlockConfig::InputTensor;
         constexpr InputTensor ResidentTarget = BlockConfig::ResidentTarget<TilingT>();
@@ -435,7 +611,8 @@ public:
                 ProcessResidentTransform<TensorT1>(
                     tile,
                     gm2l1Ctx,
-                    residentT1, residentTaskOffset);
+                    residentT1, residentTaskOffset,
+                    residentKGroupStartCoreIdx, residentKGroupCoreNum);
 
                 gm2l1Que.EnQue();
             }
@@ -604,15 +781,16 @@ private:
     __aicore__ inline void ProcessResidentTransform(
         const HWBox& tile,
         typename TransformFunctions::GM2L1Ctx& ctx,
-        const ResidentTaskInfo& task, uint32_t& taskOffset)
+        const ResidentTaskInfo& task, uint32_t& taskOffset,
+        uint16_t residentKGroupStartCoreIdx, uint16_t residentKGroupCoreNum)
     {
         using TransformConfig = Std::conditional_t<
             TransformType == BlockConfig::InputTensor::FMAP,
             WinoTransformDetail::FmapConfig<T, TilingT>,
             WinoTransformDetail::DyConfig<T, TilingT> >;
 
-        const uint32_t coreId = AivCoreId();
-        const uint32_t stride = AivNums();
+        const uint32_t coreId = AivCoreId() - residentKGroupStartCoreIdx * AivNumInBlock();
+        const uint32_t stride = residentKGroupCoreNum * AivNumInBlock();
 
         for (uint32_t taskId = (coreId + stride - taskOffset) % stride;
              taskId < task.cTaskCnt;
@@ -844,16 +1022,18 @@ public:
         }
     }
 
+    template <typename SplitMImpl>
     __aicore__ inline void Fixpipe2UB(
         InvTransformL0C2UBSyncQueue<TilingT>& syncQue,
-        CoutCinRange& localBlock,
-        const LocalTensor<float>& invBuf)
+        const CoutCinRange& localBlock,
+        const LocalTensor<float>& invBuf,
+        const SplitMScheduler::Interface<SplitMImpl>& splitMScheduler)
     {
         winoMmad_.Fixpipe2UB(
             syncQue,
-            localBlock.coutLength,
-            localBlock.cinLength,
-            invBuf);
+            localBlock,
+            invBuf,
+            splitMScheduler);
     }
 
 private:
@@ -907,7 +1087,7 @@ private:
                 waitResidentTransform, loadPingPong);
 
             iter.Next();
-
+            bool firstK = true;
             // ================= 阶段 2: Steady State (计算当前轮 + 预载入下一轮) =================
             while (iter.More()) {
                 //winograd每个点位需要执行16次独立的mad计算
@@ -944,9 +1124,10 @@ private:
                     tiles, ub2l1,
                     cRange.coutLength, coutC1Length,
                     cRange.cinLength, cinC1Length,
-                    kIdx == 0 && batchIdx == 0,
+                    firstK,
                     computePingPong);
 
+                firstK = false;
                 tiles = nextTiles;
                 kIdx = nextKIdx;
                 batchIdx = nextBatchIdx;
@@ -954,7 +1135,7 @@ private:
                 iter.Next();
             }
 
-            // ================= 阶段 3: Epilogue (计算最后一轮数据并触发 Fixpipe 落盘) =================
+            // ================= 阶段 3: Epilogue (计算最后一轮数据) =================
             MmadCompute<NotIdle>(
                 tiles, ub2l1,
                 cRange.coutLength, coutC1Length,
@@ -1091,7 +1272,7 @@ public:
         using namespace WinoDetail;
         //驻留fmap就往cout方向循环,减少执行驻留带来的全局同步影响
         constexpr BlockIterDirection BasicBlockIterDir = ResidentFmap ? COUT : CIN;
-        auto blockIter = BlockIterator<BasicBlockIterDir, TilingT>::Create(cout_, cin_);
+        auto blockIter = BlockIterator<BasicBlockIterDir, TilingT, true>::Create(cout_, cin_);
 
         uint32_t watermarkResidentC = 0;
 
@@ -1103,52 +1284,131 @@ public:
             blockIter.GetClusterBlockUpperBound(clusterCoutBound, clusterCinBound);
             uint32_t residentCBound = ResidentFmap ? clusterCinBound : clusterCoutBound;
 
-            BatchTileKIterator<TilingT> kIter(
-                batch_,
-                tilesH_,
-                tilesW_);
-
-            if ASCEND_IS_AIC {
-                dwMmad_.IterateK(
-                    localBlock,
-                    kIter,
-                    gm2l1_,
-                    ub2l1_,
-                    residentCBound > watermarkResidentC);
-            }
-
-            if ASCEND_IS_AIV {
-                dwFwd_.IterateK(
-                    localBlock,
-                    kIter,
-                    gm2l1_,
-                    ub2l1_,
-                    watermarkResidentC,
-                    residentCBound);
-            }
-
-            if (localBlock.NotEmpty()) {
-                //当前ub很难同时放下正变换和逆变换的速率，所以逆变换需要停掉整个正变换，并空出整个ub来逆变换，
-                constexpr uint32_t invBufSize = WinoInvBufUtil::GetInvBufTotalSizeInBytes<TilingT>();
-                static_assert(invBufSize < TOTAL_UB_SIZE, "illegal buffer size");
-                auto invBuf = LocalTensor<float>(TPosition::VECIN, 0, invBufSize);
-
-                if ASCEND_IS_AIC {
-                    dwMmad_.Fixpipe2UB(l0c2ubSync_, localBlock, invBuf);
-                }
-                if ASCEND_IS_AIV {
-                    dwInv_.TransformOutput(l0c2ubSync_, localBlock, cin_, invBuf);
-                    //停掉正变换的mte2搬运直到逆变换mte3搬出结束
-                    dwInv_.BlockMTE2ByMTE3();
-                }
-            }
+            BatchTileKIterator<TilingT> kIter(batch_, tilesH_, tilesW_);
+            //主轮不切K，cout整个轴在搬出时不做交织切分
+            auto scheduleM = SplitMScheduler::Interface(SplitMScheduler::Single(localBlock.coutLength));
+            IterateK(
+                localBlock, kIter,
+                residentCBound, watermarkResidentC,
+                0, GetBlockNum(), false,
+                scheduleM);
 
             blockIter.Next();
             watermarkResidentC = Std::max(watermarkResidentC, residentCBound);
         }
+
+        if (blockIter.GetTailBlockCnt() == 0) {
+            return;
+        }
+
+        constexpr uint32_t singleShapeTileH = BlockConfig::SingleShapeTileH<TilingT>();
+        auto tailIter = TailBlockSplitKIterator<BasicBlockIterDir, TilingT>(
+            blockIter.GetTailBlockCnt(),
+            blockIter.GetSwizzleTopology(),
+            batch_ * Ops::Base::CeilDiv(tilesH_, singleShapeTileH),
+            cout_, cin_);
+
+        CoutCinRange localBlock;
+        SplitKState splitKState;
+        tailIter.GetLocalBlock(localBlock, splitKState);
+        uint32_t residentCBound = ResidentFmap ? cin_ : cout_;
+
+        BatchTileKIterator<TilingT> kIter(batch_, tilesH_, tilesW_, splitKState.kBegin, splitKState.kLength);
+        auto scheduleM = SplitMScheduler::Interface(
+            SplitMScheduler::Interleave(
+                splitKState.kGroups,
+                splitKState.kGroupIdx,
+                localBlock.coutLength));
+
+        IterateK(
+            localBlock, kIter,
+            residentCBound, watermarkResidentC,
+            splitKState.kGroupStartCoreId, splitKState.kGroupCoreNum,
+            splitKState.kLength < splitKState.kMaxLength, //切k不均衡时要补一轮同步
+            scheduleM);
     }
 
 private:
+    template <typename SplitMImpl>
+    inline __aicore__ void IterateK(
+        const CoutCinRange& localBlock,
+        WinoDetail::BatchTileKIterator<TilingT>& kIter,
+        uint32_t residentCBound,
+        uint32_t watermarkResidentC,
+        uint16_t kGroupStartCore, uint16_t kCore,
+        bool appendResidentCrossCoreSync,
+        const SplitMScheduler::Interface<SplitMImpl>& scheduleM)
+    {
+        bool shouldResidentTransform = residentCBound > watermarkResidentC;
+        constexpr bool IsTailSplitK = Std::is_same_v<SplitMImpl, SplitMScheduler::Interleave>;
+
+        if ASCEND_IS_AIC {
+            dwMmad_.IterateK(
+                localBlock,
+                kIter,
+                gm2l1_,
+                ub2l1_,
+                shouldResidentTransform);
+
+            if constexpr (IsTailSplitK) {
+                if (appendResidentCrossCoreSync && shouldResidentTransform) {
+                    //尾轮处理时切k不均衡需要额外补一次全核同步
+                    //要是芯片跨核同步支持分组不强制全核一起来就好了
+                    gm2l1_.WaitData();
+                    gm2l1_.DeQue();
+                }
+            }
+        }
+
+        if ASCEND_IS_AIV {
+            dwFwd_.IterateK(
+                localBlock,
+                kIter,
+                gm2l1_,
+                ub2l1_,
+                watermarkResidentC,
+                residentCBound,
+                kGroupStartCore,
+                kCore);
+
+            if constexpr (IsTailSplitK) {
+                if (appendResidentCrossCoreSync && shouldResidentTransform) {
+                    gm2l1_.WaitSlot();
+                    gm2l1_.EnQue();
+                }
+            }
+        }
+
+        //当前ub很难同时放下正变换和逆变换的速率，所以逆变换需要停掉整个正变换，并空出整个ub来逆变换，
+        constexpr uint32_t invBufSize = WinoInvBufUtil::GetInvBufTotalSizeInBytes<TilingT>();
+        static_assert(invBufSize < TOTAL_UB_SIZE, "illegal buffer size");
+        auto invBuf = LocalTensor<float>(TPosition::VECIN, 0, invBufSize);
+
+        if (localBlock.NotEmpty()) {
+            if ASCEND_IS_AIC {
+                dwMmad_.Fixpipe2UB(
+                    l0c2ubSync_, localBlock, invBuf, scheduleM);
+            }
+            if ASCEND_IS_AIV {
+                dwInv_.TransformOutput(l0c2ubSync_, localBlock, cin_, invBuf, scheduleM);
+                //主轮下停掉正变换的mte2搬运直到逆变换mte3搬出结束
+                //尾轮不用，因为已经全算完了，不会有mte2触发了
+                if constexpr (!IsTailSplitK) {
+                    dwInv_.BlockMTE2ByMTE3();
+                }
+            }
+        } else {
+            //主轮情况空跑核直接退出不做搬出就行
+            //尾轮切k下还得参与交织写入的全局同步
+            if constexpr (IsTailSplitK) {
+                if ASCEND_IS_AIV {
+                    dwInv_.TransformOutputJoinInterleaveSyncOnly(l0c2ubSync_, localBlock, cin_, invBuf, scheduleM);
+                }
+            }
+        }
+    }
+
+
     const uint32_t tilesH_;
     const uint32_t tilesW_;
     const uint32_t batch_;

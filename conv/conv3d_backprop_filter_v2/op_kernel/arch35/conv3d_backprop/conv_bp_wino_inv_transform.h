@@ -53,6 +53,7 @@ class WinoInvTransformer {
 public:
     static constexpr uint32_t INV_TRANS_BUF_SIZE = WinoInvBufUtil::InvTransBufSize<TilingT>();
     static constexpr uint32_t INV_TRANS_SINGLE_POINT_BUF_SIZE = WinoInvBufUtil::InvTransSinglePointBufSize<TilingT>();
+    static constexpr uint8_t CROSS_CORE_INTERLEAVE_MTE3_SYNC_FLAG = 11;
 
     __aicore__ inline explicit WinoInvTransformer(__gm__ DstT* yGm)
     {
@@ -66,13 +67,24 @@ public:
         mte32mte2_ = pipe->AllocEventID<HardEvent::MTE3_MTE2>();
     }
 
+    template <typename QueConfig, typename SplitMImpl>
+    __aicore__ inline void TransformOutputJoinInterleaveSyncOnly(
+        CVSyncQue<QueConfig>& l0c2ubSync,
+        const CoutCinRange& localBlock,
+        const uint32_t cinSrc,
+        const LocalTensor<float>& vBuf,
+        const SplitMScheduler::Interface<SplitMImpl>& splitMScheduler)
+    {
+        TransformOutput<true>(l0c2ubSync, localBlock, cinSrc, vBuf, splitMScheduler);
+    }
 
-    template <typename QueConfig>
+    template <bool OnlySyncCrossCoreOnInterleave = false, typename QueConfig, typename SplitMImpl>
     __aicore__ inline void TransformOutput(
         CVSyncQue<QueConfig>& l0c2ubSync,
         const CoutCinRange& localBlock,
         const uint32_t cinSrc,
-        const LocalTensor<float>& vBuf)
+        const LocalTensor<float>& vBuf,
+        const SplitMScheduler::Interface<SplitMImpl>& splitMScheduler)
     {
         constexpr uint16_t aivNums = AivNumInBlock();
         constexpr uint16_t singleShapeInvTransCout = BlockConfig::SingleShapeInvTransformCout<TilingT>();
@@ -80,45 +92,86 @@ public:
         constexpr uint8_t BufCnt = BlockConfig::InvTransformBufCnt<TilingT>();
         const uint16_t aivId = GetSubBlockIdx();
 
-        uint32_t bufIdx = 0;
-        for (uint32_t coutIdxInBlock = 0; coutIdxInBlock < localBlock.coutLength; coutIdxInBlock += singleBlockCout) {
-            const uint16_t coutLengthInBlock = Std::min(singleBlockCout, localBlock.coutLength - coutIdxInBlock);
+        uint16_t totalRounds = splitMScheduler.GetTotalRounds();
 
-            l0c2ubSync.WaitData();
+        constexpr bool isInterleaveWrite = Std::is_same_v<SplitMImpl, SplitMScheduler::Interleave>;
 
-            const uint16_t localCoutLength = Ops::Base::CeilDiv(coutLengthInBlock, aivNums);
-            const uint16_t localCoutOffset = localCoutLength * aivId;
-
-            if (localCoutOffset < coutLengthInBlock) {
-                const uint32_t processCoutLength = Std::min(localCoutLength, coutLengthInBlock - localCoutOffset);
-                const uint32_t coutCin = processCoutLength * localBlock.cinLength;
-
-                LocalTensor<float> buf = vBuf[bufIdx * INV_TRANS_BUF_SIZE];
-                ProcessInvTransform(
-                    reinterpret_cast<__ubuf__ float*>(buf.GetPhyAddr()),
-                    coutCin,
-                    Ops::Base::CeilDiv(coutCin, VL<float>()));
-
-                const uint32_t coutIdx = localBlock.coutIdx + coutIdxInBlock + localCoutOffset;
-
-                SetFlag<HardEvent::V_MTE3>(v2mte3_);
-                WaitFlag<HardEvent::V_MTE3>(v2mte3_);
-
-                uint64_t gmOffset = (static_cast<uint64_t>(coutIdx) * cinSrc + localBlock.cinIdx) * KERNEL_3x3;
-
-                DataCopyExtParams params;
-                params.blockCount = processCoutLength;
-                params.blockLen = localBlock.cinLength * KERNEL_3x3 * sizeof(DstT);
-                params.srcStride = 0;
-                params.dstStride = (static_cast<uint64_t>(cinSrc) - localBlock.cinLength) * KERNEL_3x3 * sizeof(DstT);
-                DataCopyPad<DstT, PaddingMode::Compact>(
-                    yGm_[gmOffset],
-                    buf[F23_TRANSFORM_TILE_ELEMENTS_16 * INV_TRANS_SINGLE_POINT_BUF_SIZE].ReinterpretCast<DstT>(),
-                    params);
+        for (uint16_t r = 0; r < totalRounds; r++) {
+            if constexpr (isInterleaveWrite) {
+                if (r > 0) {
+                    //跨核交织写出每轮需要同步确保计算的确定性
+                    CrossCoreSetFlag<0, PIPE_MTE3>(CROSS_CORE_INTERLEAVE_MTE3_SYNC_FLAG);
+                    CrossCoreWaitFlag<0, PIPE_MTE3>(CROSS_CORE_INTERLEAVE_MTE3_SYNC_FLAG);
+                }
+            }
+            if constexpr (OnlySyncCrossCoreOnInterleave) {
+                //空跑核纯同步的
+                static_assert(isInterleaveWrite, "is not interleave sync write");
+                continue;
             }
 
-            l0c2ubSync.DeQue();
-            bufIdx = (bufIdx + 1) % BufCnt;
+            uint16_t coutOffset, coutLength;
+            splitMScheduler.GetRoundRange(r, coutOffset, coutLength);
+
+            using SplitMs = SplitMScheduler::Interface<SplitMImpl>;
+            uint32_t subRounds = SplitMs::template GetSubRoundCnt<singleBlockCout>(coutLength);
+
+            for (uint32_t subIdx = 0; subIdx < subRounds; subIdx++) {
+                uint16_t coutSubOffset, coutSubLength;
+                SplitMs::template GetSubRoundRange<singleBlockCout>(
+                    subIdx, coutOffset, coutLength, coutSubOffset, coutSubLength);
+
+                l0c2ubSync.WaitData();
+
+                const uint16_t localCoutLength = Ops::Base::CeilDiv(coutSubLength, aivNums);
+                const uint16_t localCoutOffset = localCoutLength * aivId;
+
+                if (likely(localCoutOffset < coutSubLength)) {
+                    const uint32_t processCoutLength = Std::min(localCoutLength, coutSubLength - localCoutOffset);
+                    const uint32_t coutCin = processCoutLength * localBlock.cinLength;
+
+                    uint32_t iterIdx = r * subRounds + subIdx;
+                    LocalTensor<float> buf = vBuf[INV_TRANS_BUF_SIZE * (iterIdx % BufCnt)];
+                    ProcessInvTransform(
+                        reinterpret_cast<__ubuf__ float*>(buf.GetPhyAddr()),
+                        coutCin,
+                        Ops::Base::CeilDiv(coutCin, VL<float>()));
+
+                    const uint32_t coutIdx = localBlock.coutIdx + coutSubOffset + localCoutOffset;
+
+                    SetFlag<HardEvent::V_MTE3>(v2mte3_);
+                    WaitFlag<HardEvent::V_MTE3>(v2mte3_);
+
+                    uint64_t gmOffset = (static_cast<uint64_t>(coutIdx) * cinSrc + localBlock.cinIdx) * KERNEL_3x3;
+
+                    DataCopyExtParams params;
+                    params.blockCount = processCoutLength;
+                    params.blockLen = localBlock.cinLength * KERNEL_3x3 * sizeof(DstT);
+                    params.srcStride = 0;
+                    params.dstStride = (static_cast<uint64_t>(cinSrc) - localBlock.cinLength) * KERNEL_3x3 * sizeof(
+                                           DstT);
+
+                    // r == 0 首写覆盖, r > 0 atomic累加
+                    if constexpr (isInterleaveWrite) {
+                        if (r > 0) {
+                            SetAtomicAdd<DstT>();
+                        }
+                    }
+
+                    DataCopyPad<DstT, PaddingMode::Compact>(
+                        yGm_[gmOffset],
+                        buf[F23_TRANSFORM_TILE_ELEMENTS_16 * INV_TRANS_SINGLE_POINT_BUF_SIZE].ReinterpretCast<DstT>(),
+                        params);
+
+                    if constexpr (isInterleaveWrite) {
+                        if (r > 0) {
+                            SetAtomicNone();
+                        }
+                    }
+                }
+
+                l0c2ubSync.DeQue();
+            }
         }
     }
 

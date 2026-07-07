@@ -350,4 +350,147 @@ static inline uint32_t __aicore__ AivNums()
     return GetBlockNum() * AivNumInBlock();
 }
 
+
+//余数均摊切分实现
+//
+// 比如将5个任务切出3份
+// 会先算出base=5/3=1 , remainder=5%3=2
+// 那意味着每个切分的基础数量为5，然后将余数均摊到每个切分上，也就是将前2个切分额外加1，切出2,2,1，
+//
+// 余数均摊可以保证切分均衡，两个切分间最多差1
+//
+// 相比直接CeilDiv的话会更均衡一些
+// 比如5个任务4个cut余数均摊时2,1,1,1，而CeilDiv切的话就是2,2,1,0
+//
+class RemainderDistributionSpliter {
+public:
+    __aicore__ inline RemainderDistributionSpliter(uint32_t totalTask, uint32_t totalSplit)
+        : base_(totalTask / totalSplit),
+          remainer_(totalTask - base_ * totalSplit)
+    {
+    }
+
+    template<typename T>
+    __aicore__ inline void GetSplit(uint32_t splitIdx, T& outOffset, T& outLength) const
+    {
+        static_assert(Std::is_same_v<T, uint16_t> ||Std::is_same_v<T, uint32_t>);
+        //前remainer_个切分额外补1，均摊余数
+        outLength = base_ + (splitIdx < remainer_ ? 1 : 0);
+        outOffset = splitIdx * base_ + Std::min(splitIdx, remainer_);
+    }
+
+    __aicore__ inline uint32_t GetMaxLength() const
+    {
+        return base_ + (remainer_ > 0 ? 1 : 0);
+    }
+
+private:
+    const uint32_t base_;
+    const uint32_t remainer_;
+};
+
+namespace SplitMScheduler {
+template <typename Impl>
+class Interface {
+public:
+    __aicore__ inline Interface(const Impl& impl): impl_(impl)
+    {
+    }
+
+    __aicore__ inline void GetRoundRange(uint16_t roundIdx, uint16_t& outOffset, uint16_t& outLength) const
+    {
+        impl_.GetRoundRange(roundIdx, outOffset, outLength);
+    }
+
+    __aicore__ inline uint16_t GetTotalRounds() const
+    {
+        return impl_.GetTotalRounds();
+    }
+
+    //SubRound,适配l0c搬出到ub因为空间不够时的切分逻辑
+    template <uint16_t MaxSingleM>
+    static __aicore__ inline uint16_t GetSubRoundCnt(uint16_t mLength)
+    {
+        return Ops::Base::CeilDiv(mLength, MaxSingleM);
+    }
+
+    template <uint16_t MaxSingleM>
+    static __aicore__ inline void GetSubRoundRange(
+        uint16_t subIdx,
+        uint16_t offset, uint16_t length,
+        uint16_t& outOffset, uint16_t& outLength)
+    {
+        uint16_t subOffset = subIdx * MaxSingleM;
+        outOffset = offset + subOffset;
+        outLength = Std::min(MaxSingleM, length - subOffset);
+    }
+
+private:
+    const Impl impl_;
+};
+
+//交织写出，用于跨核切K场景实现确定性计算
+//假设一个基本块m=16被2个core切k
+//第一轮core0 搬出m0-8,core1搬出m8-16
+//第二轮core0 搬出m8-16,core1搬出m0-8
+//通过这种切M交织处理的方式使得单轮搬出没有重叠，实现确定性计算
+class Interleave {
+public:
+    __aicore__ inline Interleave(
+        uint16_t groupCores,
+        uint16_t localCoreId,
+        uint16_t m)
+        : groupCores_(groupCores),
+          localCoreId_(localCoreId),
+          m_(m)
+    {
+    }
+
+    //获取本轮本核应该搬出的M轴全局范围
+    //不要输入超过totalRound的roundIdx，没有校验的
+    __aicore__ inline void GetRoundRange(uint16_t roundIdx, uint16_t& outOffset, uint16_t& outLength) const
+    {
+        RemainderDistributionSpliter splitter(m_, groupCores_);
+        uint16_t splitIdx = (localCoreId_ + roundIdx) % groupCores_;
+        splitter.GetSplit(splitIdx,outOffset,outLength);
+    }
+
+    __aicore__ inline uint16_t GetTotalRounds() const
+    {
+        return groupCores_;
+    }
+
+private:
+    const uint16_t groupCores_;
+    const uint16_t localCoreId_;
+    const uint16_t m_;
+};
+
+//完全不切分的场景，用于主轮搬出，实现该类使得主尾轮的搬出逻辑能共享同一套模板代码
+class Single {
+public:
+    __aicore__ explicit inline Single(uint16_t m)
+        : m_(m)
+    {
+    }
+
+    __aicore__ inline void GetRoundRange(uint16_t roundIdx, uint16_t& outOffset, uint16_t& outLength) const
+    {
+        outOffset = 0;
+        outLength = m_;
+    }
+
+    __aicore__ inline constexpr uint16_t GetTotalRounds() const
+    {
+        return 1;
+    }
+
+private:
+    const uint16_t m_;
+};
+}
+
+
+
+
 #endif //CONV_BP_WINO_UTIL_H

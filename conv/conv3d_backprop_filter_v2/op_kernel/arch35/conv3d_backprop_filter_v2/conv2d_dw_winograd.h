@@ -132,7 +132,7 @@ private:
     {
         constexpr uint32_t singleShapeCout = 64;
         constexpr uint32_t singleShapeCin = 64;
-        constexpr uint32_t singleShapeTransformC1 = 1;
+        constexpr uint32_t singleShapeTransformC1 = 16 / C0<SrcT>();
         constexpr uint32_t singleShapeResidentC = 32;
         constexpr uint32_t fwdBufCnt = 4;
         constexpr uint32_t invTransBufCnt = 4;
