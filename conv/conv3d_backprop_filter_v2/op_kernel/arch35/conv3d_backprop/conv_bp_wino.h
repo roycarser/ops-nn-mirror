@@ -484,6 +484,8 @@ struct SplitKState {
     //当前kGroup的核数
     uint16_t kGroupStartCoreId = 0;
     uint16_t kGroupCoreNum = 0;
+    //当前核负责的尾块索引,用于tailGm寻址
+    uint16_t tailBlockId = 0;
 };
 
 template <BlockIterDirection MainBlockIterDir, typename TilingT>
@@ -552,6 +554,7 @@ public:
         k.kMaxLength = splitter.GetMaxLength();
 
         uint16_t tailBlockIdx = coreId - k.kGroupStartCoreId;
+        k.tailBlockId = tailBlockIdx;
         GetBlockFromSwizzle2D<MainBlockIterDir>(
             topology_, topologyTailIter_, tailBlockIdx,
             SingleShapeCout, SingleShapeCin,
@@ -1328,7 +1331,7 @@ public:
             IterateK(
                 localBlock, kIter,
                 residentCBound, watermarkResidentC,
-                0, 0, GetBlockNum(), false);
+                {}, false);
 
             blockIter.Next();
             watermarkResidentC = Std::max(watermarkResidentC, residentCBound);
@@ -1355,12 +1358,13 @@ public:
         IterateK<true>(
             localBlock, kIter,
             residentCBound, watermarkResidentC,
-            splitKState.kGroupIdx,splitKState.kGroupStartCoreId, splitKState.kGroupCoreNum,
+            splitKState,
             //切k不均衡时要补一轮同步
             splitKState.kLength < splitKState.kMaxLength);
 
         if ASCEND_IS_AIV {
-            dwInv_.TailInterleaveWrite(localBlock, cin_, splitKState.kGroups, splitKState.kGroupIdx);
+            dwInv_.TailInterleaveWrite(localBlock, cin_,
+                splitKState.kGroups, splitKState.kGroupIdx, splitKState.tailBlockId);
         }
     }
 
@@ -1371,7 +1375,7 @@ private:
         WinoDetail::BatchTileKIterator<TilingT>& kIter,
         uint32_t residentCBound,
         uint32_t watermarkResidentC,
-        uint16_t kGroupIdx, uint16_t kGroupStartCore, uint16_t kCore,
+        const WinoDetail::SplitKState& splitKState,
         bool appendResidentCrossCoreSync)
     {
         bool shouldResidentTransform = residentCBound > watermarkResidentC;
@@ -1402,8 +1406,8 @@ private:
                 ub2l1_,
                 watermarkResidentC,
                 residentCBound,
-                kGroupStartCore,
-                kCore);
+                IsTailSplitK ? splitKState.kGroupStartCoreId : 0,
+                IsTailSplitK ? splitKState.kGroupCoreNum : GetBlockNum());
 
             if constexpr (IsTailSplitK) {
                 if (appendResidentCrossCoreSync && shouldResidentTransform) {
@@ -1424,7 +1428,11 @@ private:
                     l0c2ubSync_, localBlock, invBuf);
             }
             if ASCEND_IS_AIV {
-                dwInv_.template TransformOutput<IsTailSplitK>(l0c2ubSync_, localBlock, cin_, invBuf, kGroupIdx);
+                dwInv_.template TransformOutput<IsTailSplitK>(
+                    l0c2ubSync_, localBlock, cin_, invBuf,
+                    splitKState.kGroupIdx,
+                    splitKState.kGroups,
+                    splitKState.tailBlockId);
                 if constexpr (!IsTailSplitK) {
                     dwInv_.BlockMTE2ByMTE3();
                 }

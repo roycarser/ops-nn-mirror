@@ -80,7 +80,9 @@ public:
         const CoutCinRange& localBlock,
         const uint32_t cinSrc,
         const LocalTensor<float>& vBuf,
-        uint32_t tailKGroupIdx)
+        uint32_t tailKGroupIdx,
+        uint32_t tailKGroups,
+        uint16_t tailBlockId)
     {
         constexpr uint16_t aivNums = AivNumInBlock();
         constexpr uint16_t singleShapeInvTransCout = BlockConfig::SingleShapeInvTransformCout<TilingT>();
@@ -126,7 +128,7 @@ public:
                                                        BlockConfig::SingleShapeCin<TilingT>() *
                                                        KERNEL_3x3;
 
-                    uint64_t gmOffset = TailBlockSize * tailKGroupIdx +
+                    uint64_t gmOffset = (tailBlockId * tailKGroups + tailKGroupIdx) * TailBlockSize +
                                         localBlock.cinLength * KERNEL_3x3 * (coutIdx - localBlock.coutIdx);
                     DataCopyPad<float, PaddingMode::Compact>(
                         tailGm_[gmOffset],
@@ -156,14 +158,14 @@ public:
     __aicore__ inline void TailInterleaveWrite(
         const CoutCinRange& localBlock,
         const uint32_t cinSrc,
-        uint32_t kGroup, uint32_t groupIdx)
+        uint32_t tailKGroup, uint32_t tailKGroupIdx, uint16_t tailBlockId)
     {
         CrossCoreSetFlag<0, PIPE_MTE3>(WinoInvBufUtil::CROSS_CORE_INTERLEAVE_MTE3_SYNC_FLAG);
         CrossCoreWaitFlag<0, PIPE_MTE2>(WinoInvBufUtil::CROSS_CORE_INTERLEAVE_MTE3_SYNC_FLAG);
 
-        RemainderDistributionSpliter splitter(localBlock.coutLength, kGroup);
+        RemainderDistributionSpliter splitter(localBlock.coutLength, tailKGroup);
         uint16_t coutOffset, coutLength;
-        splitter.GetSplit(groupIdx, coutOffset, coutLength);
+        splitter.GetSplit(tailKGroupIdx, coutOffset, coutLength);
 
         if (coutLength == 0 || GetSubBlockIdx() != 0) {
             return;
@@ -176,7 +178,7 @@ public:
         //切PingPong
         uint32_t inputCnt = Std::min(
             (availableBufCnt - 1) / 2,
-            Ops::Base::CeilDiv(kGroup, 2u));
+            Ops::Base::CeilDiv(tailKGroup, 2u));
         uint32_t inputBufLengthInBytes = inputCnt * bufLengthInBytes;
 
         LocalTensor<float> accumulateBuf(
@@ -189,7 +191,7 @@ public:
                                            BlockConfig::SingleShapeCin<TilingT>() *
                                            KERNEL_3x3;
 
-        uint32_t loadCnt = Ops::Base::CeilDiv(kGroup, inputCnt);
+        uint32_t loadCnt = Ops::Base::CeilDiv(tailKGroup, inputCnt);
         SetFlag<HardEvent::V_MTE2>(v2mte2_[0]);
         SetFlag<HardEvent::V_MTE2>(v2mte2_[1]);
 
@@ -200,7 +202,7 @@ public:
                 inputBufLengthInBytes);
 
             uint32_t startGroupIdx = i * inputCnt;
-            uint32_t loadGroups = Std::min(inputCnt, kGroup - startGroupIdx);
+            uint32_t loadGroups = Std::min(inputCnt, tailKGroup - startGroupIdx);
             DataCopyExtParams params;
             params.blockCount = loadGroups;
             params.blockLen = coutLength * localBlock.cinLength * KERNEL_3x3 * sizeof(float);
@@ -212,7 +214,8 @@ public:
 
             DataCopyPad<float, PaddingMode::Normal>(
                 inBuf,
-                tailGm_[TailBlockSize * startGroupIdx + localBlock.cinLength * KERNEL_3x3 * coutOffset], params,
+                tailGm_[(tailBlockId * tailKGroup + startGroupIdx) * TailBlockSize +
+                        localBlock.cinLength * KERNEL_3x3 * coutOffset], params,
                 {false, 0, 0, 0});
 
             SetFlag<HardEvent::MTE2_V>(mte22v_);
