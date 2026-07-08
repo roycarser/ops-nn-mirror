@@ -98,7 +98,7 @@ public:
 
             const uint16_t localCoutLength = Ops::Base::CeilDiv(coutLengthInBlock, aivNums);
             const uint16_t localCoutOffset = localCoutLength * aivId;
-
+            //TODO 尾轮不逆变换，累加完在做一次逆变换
             if (localCoutOffset < coutLengthInBlock) {
                 const uint32_t processCoutLength = Std::min(localCoutLength, coutLengthInBlock - localCoutOffset);
                 const uint32_t coutCin = processCoutLength * localBlock.cinLength;

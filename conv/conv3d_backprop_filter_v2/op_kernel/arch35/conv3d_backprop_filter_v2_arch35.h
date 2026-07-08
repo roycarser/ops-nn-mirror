@@ -57,11 +57,12 @@ __global__ __aicore__ void conv3d_backprop_filter_v2_arch35(GM_ADDR x, GM_ADDR f
     if constexpr (winogradTilingFlag != TPL_WINOGRAD_DISABLE) {
         TPipe pipe;
         CONV3D_DX_INPUT_RUN_OP(Conv2dDwWinograd<DTYPE_X, DTYPE_Y, winogradTilingFlag, winogradResidentFlag>);
-    } else {
-        Conv3dDwInitOutput<DTYPE_Y> opInitOutput;
-        opInitOutput.Init(y, &tilingData);
-        opInitOutput.Process();
-        opInitOutput.Destroy();
+        return;
+    }
+    Conv3dDwInitOutput<DTYPE_Y> opInitOutput;
+    opInitOutput.Init(y, &tilingData);
+    opInitOutput.Process();
+    opInitOutput.Destroy();
 
     if constexpr (conv3DDWTemplateId == TPL_STREAM_K) {
         CONV3D_DX_INPUT_RUN_OP(Conv3dDwBasicBlockStreamK<DTYPE_X, FORMAT_X, DTYPE_OUT_BACKPROP, FORMAT_OUT_BACKPROP,
