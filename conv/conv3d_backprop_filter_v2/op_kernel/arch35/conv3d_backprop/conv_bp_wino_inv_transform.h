@@ -23,6 +23,7 @@ using namespace AscendC;
 namespace WinoInvBufUtil {
 //需要申请26个CoutCin空间,16个用来放原始数据,9个用来放逆变换转置后的数据
 static constexpr uint32_t COUT_CIN_BUF_CNT = 25;
+static constexpr uint8_t CROSS_CORE_INTERLEAVE_MTE3_SYNC_FLAG = 11;
 
 template <typename TilingT>
 static constexpr __aicore__ inline uint32_t InvTransSinglePointBufSize()
@@ -53,11 +54,12 @@ class WinoInvTransformer {
 public:
     static constexpr uint32_t INV_TRANS_BUF_SIZE = WinoInvBufUtil::InvTransBufSize<TilingT>();
     static constexpr uint32_t INV_TRANS_SINGLE_POINT_BUF_SIZE = WinoInvBufUtil::InvTransSinglePointBufSize<TilingT>();
-    static constexpr uint8_t CROSS_CORE_INTERLEAVE_MTE3_SYNC_FLAG = 11;
 
-    __aicore__ inline explicit WinoInvTransformer(__gm__ DstT* yGm)
+
+    __aicore__ inline explicit WinoInvTransformer(__gm__ DstT* yGm, __gm__ float* tailGm)
     {
         yGm_.SetGlobalBuffer(yGm);
+        tailGm_.SetGlobalBuffer(tailGm);
     }
 
     __aicore__ inline void Init()
@@ -65,26 +67,20 @@ public:
         TPipe* pipe = GetTPipePtr();
         v2mte3_ = pipe->AllocEventID<HardEvent::V_MTE3>();
         mte32mte2_ = pipe->AllocEventID<HardEvent::MTE3_MTE2>();
+
+        mte22v_ = pipe->AllocEventID<HardEvent::MTE2_V>();
+        v2mte2_[0] = pipe->AllocEventID<HardEvent::V_MTE2>();
+        v2mte2_[1] = pipe->AllocEventID<HardEvent::V_MTE2>();
     }
 
-    template <typename QueConfig, typename SplitMImpl>
-    __aicore__ inline void TransformOutputJoinInterleaveSyncOnly(
-        CVSyncQue<QueConfig>& l0c2ubSync,
-        const CoutCinRange& localBlock,
-        const uint32_t cinSrc,
-        const LocalTensor<float>& vBuf,
-        const SplitMScheduler::Interface<SplitMImpl>& splitMScheduler)
-    {
-        TransformOutput<true>(l0c2ubSync, localBlock, cinSrc, vBuf, splitMScheduler);
-    }
 
-    template <bool OnlySyncCrossCoreOnInterleave = false, typename QueConfig, typename SplitMImpl>
+    template <bool WriteToTailGM = false, typename QueConfig>
     __aicore__ inline void TransformOutput(
         CVSyncQue<QueConfig>& l0c2ubSync,
         const CoutCinRange& localBlock,
         const uint32_t cinSrc,
         const LocalTensor<float>& vBuf,
-        const SplitMScheduler::Interface<SplitMImpl>& splitMScheduler)
+        uint32_t tailKGroupIdx)
     {
         constexpr uint16_t aivNums = AivNumInBlock();
         constexpr uint16_t singleShapeInvTransCout = BlockConfig::SingleShapeInvTransformCout<TilingT>();
@@ -92,87 +88,167 @@ public:
         constexpr uint8_t BufCnt = BlockConfig::InvTransformBufCnt<TilingT>();
         const uint16_t aivId = GetSubBlockIdx();
 
-        uint16_t totalRounds = splitMScheduler.GetTotalRounds();
+        uint32_t bufIdx = 0;
+        for (uint32_t coutIdxInBlock = 0; coutIdxInBlock < localBlock.coutLength; coutIdxInBlock += singleBlockCout) {
+            const uint16_t coutLengthInBlock = Std::min(singleBlockCout, localBlock.coutLength - coutIdxInBlock);
 
-        constexpr bool isInterleaveWrite = Std::is_same_v<SplitMImpl, SplitMScheduler::Interleave>;
+            l0c2ubSync.WaitData();
 
-        for (uint16_t r = 0; r < totalRounds; r++) {
-            if constexpr (isInterleaveWrite) {
-                if (r > 0) {
-                    //跨核交织写出每轮需要同步确保计算的确定性
-                    CrossCoreSetFlag<0, PIPE_MTE3>(CROSS_CORE_INTERLEAVE_MTE3_SYNC_FLAG);
-                    CrossCoreWaitFlag<0, PIPE_MTE3>(CROSS_CORE_INTERLEAVE_MTE3_SYNC_FLAG);
-                }
-            }
-            if constexpr (OnlySyncCrossCoreOnInterleave) {
-                //空跑核纯同步的
-                static_assert(isInterleaveWrite, "is not interleave sync write");
-                continue;
-            }
+            const uint16_t localCoutLength = Ops::Base::CeilDiv(coutLengthInBlock, aivNums);
+            const uint16_t localCoutOffset = localCoutLength * aivId;
 
-            uint16_t coutOffset, coutLength;
-            splitMScheduler.GetRoundRange(r, coutOffset, coutLength);
+            if (localCoutOffset < coutLengthInBlock) {
+                const uint32_t processCoutLength = Std::min(localCoutLength, coutLengthInBlock - localCoutOffset);
+                const uint32_t coutCin = processCoutLength * localBlock.cinLength;
 
-            using SplitMs = SplitMScheduler::Interface<SplitMImpl>;
-            uint32_t subRounds = SplitMs::template GetSubRoundCnt<singleBlockCout>(coutLength);
+                LocalTensor<float> buf = vBuf[bufIdx * INV_TRANS_BUF_SIZE];
+                ProcessInvTransform(
+                    reinterpret_cast<__ubuf__ float*>(buf.GetPhyAddr()),
+                    coutCin,
+                    Ops::Base::CeilDiv(coutCin, VL<float>()));
 
-            for (uint32_t subIdx = 0; subIdx < subRounds; subIdx++) {
-                uint16_t coutSubOffset, coutSubLength;
-                SplitMs::template GetSubRoundRange<singleBlockCout>(
-                    subIdx, coutOffset, coutLength, coutSubOffset, coutSubLength);
+                const uint32_t coutIdx = localBlock.coutIdx + coutIdxInBlock + localCoutOffset;
 
-                l0c2ubSync.WaitData();
+                SetFlag<HardEvent::V_MTE3>(v2mte3_);
+                WaitFlag<HardEvent::V_MTE3>(v2mte3_);
 
-                const uint16_t localCoutLength = Ops::Base::CeilDiv(coutSubLength, aivNums);
-                const uint16_t localCoutOffset = localCoutLength * aivId;
+                if constexpr (WriteToTailGM) {
+                    //尾轮没实现非fp32的输出，当前dw也没必要实现
+                    static_assert(Std::is_same_v<DstT, float>, "only support fp32 when enable tail write");
 
-                if (likely(localCoutOffset < coutSubLength)) {
-                    const uint32_t processCoutLength = Std::min(localCoutLength, coutSubLength - localCoutOffset);
-                    const uint32_t coutCin = processCoutLength * localBlock.cinLength;
+                    DataCopyExtParams params;
+                    params.blockCount = processCoutLength;
+                    params.blockLen = localBlock.cinLength * KERNEL_3x3 * sizeof(DstT);
+                    params.srcStride = 0;
+                    params.dstStride = 0;
 
-                    uint32_t iterIdx = r * subRounds + subIdx;
-                    LocalTensor<float> buf = vBuf[INV_TRANS_BUF_SIZE * (iterIdx % BufCnt)];
-                    ProcessInvTransform(
-                        reinterpret_cast<__ubuf__ float*>(buf.GetPhyAddr()),
-                        coutCin,
-                        Ops::Base::CeilDiv(coutCin, VL<float>()));
+                    constexpr uint32_t TailBlockSize = BlockConfig::SingleShapeCout<TilingT>() *
+                                                       BlockConfig::SingleShapeCin<TilingT>() *
+                                                       KERNEL_3x3;
 
-                    const uint32_t coutIdx = localBlock.coutIdx + coutSubOffset + localCoutOffset;
-
-                    SetFlag<HardEvent::V_MTE3>(v2mte3_);
-                    WaitFlag<HardEvent::V_MTE3>(v2mte3_);
-
-                    uint64_t gmOffset = (static_cast<uint64_t>(coutIdx) * cinSrc + localBlock.cinIdx) * KERNEL_3x3;
-
+                    uint64_t gmOffset = TailBlockSize * tailKGroupIdx +
+                                        localBlock.cinLength * KERNEL_3x3 * (coutIdx - localBlock.coutIdx);
+                    DataCopyPad<float, PaddingMode::Compact>(
+                        tailGm_[gmOffset],
+                        buf[F23_TRANSFORM_TILE_ELEMENTS_16 * INV_TRANS_SINGLE_POINT_BUF_SIZE].ReinterpretCast<DstT>(),
+                        params);
+                } else {
                     DataCopyExtParams params;
                     params.blockCount = processCoutLength;
                     params.blockLen = localBlock.cinLength * KERNEL_3x3 * sizeof(DstT);
                     params.srcStride = 0;
                     params.dstStride = (static_cast<uint64_t>(cinSrc) - localBlock.cinLength) * KERNEL_3x3 * sizeof(
                                            DstT);
-
-                    // r == 0 首写覆盖, r > 0 atomic累加
-                    if constexpr (isInterleaveWrite) {
-                        if (r > 0) {
-                            SetAtomicAdd<DstT>();
-                        }
-                    }
-
+                    uint64_t gmOffset = (static_cast<uint64_t>(coutIdx) * cinSrc + localBlock.cinIdx) * KERNEL_3x3;
                     DataCopyPad<DstT, PaddingMode::Compact>(
                         yGm_[gmOffset],
                         buf[F23_TRANSFORM_TILE_ELEMENTS_16 * INV_TRANS_SINGLE_POINT_BUF_SIZE].ReinterpretCast<DstT>(),
                         params);
-
-                    if constexpr (isInterleaveWrite) {
-                        if (r > 0) {
-                            SetAtomicNone();
-                        }
-                    }
                 }
-
-                l0c2ubSync.DeQue();
             }
+
+            l0c2ubSync.DeQue();
+            bufIdx = (bufIdx + 1) % BufCnt;
         }
+    }
+
+
+    __aicore__ inline void TailInterleaveWrite(
+        const CoutCinRange& localBlock,
+        const uint32_t cinSrc,
+        uint32_t kGroup, uint32_t groupIdx)
+    {
+        CrossCoreSetFlag<0, PIPE_MTE3>(WinoInvBufUtil::CROSS_CORE_INTERLEAVE_MTE3_SYNC_FLAG);
+        CrossCoreWaitFlag<0, PIPE_MTE2>(WinoInvBufUtil::CROSS_CORE_INTERLEAVE_MTE3_SYNC_FLAG);
+
+        RemainderDistributionSpliter splitter(localBlock.coutLength, kGroup);
+        uint16_t coutOffset, coutLength;
+        splitter.GetSplit(groupIdx, coutOffset, coutLength);
+
+        if (coutLength == 0 || GetSubBlockIdx() != 0) {
+            return;
+        }
+
+        uint32_t bufLength = Ops::Base::CeilAlign(coutLength * localBlock.cinLength * KERNEL_3x3, C0<float>());
+        uint32_t bufLengthInBytes = bufLength * sizeof(float);
+
+        uint32_t availableBufCnt = TOTAL_UB_SIZE / bufLengthInBytes;
+        //切PingPong
+        uint32_t inputCnt = Std::min(
+            (availableBufCnt - 1) / 2,
+            Ops::Base::CeilDiv(kGroup, 2u));
+        uint32_t inputBufLengthInBytes = inputCnt * bufLengthInBytes;
+
+        LocalTensor<float> accumulateBuf(
+            TPosition::VECCALC,
+            inputCnt * 2 * bufLengthInBytes,
+            bufLengthInBytes);
+
+        bool pingPongFlag = false;
+        constexpr uint32_t TailBlockSize = BlockConfig::SingleShapeCout<TilingT>() *
+                                           BlockConfig::SingleShapeCin<TilingT>() *
+                                           KERNEL_3x3;
+
+        uint32_t loadCnt = Ops::Base::CeilDiv(kGroup, inputCnt);
+        SetFlag<HardEvent::V_MTE2>(v2mte2_[0]);
+        SetFlag<HardEvent::V_MTE2>(v2mte2_[1]);
+
+        for (uint32_t i = 0; i < loadCnt; i++) {
+            LocalTensor<float> inBuf(
+                TPosition::VECCALC,
+                inputBufLengthInBytes * pingPongFlag,
+                inputBufLengthInBytes);
+
+            uint32_t startGroupIdx = i * inputCnt;
+            uint32_t loadGroups = Std::min(inputCnt, kGroup - startGroupIdx);
+            DataCopyExtParams params;
+            params.blockCount = loadGroups;
+            params.blockLen = coutLength * localBlock.cinLength * KERNEL_3x3 * sizeof(float);
+            params.srcStride = TailBlockSize * sizeof(float) - params.blockLen;
+            params.dstStride = 0;
+
+            TEventID v2mte2Flag = v2mte2_[pingPongFlag];
+            WaitFlag<HardEvent::V_MTE2>(v2mte2Flag);
+
+            DataCopyPad<float, PaddingMode::Normal>(
+                inBuf,
+                tailGm_[TailBlockSize * startGroupIdx + localBlock.cinLength * KERNEL_3x3 * coutOffset], params,
+                {false, 0, 0, 0});
+
+            SetFlag<HardEvent::MTE2_V>(mte22v_);
+            WaitFlag<HardEvent::MTE2_V>(mte22v_);
+            if (i == 0) {
+                Duplicate(accumulateBuf, 0.0f, static_cast<int32_t>(bufLength));
+            }
+            Accumulate(
+                reinterpret_cast<__ubuf__ float*>(inBuf.GetPhyAddr()),
+                reinterpret_cast<__ubuf__ float*>(accumulateBuf.GetPhyAddr()),
+                loadGroups, bufLength,
+                Ops::Base::CeilDiv(bufLength, VL<float>()));
+
+            SetFlag<HardEvent::V_MTE2>(v2mte2Flag);
+            pingPongFlag = !pingPongFlag;
+        }
+
+        WaitFlag<HardEvent::V_MTE2>(v2mte2_[0]);
+        WaitFlag<HardEvent::V_MTE2>(v2mte2_[1]);
+
+        SetFlag<HardEvent::V_MTE3>(v2mte3_);
+        WaitFlag<HardEvent::V_MTE3>(v2mte3_);
+
+        DataCopyExtParams params;
+        params.blockCount = coutLength;
+        params.blockLen = localBlock.cinLength * KERNEL_3x3 * sizeof(float);
+        params.srcStride = 0;
+        params.dstStride = (static_cast<uint64_t>(cinSrc) - localBlock.cinLength) * KERNEL_3x3 * sizeof(float);
+
+        uint64_t gmOffset = (static_cast<uint64_t>(localBlock.coutIdx + coutOffset) * cinSrc + localBlock.cinIdx) *
+                            KERNEL_3x3;
+
+        DataCopyPad<float, PaddingMode::Compact>(
+            yGm_[gmOffset],
+            accumulateBuf,
+            params);
     }
 
     __aicore__ inline void BlockMTE2ByMTE3() const
@@ -185,6 +261,39 @@ private:
     static constexpr uint32_t KERNEL_3 = 3;
     static constexpr uint32_t KERNEL_3x3 = 9;
 
+    __simd_vf__ static inline void Accumulate(
+        __ubuf__ float* buf,
+        __ubuf__ float* accBuf,
+        uint16_t blockCnt,
+        uint32_t blockLength,
+        uint16_t blockLoopCnt)
+    {
+        uint16_t blockCntOneLess = blockCnt - 1;
+        uint32_t maskValue = blockLength;
+        int32_t loopStride = static_cast<int32_t>(VL<float>()) - static_cast<int32_t>((blockCnt - 1) * blockLength);
+
+        for (uint16_t i = 0; i < blockLoopCnt; i++) {
+            Reg::MaskReg mask = Reg::UpdateMask<float>(maskValue);
+            Reg::RegTensor<float> acc;
+            Reg::Duplicate(acc, 0, mask);
+
+            for (uint16_t n = 0; n < blockCntOneLess; n++) {
+                Reg::RegTensor<float> s;
+                Reg::LoadAlign<float, Reg::PostLiteral::POST_MODE_UPDATE>(s, buf, static_cast<int32_t>(blockLength));
+                Reg::Add(acc, acc, s, mask);
+            }
+
+            Reg::RegTensor<float> s;
+            Reg::LoadAlign<float, Reg::PostLiteral::POST_MODE_UPDATE>(s, buf, loopStride);
+            Reg::Add(acc, acc, s, mask);
+
+            Reg::RegTensor<float> a;
+            Reg::LoadAlign(a, accBuf);
+            Reg::Add(acc, acc, a, mask);
+
+            Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE>(accBuf, acc, VL<float>(), mask);
+        }
+    }
 
     __simd_vf__ static inline void ProcessInvTransform(
         __ubuf__ float* buf,
@@ -397,7 +506,10 @@ private:
 
     TEventID mte32mte2_ = 0;
     TEventID v2mte3_ = 0;
+    TEventID mte22v_;
+    TEventID v2mte2_[2];
     GlobalTensor<DstT> yGm_;
+    GlobalTensor<float> tailGm_;
 };
 
 #endif //CONV_BP_WINO_INV_TRANSFORM_H

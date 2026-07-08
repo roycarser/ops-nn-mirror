@@ -71,9 +71,21 @@ public:
         uint32_t tileH = WinoDyFwdTransformer<SrcT, TilingT>::SlideWin::SrcLength2Tiles(dyH_);
         uint32_t tileW = WinoDyFwdTransformer<SrcT, TilingT>::SlideWin::SrcLength2Tiles(dyW_);
 
+        NK1C1K0C0::Shape<SrcT> nk1c1k0c0Shape = NK1C1K0C0::Shape<SrcT>::template Create<TilingT>(
+            BlockConfig::ResidentTarget<TilingT>() == BlockConfig::InputTensor::FMAP ?
+                cin_ :
+                cout_,
+            tileH, tileW);
+
+        __gm__ float* tailGm = reinterpret_cast<__gm__ float*>(
+            nk1c1k0c0 + static_cast<uint64_t>(batch_) * nk1c1k0c0Shape.c1 *
+            nk1c1k0c0Shape.c0 *
+            nk1c1k0c0Shape.k0 *
+            nk1c1k0c0Shape.k1);
+
         ConvBackpropFilterWinograd<SrcT, DstT, TilingT> winograd(
             fmapFwd, dyFwd,
-            nk1c1k0c0, y_,
+            nk1c1k0c0, nk1c1k0c0Shape, y_, tailGm,
             winoMmad,
             tileH, tileW,
             batch_);

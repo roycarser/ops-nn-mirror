@@ -86,7 +86,7 @@ bool Conv3DBackpropFilterV2WinogradTiling::IsCapable()
         return false;
     }
 
-    if ((runInfo_.co / 64) * (runInfo_.ci / 64) < platformInfo_.core_num / 2) {
+    if ((runInfo_.co / 64) * (runInfo_.ci / 64) < 16) {
         OP_LOGD(opName_, "the cout/cin is too small for winograd");
         return false;
     }
@@ -203,10 +203,15 @@ ge::graphStatus Conv3DBackpropFilterV2WinogradTiling::GetWorkspaceSize()
     uint32_t c1c0Fmap = Ops::Base::CeilAlign(static_cast<uint32_t>(runInfo_.ci * runInfo_.a_dtype_bytes), c0Byte);
     uint32_t c1c0Dy = Ops::Base::CeilAlign(static_cast<uint32_t>(runInfo_.co * runInfo_.b_dtype_bytes), c0Byte);
 
+    //全局驻留的空间
     size_t userWorkSpaceSize = static_cast<size_t>(runInfo_.batch) * std::max(c1c0Fmap, c1c0Dy) * k0 * k1;
-    //追加nc1hwc0转换的空间
+
+    //nc1hwc0转换的空间
     userWorkSpaceSize += static_cast<size_t>(runInfo_.batch) * c1c0Fmap * runInfo_.hi * runInfo_.wi;
     userWorkSpaceSize += static_cast<size_t>(runInfo_.batch) * c1c0Dy * runInfo_.ho * runInfo_.wo;
+
+    //切k的空间
+    userWorkSpaceSize += 64 * 64 * 3 * 3 * sizeof(float) * platformInfo_.core_num;
 
     workspaces[0] = WORKSPACE + userWorkSpaceSize;
     return ge::GRAPH_SUCCESS;

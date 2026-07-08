@@ -29,7 +29,7 @@ public:
 
     //累加轴过大暂时不处理，winograd累加轴比常规实现少了4倍，应该能囊括绝大部分case
     //有需要可以适当放大
-    static constexpr uint32_t RECOMMEND_K_MAX_SIZE = 65536;
+    static constexpr uint32_t RECOMMEND_K_MAX_SIZE = 512000;
 
     explicit Conv3DBackpropFilterV2WinogradTiling(gert::TilingContext* context) : Conv3DDWV2BasicBlockTilingArch35(
         context)

@@ -211,12 +211,12 @@ public:
     }
 
 
-    template <typename SyncQueConfig, typename SplitMImpl>
+    template <typename SyncQueConfig>
     __aicore__ inline void Fixpipe2UB(
         CVSyncQue<SyncQueConfig>& syncQue,
-        const CoutCinRange& localBlock,
-        const LocalTensor<float>& outputTransformVBuf,
-        const SplitMScheduler::Interface<SplitMImpl>& splitMScheduler)
+        uint32_t cout,
+        uint32_t cin,
+        const LocalTensor<float>& outputTransformVBuf)
     {
         SetFlag<HardEvent::M_FIX>(mad2fixpipeFlag_.src2dst);
         WaitFlag<HardEvent::M_FIX>(mad2fixpipeFlag_.src2dst);
@@ -227,49 +227,35 @@ public:
         constexpr uint16_t singleBlockCout = BlockConfig::SingleShapeInvTransformCout<TilingT>() * aivNums;
         const auto l0c = LocalTensor<float>(TPosition::CO1, 0, TOTAL_L0C_SIZE);
 
-        const uint32_t totalRounds = splitMScheduler.GetTotalRounds();
+        uint32_t index = 0;
+        for (uint32_t coutIdx = 0; coutIdx < cout; coutIdx += singleBlockCout) {
+            const uint16_t coutLength = Std::min(singleBlockCout, cout - coutIdx);
 
-        for (uint32_t r = 0; r < totalRounds; r++) {
-            uint16_t coutOffset, coutLength;
-            splitMScheduler.GetRoundRange(r, coutOffset, coutLength);
-
-            using SplitMs = SplitMScheduler::Interface<SplitMImpl>;
-            uint32_t subRounds = SplitMs::template GetSubRoundCnt<singleBlockCout>(coutLength);
-
-            for (uint32_t subIdx = 0; subIdx < subRounds; subIdx++) {
-
-                uint16_t coutSubOffset, coutSubLength;
-                SplitMs::template GetSubRoundRange<singleBlockCout>(
-                    subIdx,
-                    coutOffset, coutLength,
-                    coutSubOffset, coutSubLength);
-
-                //mSize对齐到2用于ub均分,由于实际计算分形一定是16的倍数，所以这么操作应当不会导致地址溢出
-                //假设cout为16，那么对齐后还是16，如果是17那就会变成18，实际计算分形则是32，不存在溢出
-                // //TODO 判断尾块非C0对齐有没有问题
-                FixpipeParamsC310 fp;
-                fp.mSize = aivNums == 2 ? coutSubLength + (coutSubLength & 1) : coutSubLength;
-                fp.nSize = localBlock.cinLength;
-                fp.srcStride = localBlock.coutLength;
-                fp.dstStride = localBlock.cinLength;
-                fp.params.ndNum = F23_TRANSFORM_TILE_ELEMENTS_16;
-                fp.params.srcNdStride = L0C_SINGLE_POINT_BUF_BYTES / (BLOCK_CUBE * sizeof(float));
-                //到UB上按C0对齐
-                fp.params.dstNdStride = WinoInvBufUtil::InvTransSinglePointBufSize<TilingT>();
-                if constexpr (aivNums == 2) {
-                    fp.dualDstCtl = 1;
-                }
-
-                syncQue.WaitSlot();
-                static constexpr FixpipeConfig cfg = {CO2Layout::ROW_MAJOR, true};
-                uint32_t iterIdx = r * subRounds + subIdx;
-                const uint32_t srcOffset = coutSubOffset * BLOCK_CUBE;
-                const uint32_t dstOffset = invTransSingleBufSize * (iterIdx % invTransBufCnt);
-                Fixpipe<float, float, cfg>(outputTransformVBuf[dstOffset], l0c[srcOffset], fp);
-                syncQue.EnQue();
+            //mSize对齐到2用于ub均分,由于实际计算分形一定是16的倍数，所以这么操作应当不会导致地址溢出
+            //假设cout为16，那么对齐后还是16，如果是17那就会变成18，实际计算分形则是32，不存在溢出
+            // //TODO 判断尾块非C0对齐有没有问题
+            FixpipeParamsC310 fp;
+            fp.mSize = aivNums == 2 ? coutLength + (coutLength & 1) : coutLength;
+            fp.nSize = cin;
+            fp.srcStride = cout;
+            fp.dstStride = cin;
+            fp.params.ndNum = F23_TRANSFORM_TILE_ELEMENTS_16;
+            fp.params.srcNdStride = L0C_SINGLE_POINT_BUF_BYTES / (BLOCK_CUBE * sizeof(float));
+            //到UB上按C0对齐
+            fp.params.dstNdStride = WinoInvBufUtil::InvTransSinglePointBufSize<TilingT>();
+            if constexpr (aivNums == 2) {
+                fp.dualDstCtl = 1;
             }
-        }
 
+            syncQue.WaitSlot();
+            static constexpr FixpipeConfig cfg = {CO2Layout::ROW_MAJOR, true};
+            const uint32_t srcOffset = singleBlockCout * BLOCK_CUBE * index;
+            const uint32_t dstOffset = invTransSingleBufSize * (index % invTransBufCnt);
+            Fixpipe<float, float, cfg>(outputTransformVBuf[dstOffset], l0c[srcOffset], fp);
+            syncQue.EnQue();
+
+            index++;
+        }
         SetFlag<HardEvent::FIX_M>(mad2fixpipeFlag_.dst2src);
     }
 
