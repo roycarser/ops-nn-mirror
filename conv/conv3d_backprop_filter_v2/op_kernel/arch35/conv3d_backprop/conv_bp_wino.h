@@ -70,6 +70,12 @@ public:
         Update();
     }
 
+    //在一单位k里会实际有几次循环
+    __aicore__ inline uint32_t StepInSingleK() const
+    {
+        return wSteps_;
+    }
+
     __aicore__ inline HWBox TileBox() const
     {
         HWBox tile = {};
@@ -1392,8 +1398,10 @@ private:
                 if (appendResidentCrossCoreSync && shouldResidentTransform) {
                     //尾轮处理时切k不均衡需要额外补一次全核同步
                     //要是芯片跨核同步支持分组不强制全核一起来就好了
-                    gm2l1_.WaitData();
-                    gm2l1_.DeQue();
+                    for (uint32_t i = 0; i != kIter.StepInSingleK(); i++) {
+                        gm2l1_.WaitData();
+                        gm2l1_.DeQue();
+                    }
                 }
             }
         }
@@ -1411,8 +1419,10 @@ private:
 
             if constexpr (IsTailSplitK) {
                 if (appendResidentCrossCoreSync && shouldResidentTransform) {
-                    gm2l1_.WaitSlot();
-                    gm2l1_.EnQue();
+                    for (uint32_t i = 0; i != kIter.StepInSingleK(); i++) {
+                        gm2l1_.WaitSlot();
+                        gm2l1_.EnQue();
+                    }
                 }
             }
         }
