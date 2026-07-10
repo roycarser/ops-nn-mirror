@@ -426,7 +426,7 @@ public:
         return topology_.TotalCnt() > mainBlockNum ? topology_.TotalCnt() - mainBlockNum : 0;
     }
 
-    static inline __aicore__ BlockIterator Create( bool onlyIterMainBlocks,uint32_t cout, uint32_t cin)
+    static inline __aicore__ BlockIterator Create(bool onlyIterMainBlocks, uint32_t cout, uint32_t cin)
     {
         uint32_t coutCnt = Ops::Base::CeilDiv(cout, SingleShapeCout);
         uint32_t cinCnt = Ops::Base::CeilDiv(cin, SingleShapeCin);
@@ -1116,9 +1116,6 @@ private:
         }
 
         if (likely(iter.More())) {
-            bool loadPingPong = false;
-            bool computePingPong = false;
-
             HWBox tiles = iter.TileBox();
             uint32_t kIdx = iter.TileKIdx();
             uint32_t batchIdx = iter.BatchIdx();
@@ -1127,7 +1124,7 @@ private:
             MmadLoadResident<NotIdle>(
                 tiles, gm2l1, batchIdx, kIdx,
                 residentC1Idx, residentC1Length,
-                waitResidentTransform, loadPingPong);
+                waitResidentTransform, loadPingPong_);
 
             iter.Next();
             bool firstK = true;
@@ -1161,14 +1158,14 @@ private:
                 MmadLoadResident<NotIdle>(
                     nextTiles, gm2l1, nextBatchIdx, nextKIdx,
                     residentC1Idx, residentC1Length,
-                    waitResidentTransform, loadPingPong);
+                    waitResidentTransform, loadPingPong_);
 
                 MmadCompute<NotIdle>(
                     tiles, ub2l1,
                     cRange.coutLength, coutC1Length,
                     cRange.cinLength, cinC1Length,
                     firstK,
-                    computePingPong);
+                    computePingPong_);
 
                 firstK = false;
                 tiles = nextTiles;
@@ -1182,7 +1179,7 @@ private:
                 cRange.coutLength, coutC1Length,
                 cRange.cinLength, cinC1Length,
                 firstK,
-                computePingPong);
+                computePingPong_);
         }
     }
 
@@ -1254,6 +1251,8 @@ private:
     }
 
     WinoMMAD<T, TilingT>& winoMmad_;
+    bool loadPingPong_ = false;
+    bool computePingPong_ = false;
 };
 }
 
@@ -1279,10 +1278,7 @@ public:
           batch_(batch),
           cin_(fmap.SrcC()),
           cout_(dy.SrcC()),
-          gm2l1_(
-              nk1c1k0c0Gm,nk1c1k0c0Shape),
-              // NK1C1K0C0::Shape<SrcT>::template Create<TilingT>(
-                  // ResidentFmap ? cin_ : cout_, tilesH, tilesW)),
+          gm2l1_(nk1c1k0c0Gm, nk1c1k0c0Shape),
           dwFwd_(fmap, dy),
           dwMmad_(winoMmad),
           dwInv_(yGm, tailGm)

@@ -31,19 +31,16 @@ bool Conv3DBackpropFilterV2WinogradTiling::IsCapable()
         return false;
     }
 
-    if (dtypeByte_ != ge::GetSizeByDataType(ge::DT_BF16) && dtypeByte_ != ge::GetSizeByDataType(ge::DT_FLOAT16) &&
-        dtypeByte_ != ge::GetSizeByDataType(ge::DT_FLOAT)) {
-        OP_LOGD(opName_, "Winograd tiling is only supported for bf16/fp16/fp32/hf32 dataType.");
-        return false;
-    }
-
     if (!CheckFormat()) {
         OP_LOGD(opName_, "current format is not support by winograd tiling");
         return false;
     }
 
-    if (runInfo_.a_dtype != runInfo_.b_dtype) {
-        OP_LOGD(opName_, "Winograd tiling is not support different dtype");
+    //float16/bfloat16浮点误差比较严重，禁用，如果有int量化到时可以开下
+    if (runInfo_.a_dtype != ge::DataType::DT_FLOAT ||
+        runInfo_.b_dtype != ge::DataType::DT_FLOAT ||
+        runInfo_.c_dtype != ge::DataType::DT_FLOAT) {
+        OP_LOGD(opName_, "Winograd tiling only support float");
         return false;
     }
 

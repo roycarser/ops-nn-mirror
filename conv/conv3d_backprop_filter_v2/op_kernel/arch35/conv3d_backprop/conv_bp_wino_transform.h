@@ -231,18 +231,15 @@ public:
             + static_cast<uint64_t>(src.hIdx) * srcWC0
             + static_cast<uint64_t>(src.wIdx) * C0<T>();
 
-        AscendC::LoopModeParams loop;
-        loop.loop1Size = box.c.c1;
-        loop.loop1SrcStride = srcHWC0 * sizeof(T);
-        loop.loop1DstStride = WinoTransformDetail::GetInputBufSizeC0<Config>() * sizeof(T);
-        loop.loop2Size = 1;
-        loop.loop2SrcStride = 0;
-        loop.loop2DstStride = 0;
-
         if constexpr (BlockConfig::SingleTransformC1<TilingConfigT>() > 1) {
-            if (box.c.c1 > 1) {
-                SetLoopModePara(loop, AscendC::DataCopyMVType::OUT_TO_UB);
-            }
+            AscendC::LoopModeParams loop;
+            loop.loop1Size = box.c.c1;
+            loop.loop1SrcStride = srcHWC0 * sizeof(T);
+            loop.loop1DstStride = WinoTransformDetail::GetInputBufSizeC0<Config>() * sizeof(T);
+            loop.loop2Size = 1;
+            loop.loop2SrcStride = 0;
+            loop.loop2DstStride = 0;
+            SetLoopModePara(loop, AscendC::DataCopyMVType::OUT_TO_UB);
         }
 
         uint32_t srcFullLenW = SlideWin::Tiles2SrcLength(box.tile.wLength);
@@ -256,9 +253,7 @@ public:
         AscendC::DataCopy(srcBuf[hPadOffset], gm_[gmOffset], params);
 
         if constexpr (BlockConfig::SingleTransformC1<TilingConfigT>() > 1) {
-            if (box.c.c1 > 1) {
-                AscendC::ResetLoopModePara(AscendC::DataCopyMVType::OUT_TO_UB);
-            }
+            AscendC::ResetLoopModePara(AscendC::DataCopyMVType::OUT_TO_UB);
         }
     }
 
