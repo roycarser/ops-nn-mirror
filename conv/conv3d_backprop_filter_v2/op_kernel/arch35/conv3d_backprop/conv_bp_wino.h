@@ -106,7 +106,7 @@ public:
         constexpr InputTensor TensorT1 = ResidentTarget == InputTensor::FMAP ? InputTensor::FMAP : InputTensor::DY;
 
         StreamTaskInfo streamT0;
-        ComputeT0TaskInfo(localBlock.GetIdx<TensorT0>(), localBlock.GetLen<TensorT0>(), streamT0);
+        ComputeT0TaskInfo<TensorT0>(localBlock, streamT0);
 
         StreamTaskInfo streamT1;
         ResidentTaskInfo residentT1;
@@ -161,12 +161,14 @@ private:
     struct StreamTaskInfo;
     struct ResidentTaskInfo;
 
+    template <BlockConfig::InputTensor TensorT0>
     __aicore__ inline void ComputeT0TaskInfo(
-        uint32_t localCIdx,
-        uint16_t localCLen,
+        const CoutCinRange& localBlock,
         StreamTaskInfo& stream) const
     {
         //当前非驻留矩阵区域
+        uint32_t localCIdx = localBlock.GetIdx<TensorT0>();
+        uint16_t localCLen = localBlock.GetLen<TensorT0>();
         stream.cLocalIdx = localCIdx;
         stream.cIdx = localCIdx;
         stream.cLen = localCLen;
@@ -175,15 +177,17 @@ private:
                                     AivNumInBlock()) * C0<T>();
     }
 
+    template <BlockConfig::InputTensor TensorT1>
     __aicore__ inline void ComputeT1TaskInfo(
-        uint32_t localCIdx,
-        uint16_t localCLen,
+    const CoutCinRange& localBlock,
         uint32_t residentCBound,
         uint32_t watermarkResidentC,
-        uint16_t singleShapeC,
         StreamTaskInfo& stream,
         ResidentTaskInfo& resident) const
     {
+        uint32_t localCIdx = localBlock.GetIdx<TensorT1>();
+        uint16_t localCLen = localBlock.GetLen<TensorT1>();
+
         //[resident,stream]
         stream.cLocalIdx = localCIdx;
         stream.cIdx = localCIdx + SingleShapeResidentC;
@@ -193,6 +197,7 @@ private:
                                     AivNumInBlock()) * C0<T>();
 
         if (residentCBound > watermarkResidentC) {
+            constexpr uint16_t singleShapeC = BlockConfig::SingleShapeC<TilingT, TensorT1>();
             uint32_t t1FullCLen = residentCBound - watermarkResidentC;
             uint32_t t1MainCBlk = t1FullCLen / singleShapeC;
             uint16_t t1TailCLen = t1FullCLen % singleShapeC;

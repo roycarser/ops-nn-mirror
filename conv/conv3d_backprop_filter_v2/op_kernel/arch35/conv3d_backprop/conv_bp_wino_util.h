@@ -365,8 +365,9 @@ static inline uint32_t __aicore__ AivNums()
 class RemainderDistributionSpliter {
 public:
     __aicore__ inline RemainderDistributionSpliter(uint32_t totalTask, uint32_t totalSplit)
-        : base_(totalTask / totalSplit),
-          remainer_(totalTask - base_ * totalSplit)
+        //为了codecheck加个除0保护，但是上层不应该传0到这里
+        : base_(totalSplit == 0 ? 0 : totalTask / totalSplit),
+          remainer_(totalSplit == 0 ? 0 : totalTask - base_ * totalSplit)
     {
     }
 
