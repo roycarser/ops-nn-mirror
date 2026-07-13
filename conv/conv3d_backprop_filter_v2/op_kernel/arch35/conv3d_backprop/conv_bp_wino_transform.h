@@ -416,14 +416,4 @@ private:
     const uint16_t padW_;
 };
 
-
-#include "conv_bp_wino_transform_impl.h"
-
-template <typename T, typename TilingT>
-using WinoFmapFwdTransformer = WinoTransformer<WinoTransformDetail::FmapConfig<T, TilingT> >;
-
-
-template <typename T, typename TilingT>
-using WinoDyFwdTransformer = WinoTransformer<WinoTransformDetail::DyConfig<T, TilingT> >;
-
 #endif //CONV_BP_WINO_TRANSFORM_H

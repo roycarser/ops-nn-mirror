@@ -18,7 +18,8 @@
 
 #include "conv_bp_wino_mmad.h"
 #include "conv_bp_wino_inv_transform.h"
-#include "conv_bp_wino_transform.h"
+#include "conv_bp_wino_transform_dy.h"
+#include "conv_bp_wino_transform_fmap.h"
 #include "conv_bp_wino_data_blocks.h"
 
 using namespace AscendC;
@@ -565,40 +566,27 @@ private:
         bool waitResidentTransform)
     {
         static constexpr uint16_t SingleShapeResidentC = BlockConfig::SingleShapeResidentC<TilingT>();
-        uint32_t coutC1Length;
-        uint32_t cinC1Length;
-        uint32_t residentC1Idx;
-        uint32_t residentC1Length;
+        uint32_t coutC1Length = 0;
+        uint32_t cinC1Length = 0;
+        uint32_t residentC1Idx = 0;
+        uint32_t residentC1Length = 0;
 
         if constexpr (NotIdle) {
             coutC1Length = Ops::Base::CeilDiv(cRange.coutLength, C0<T>());
             cinC1Length = Ops::Base::CeilDiv(cRange.cinLength, C0<T>());
-            if constexpr (ResidentTarget == BlockConfig::InputTensor::FMAP) {
-                residentC1Idx = cRange.cinIdx / C0<T>();
-                residentC1Length = Ops::Base::CeilDiv(
-                    Std::min(cRange.cinLength, SingleShapeResidentC),
-                    C0<T>());
-            } else {
-                residentC1Idx = cRange.coutIdx / C0<T>();
-                residentC1Length = Ops::Base::CeilDiv(
-                    Std::min(cRange.coutLength, SingleShapeResidentC),
-                    C0<T>());
-            }
-        } else {
-            coutC1Length = 0;
-            cinC1Length = 0;
-            residentC1Idx = 0;
-            residentC1Length = 0;
+
+            residentC1Idx = cRange.GetIdx<ResidentTarget>() / C0<T>();
+            residentC1Length = Ops::Base::CeilDiv(
+                Std::min(cRange.GetLen<ResidentTarget>(), SingleShapeResidentC),
+                C0<T>());
         }
 
         if (likely(iter.More())) {
             HWBox tiles = iter.TileBox();
-            uint32_t kIdx = iter.TileKIdx();
-            uint32_t batchIdx = iter.BatchIdx();
 
             // ================= 阶段 1: Prologue (预载入第一轮数据) =================
             MmadLoadResident<NotIdle>(
-                tiles, gm2l1, batchIdx, kIdx,
+                tiles, gm2l1, iter.BatchIdx(), iter.TileKIdx(),
                 residentC1Idx, residentC1Length,
                 waitResidentTransform, loadPingPong_);
 
@@ -628,11 +616,9 @@ private:
                 // ComputePong可以立刻执行
                 //  Compute Pong
                 HWBox nextTiles = iter.TileBox();
-                uint32_t nextKIdx = iter.TileKIdx();
-                uint32_t nextBatchIdx = iter.BatchIdx();
 
                 MmadLoadResident<NotIdle>(
-                    nextTiles, gm2l1, nextBatchIdx, nextKIdx,
+                    nextTiles, gm2l1, iter.BatchIdx(), iter.TileKIdx(),
                     residentC1Idx, residentC1Length,
                     waitResidentTransform, loadPingPong_);
 
@@ -640,8 +626,7 @@ private:
                     tiles, ub2l1,
                     cRange.coutLength, coutC1Length,
                     cRange.cinLength, cinC1Length,
-                    firstK,
-                    computePingPong_);
+                    firstK,computePingPong_);
 
                 firstK = false;
                 tiles = nextTiles;
@@ -654,8 +639,7 @@ private:
                 tiles, ub2l1,
                 cRange.coutLength, coutC1Length,
                 cRange.cinLength, cinC1Length,
-                firstK,
-                computePingPong_);
+                firstK,computePingPong_);
         }
     }
 
@@ -899,6 +883,14 @@ private:
             }
         }
 
+        TransformOutput<IsTailSplitK>(localBlock, splitKState);
+    }
+
+    template <bool IsTailSplitK>
+    __aicore__ inline void TransformOutput(
+        const CoutCinRange& localBlock,
+        const WinoDetail::SplitKState& splitKState)
+    {
         //当前ub很难同时放下正变换和逆变换的速率，所以逆变换需要停掉整个正变换，并空出整个ub来逆变换，
         constexpr uint32_t invBufSize = WinoInvBufUtil::GetInvBufTotalSizeInBytes<TilingT>();
         static_assert(invBufSize < TOTAL_UB_SIZE, "illegal buffer size");

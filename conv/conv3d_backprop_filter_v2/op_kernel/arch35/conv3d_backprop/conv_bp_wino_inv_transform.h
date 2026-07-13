@@ -164,13 +164,38 @@ public:
         }
 
         uint32_t bufLength = Ops::Base::CeilAlign(coutLength * localBlock.cinLength * KERNEL_3x3, C0<float>());
-        uint32_t bufLengthInBytes = bufLength * sizeof(float);
-
-        uint32_t availableBufCnt = TOTAL_UB_SIZE / bufLengthInBytes;
+        uint32_t availableBufCnt = TOTAL_UB_SIZE / (bufLength * sizeof(float));
         //切PingPong
         uint32_t inputCnt = Std::min(
             (availableBufCnt - 1) / 2,
             Ops::Base::CeilDiv(tailKGroup, 2u));
+
+        LocalTensor<float> accumulateBuf = AccumulateTailData(
+            localBlock,
+            coutOffset, coutLength,
+            tailKGroup, tailBlockId,
+            bufLength, inputCnt);
+
+        SetFlag<HardEvent::V_MTE3>(v2mte3_);
+        WaitFlag<HardEvent::V_MTE3>(v2mte3_);
+
+        CopyOut(localBlock, coutLength, localBlock.coutIdx + coutOffset, cinSrc, accumulateBuf);
+    }
+
+    __aicore__ inline void BlockMTE2ByMTE3() const
+    {
+        SetFlag<HardEvent::MTE3_MTE2>(mte32mte2_);
+        WaitFlag<HardEvent::MTE3_MTE2>(mte32mte2_);
+    }
+
+private:
+    __aicore__ inline LocalTensor<float> AccumulateTailData(
+        const CoutCinRange& localBlock,
+        uint32_t coutOffset, uint32_t coutLength,
+        uint32_t tailKGroup, uint16_t tailBlockId,
+        uint32_t bufLength, uint32_t inputCnt) const
+    {
+        uint32_t bufLengthInBytes = bufLength * sizeof(float);
         uint32_t inputBufLengthInBytes = inputCnt * bufLengthInBytes;
 
         LocalTensor<float> accumulateBuf(
@@ -184,6 +209,7 @@ public:
                                            KERNEL_3x3;
 
         uint32_t loadCnt = Ops::Base::CeilDiv(tailKGroup, inputCnt);
+
         SetFlag<HardEvent::V_MTE2>(v2mte2_[0]);
         SetFlag<HardEvent::V_MTE2>(v2mte2_[1]);
 
@@ -228,19 +254,9 @@ public:
         WaitFlag<HardEvent::V_MTE2>(v2mte2_[0]);
         WaitFlag<HardEvent::V_MTE2>(v2mte2_[1]);
 
-        SetFlag<HardEvent::V_MTE3>(v2mte3_);
-        WaitFlag<HardEvent::V_MTE3>(v2mte3_);
-
-        CopyOut(localBlock, coutLength, localBlock.coutIdx + coutOffset, cinSrc, accumulateBuf);
+        return accumulateBuf;
     }
 
-    __aicore__ inline void BlockMTE2ByMTE3() const
-    {
-        SetFlag<HardEvent::MTE3_MTE2>(mte32mte2_);
-        WaitFlag<HardEvent::MTE3_MTE2>(mte32mte2_);
-    }
-
-private:
     __aicore__ inline void CopyOut(
         const CoutCinRange& localBlock,
         uint32_t processCoutLength,
@@ -313,9 +329,7 @@ private:
         __ubuf__ float* src2 = buf + singlePointSize * 2;
         __ubuf__ float* src3 = buf + singlePointSize * 3;
 
-        RegTensor<uint32_t> seq;
-        RegTensor<uint32_t> tmp9;
-        RegTensor<uint32_t> index;
+        RegTensor<uint32_t> seq, tmp9, index;
 
         Arange(reinterpret_cast<RegTensor<int32_t>&>(seq), 0);
         Duplicate(tmp9, 9);
@@ -330,82 +344,79 @@ private:
             MaskReg mask = UpdateMask<float>(maskValue);
 
             constexpr uint32_t pointRowStride = singlePointSize * F23_TRANSFORM_TILE_SIZE_4;
-            RegTensor<float> col0d0;
-            RegTensor<float> col0d1;
-            RegTensor<float> col0d2;
+            RegTensor<float> col0d0, col0d1, col0d2;
             TransformCol(
                 src0, src1, src2, src3,
                 mask, value0P5, col0d0, col0d1, col0d2,
                 pointRowStride);
 
-            RegTensor<float> col1d0;
-            RegTensor<float> col1d1;
-            RegTensor<float> col1d2;
+            RegTensor<float> col1d0, col1d1, col1d2;
             TransformCol(
                 src0, src1, src2, src3,
                 mask, value0P5, col1d0, col1d1, col1d2,
                 pointRowStride);
 
-            RegTensor<float> col2d0;
-            RegTensor<float> col2d1;
-            RegTensor<float> col2d2;
+            RegTensor<float> col2d0, col2d1, col2d2;
             TransformCol(
                 src0, src1, src2, src3,
                 mask, value0P5, col2d0, col2d1, col2d2,
                 pointRowStride);
 
-            RegTensor<float> col3d0;
-            RegTensor<float> col3d1;
-            RegTensor<float> col3d2;
+            RegTensor<float> col3d0, col3d1, col3d2;
             constexpr int32_t nextColStride = -3 * pointRowStride + VL<float>();
             TransformCol(
                 src0, src1, src2, src3,
                 mask, value0P5, col3d0, col3d1, col3d2,
                 nextColStride);
 
-            RegTensor<float> r0, r1, r2;
-            TransformRowAndCastInZero(
-                mask, value0P5,
-                col0d0, col1d0, col2d0, col3d0,
-                r0, r1, r2);
-
             __ubuf__ float* dst0 = dst;
-            Scatter(dst0, r0, index, mask);
-            ++dst0;
-            Scatter(dst0, r1, index, mask);
-            ++dst0;
-            Scatter(dst0, r2, index, mask);
-            ++dst0;
 
-            RegTensor<float> r3, r4, r5;
-            TransformRowAndCastInZero(
-                mask, value0P5,
-                col0d1, col1d1, col2d1, col3d1,
-                r3, r4, r5);
-
-            Scatter(dst0, r3, index, mask);
-            ++dst0;
-            Scatter(dst0, r4, index, mask);
-            ++dst0;
-            Scatter(dst0, r5, index, mask);
-            ++dst0;
-
-            RegTensor<float> r6, r7, r8;
-            TransformRowAndCastInZero(
-                mask, value0P5,
-                col0d2, col1d2, col2d2, col3d2,
-                r6, r7, r8);
-
-            Scatter(dst0, r6, index, mask);
-            ++dst0;
-            Scatter(dst0, r7, index, mask);
-            ++dst0;
-            Scatter(dst0, r8, index, mask);
+            TransformRowWithCastAndSetter(dst0, col0d0, col1d0, col2d0, col3d0,
+                value0P5, index, mask);
+            TransformRowWithCastAndSetter(dst0, col0d1, col1d1, col2d1, col3d1,
+                value0P5, index, mask);
+            TransformRowWithCastAndSetter(dst0, col0d2, col1d2, col2d2, col3d2,
+                value0P5, index, mask);
 
             dst += VL<float>() * KERNEL_3x3;
         }
 
         //scatter完后在重新做cast，把float转b16后空的2个字节移除，不能直接用b16做scatter，bank冲突太严重
+        if constexpr (!Std::is_same_v<DstT, float>) {
+            B32ToB16(transposeBuf, loopCnt, maskValue);
+        }
+    }
+
+    __simd_callee__ static inline  void TransformRowWithCastAndSetter(
+        __ubuf__ float*& dst0,
+        MicroAPI::RegTensor<float>& c0,
+        MicroAPI::RegTensor<float>& c1,
+        MicroAPI::RegTensor<float>& c2,
+        MicroAPI::RegTensor<float>& c3,
+        MicroAPI::RegTensor<float>& value0P5,
+        MicroAPI::RegTensor<uint32_t>& index,
+        MicroAPI::MaskReg& mask)
+    {
+        MicroAPI::RegTensor<float> r0, r1, r2;
+        TransformRowAndCastInZero(
+            mask, value0P5,
+            c0, c1, c2, c3,
+            r0, r1, r2);
+
+        Scatter(dst0, r0, index, mask);
+        ++dst0;
+        Scatter(dst0, r1, index, mask);
+        ++dst0;
+        Scatter(dst0, r2, index, mask);
+        ++dst0;
+    }
+
+    __simd_callee__ static inline void B32ToB16(
+        __ubuf__ float* transposeBuf,
+        uint16_t loopCnt,
+        MicroAPI::MaskReg& maskAll)
+    {
+        using namespace MicroAPI;
         if constexpr (!Std::is_same_v<DstT, float>) {
             LocalMemBar<MemType::VEC_STORE, MemType::VEC_LOAD>();
 
@@ -421,7 +432,6 @@ private:
             }
         }
     }
-
 
     __simd_callee__ static inline void TransformCol(
         __ubuf__ float*& src0,
