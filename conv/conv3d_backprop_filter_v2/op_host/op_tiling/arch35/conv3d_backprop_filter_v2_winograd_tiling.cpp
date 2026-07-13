@@ -25,6 +25,67 @@
 namespace Ops {
 namespace NN {
 namespace Conv {
+namespace {
+bool CheckDtype(const Conv3dBpFilterV2RunInfo& runInfo, const char_t* opName)
+{
+    //float16/bfloat16浮点误差比较严重，禁用，如果有int量化到时可以开下
+    if (runInfo.a_dtype != ge::DataType::DT_FLOAT ||
+        runInfo.b_dtype != ge::DataType::DT_FLOAT ||
+        runInfo.c_dtype != ge::DataType::DT_FLOAT) {
+        OP_LOGD(opName, "Winograd tiling only support float");
+        return false;
+    }
+    return true;
+}
+
+bool CheckAttrs(const Conv3dBpFilterV2RunInfo& runInfo, const char_t* opName)
+{
+    if (runInfo.di != 1 || runInfo.dout != 1 || runInfo.kd != 1 ||
+        runInfo.dilation_d != 1 || runInfo.stride_d != 1 ||
+        runInfo.pad_f != 0 || runInfo.pad_b != 0) {
+        OP_LOGD(opName, "Winograd tiling is only supported for 2d");
+        return false;
+    }
+
+    if (runInfo.dilation_h != 1 || runInfo.dilation_w != 1 ||
+        runInfo.stride_h != 1 || runInfo.stride_w != 1 ||
+        runInfo.groups != 1 ||
+        runInfo.pad_u != runInfo.pad_d ||
+        runInfo.pad_l != runInfo.pad_r) {
+        OP_LOGD(opName, "Winograd tiling is not support current attrs");
+        return false;
+    }
+
+    if (runInfo.kh != 3 || runInfo.kw != 3) {
+        OP_LOGD(opName, "Winograd tiling only support 3*3 kernel");
+        return false;
+    }
+
+    if (runInfo.pad_u > Conv3DBackpropFilterV2WinogradTiling::RECOMMEND_PAD_LIMIT ||
+        runInfo.pad_l > Conv3DBackpropFilterV2WinogradTiling::RECOMMEND_PAD_LIMIT) {
+        OP_LOGD(opName, "pad is too large for winograd");
+        return false;
+    }
+    return true;
+}
+
+bool CheckShape(const Conv3dBpFilterV2RunInfo& runInfo, const char_t* opName)
+{
+    uint64_t tileH = Ops::Base::CeilDiv(runInfo.ho, 2);
+    uint64_t tileW = Ops::Base::CeilDiv(runInfo.wo, 2);
+    if (tileH * tileW * runInfo.batch > Conv3DBackpropFilterV2WinogradTiling::RECOMMEND_K_MAX_SIZE) {
+        OP_LOGD(opName, "current reduce asix is too large for Winograd impl");
+        return false;
+    }
+
+    if ((runInfo.co / 64) * (runInfo.ci / 64) < 16) {
+        OP_LOGD(opName, "the cout/cin is too small for winograd");
+        return false;
+    }
+    return true;
+}
+}
+
 bool Conv3DBackpropFilterV2WinogradTiling::IsCapable()
 {
     if (!IsSocVersion91095()) {
@@ -36,57 +97,18 @@ bool Conv3DBackpropFilterV2WinogradTiling::IsCapable()
         return false;
     }
 
-    //float16/bfloat16浮点误差比较严重，禁用，如果有int量化到时可以开下
-    if (runInfo_.a_dtype != ge::DataType::DT_FLOAT ||
-        runInfo_.b_dtype != ge::DataType::DT_FLOAT ||
-        runInfo_.c_dtype != ge::DataType::DT_FLOAT) {
-        OP_LOGD(opName_, "Winograd tiling only support float");
+    if (!CheckDtype(runInfo_, opName_)) {
         return false;
     }
 
-    if (runInfo_.di != 1 ||
-        runInfo_.dout != 1 ||
-        runInfo_.kd != 1 ||
-        runInfo_.dilation_d != 1 ||
-        runInfo_.stride_d != 1 ||
-        runInfo_.pad_f != 0 ||
-        runInfo_.pad_b != 0) {
-        OP_LOGD(opName_, "Winograd tiling is only supported for 2d");
+    if (!CheckAttrs(runInfo_, opName_)) {
         return false;
     }
 
-    if (runInfo_.dilation_h != 1 ||
-        runInfo_.dilation_w != 1 ||
-        runInfo_.stride_h != 1 ||
-        runInfo_.stride_w != 1 ||
-        runInfo_.groups != 1 ||
-        runInfo_.pad_u != runInfo_.pad_d ||
-        runInfo_.pad_l != runInfo_.pad_r) {
-        OP_LOGD(opName_, "Winograd tiling is not support current attrs");
+    if (!CheckShape(runInfo_, opName_)) {
         return false;
     }
 
-    if (runInfo_.kh != 3 || runInfo_.kw != 3) {
-        OP_LOGD(opName_, "Winograd tiling only support 3*3 kernel");
-        return false;
-    }
-
-    if (runInfo_.pad_u > RECOMMEND_PAD_LIMIT || runInfo_.pad_l > RECOMMEND_PAD_LIMIT) {
-        OP_LOGD(opName_, "pad is too large for winograd");
-        return false;
-    }
-
-    uint64_t tileH = Ops::Base::CeilDiv(runInfo_.ho, 2);
-    uint64_t tileW = Ops::Base::CeilDiv(runInfo_.wo, 2);
-    if (tileH * tileW * runInfo_.batch > RECOMMEND_K_MAX_SIZE) {
-        OP_LOGD(opName_, "current reduce asix is too large for Winograd impl");
-        return false;
-    }
-
-    if ((runInfo_.co / 64) * (runInfo_.ci / 64) < 16) {
-        OP_LOGD(opName_, "the cout/cin is too small for winograd");
-        return false;
-    }
     return true;
 }
 
