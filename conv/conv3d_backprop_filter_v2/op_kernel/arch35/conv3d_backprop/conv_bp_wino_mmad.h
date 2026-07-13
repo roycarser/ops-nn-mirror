@@ -97,12 +97,6 @@ public:
         mad.cmatrixInitVal = firstK;
         mad.disableGemv = true; // 还没搞懂干嘛用的，先禁了
 
-        LoadData2DParamsV2 load2d;
-        load2d.mStartPosition = 0;
-        load2d.kStartPosition = 0;
-        load2d.ifTranspose = true;
-        load2d.srcStride = static_cast<int32_t>(tiles.elements);
-
         // 数据按照 [C1,16,tile.elements,C0]排布,使用load2d一次搬运一个point,即[C1,tile.elements,C0]的数据进L0
         //
         //                          C0             C0
@@ -131,9 +125,6 @@ public:
             l0bKStep = Ops::Base::CeilAlign(cinC1, 2u);
         }
 
-        uint32_t l0aPointElements = l0aMStep * l0aKStep * (AscendC::BYTE_PER_FRACTAL / sizeof(T));
-        uint32_t l0bPointElements = l0bMStep * l0bKStep * (AscendC::BYTE_PER_FRACTAL / sizeof(T));
-
         auto l1Buf = GetL1Buf(l1PingPongFlag);
         LocalTensor<T>& l1a = Std::get<0>(l1Buf);
         LocalTensor<T>& l1b = Std::get<1>(l1Buf);
@@ -142,64 +133,9 @@ public:
         // 除以16后单个点最多16kb,L0上一定能全载,除非singleShapeHW传进来为1
         // 然后l0上对齐放大到16这类异常情况,但tiling阶段应该防止这种情况
         const EventFlag mte2mte1Flag = mte2mte1Flag_[l1PingPongFlag];
+
         WaitFlag<HardEvent::MTE2_MTE1>(mte2mte1Flag.src2dst);
-
-#pragma unroll
-        for (uint8_t g = 0; g < L0POINTS.group; g++) {
-            // 通过奇偶性判断l0PingPong
-            const int l0BufFlag = g % L0_BUF_CNT;
-
-            const EventFlag mte1madFlag = mte1madFlag_[l0BufFlag];
-            WaitFlag<HardEvent::M_MTE1>(mte1madFlag.dst2src);
-
-            uint8_t pointGroupOffset = g * L0POINTS.pointPerGroup;
-
-            LocalTensor<T> l0a = LocalTensor<T>(TPosition::A2, L0POINTS.l0aSize * l0BufFlag, L0POINTS.l0aSize);
-            LocalTensor<T> l0b = LocalTensor<T>(TPosition::B2, L0POINTS.l0bSize * l0BufFlag, L0POINTS.l0aSize);
-
-#pragma unroll
-            for (uint8_t i = 0; i < L0POINTS.pointPerGroup; i++) {
-                uint8_t pointIdx = pointGroupOffset + i;
-                uint32_t offsetL1 = pointIdx * tiles.elements * C0<T>();
-
-                load2d.mStep = l0aMStep;
-                load2d.kStep = l0aKStep;
-                if constexpr (sizeof(T) == 4) {
-                    load2d.dstStride = static_cast<int32_t>(l0aKStep) / 2;
-                } else {
-                    load2d.dstStride = static_cast<int32_t>(l0aKStep);
-                }
-
-                LoadData(l0a[i * l0aPointElements], l1a[offsetL1], load2d);
-
-                load2d.mStep = l0bMStep;
-                load2d.kStep = l0bKStep;
-                if constexpr (sizeof(T) == 4) {
-                    load2d.dstStride = static_cast<int32_t>(l0bKStep) / 2;
-                } else {
-                    load2d.dstStride = static_cast<int32_t>(l0bKStep);
-                }
-
-                LoadData(l0b[i * l0bPointElements], l1b[offsetL1], load2d);
-            }
-
-            SetFlag<HardEvent::MTE1_M>(mte1madFlag.src2dst);
-            WaitFlag<HardEvent::MTE1_M>(mte1madFlag.src2dst);
-
-#pragma unroll
-            for (uint8_t i = 0; i < L0POINTS.pointPerGroup; i++) {
-                uint8_t pointIdx = pointGroupOffset + i;
-
-                LocalTensor<float> l0cBuf = GetL0CPointBuf(pointIdx);
-                uint32_t offsetA = i * l0aPointElements;
-                uint32_t offsetB = i * l0bPointElements;
-
-                AscendC::Mmad(l0cBuf, l0a[offsetA], l0b[offsetB], mad);
-            }
-
-            SetFlag<HardEvent::M_MTE1>(mte1madFlag.dst2src);
-        }
-
+        ComputePoints(tiles, mad, l1a, l1b, l0aMStep, l0aKStep, l0bMStep, l0bKStep);
         SetFlag<HardEvent::MTE1_MTE2>(mte2mte1Flag.dst2src);
     }
 
@@ -265,6 +201,76 @@ public:
     }
 
 private:
+    __aicore__ inline void ComputePoints(const HWBox& tiles, const MmadParams& mad,
+                                         LocalTensor<T>& l1a, LocalTensor<T>& l1b,
+                                         uint32_t l0aMStep, uint32_t l0aKStep,
+                                         uint32_t l0bMStep, uint32_t l0bKStep)
+    {
+        LoadData2DParamsV2 load2d;
+        load2d.mStartPosition = 0;
+        load2d.kStartPosition = 0;
+        load2d.ifTranspose = true;
+        load2d.srcStride = static_cast<int32_t>(tiles.elements);
+        uint32_t l0aPointElements = l0aMStep * l0aKStep * (AscendC::BYTE_PER_FRACTAL / sizeof(T));
+        uint32_t l0bPointElements = l0bMStep * l0bKStep * (AscendC::BYTE_PER_FRACTAL / sizeof(T));
+
+#pragma unroll
+        for (uint8_t g = 0; g < L0POINTS.group; g++) {
+            // 通过奇偶性判断l0PingPong
+            const int l0BufFlag = g % L0_BUF_CNT;
+
+            const EventFlag mte1madFlag = mte1madFlag_[l0BufFlag];
+            WaitFlag<HardEvent::M_MTE1>(mte1madFlag.dst2src);
+
+            uint8_t pointGroupOffset = g * L0POINTS.pointPerGroup;
+
+            LocalTensor<T> l0a = LocalTensor<T>(TPosition::A2, L0POINTS.l0aSize * l0BufFlag, L0POINTS.l0aSize);
+            LocalTensor<T> l0b = LocalTensor<T>(TPosition::B2, L0POINTS.l0bSize * l0BufFlag, L0POINTS.l0aSize);
+
+#pragma unroll
+            for (uint8_t i = 0; i < L0POINTS.pointPerGroup; i++) {
+                uint8_t pointIdx = pointGroupOffset + i;
+                uint32_t offsetL1 = pointIdx * tiles.elements * C0<T>();
+
+                load2d.mStep = l0aMStep;
+                load2d.kStep = l0aKStep;
+                if constexpr (sizeof(T) == 4) {
+                    load2d.dstStride = static_cast<int32_t>(l0aKStep) / 2;
+                } else {
+                    load2d.dstStride = static_cast<int32_t>(l0aKStep);
+                }
+
+                LoadData(l0a[i * l0aPointElements], l1a[offsetL1], load2d);
+
+                load2d.mStep = l0bMStep;
+                load2d.kStep = l0bKStep;
+                if constexpr (sizeof(T) == 4) {
+                    load2d.dstStride = static_cast<int32_t>(l0bKStep) / 2;
+                } else {
+                    load2d.dstStride = static_cast<int32_t>(l0bKStep);
+                }
+
+                LoadData(l0b[i * l0bPointElements], l1b[offsetL1], load2d);
+            }
+
+            SetFlag<HardEvent::MTE1_M>(mte1madFlag.src2dst);
+            WaitFlag<HardEvent::MTE1_M>(mte1madFlag.src2dst);
+
+#pragma unroll
+            for (uint8_t i = 0; i < L0POINTS.pointPerGroup; i++) {
+                uint8_t pointIdx = pointGroupOffset + i;
+
+                LocalTensor<float> l0cBuf = GetL0CPointBuf(pointIdx);
+                uint32_t offsetA = i * l0aPointElements;
+                uint32_t offsetB = i * l0bPointElements;
+
+                AscendC::Mmad(l0cBuf, l0a[offsetA], l0b[offsetB], mad);
+            }
+
+            SetFlag<HardEvent::M_MTE1>(mte1madFlag.dst2src);
+        }
+    }
+
     struct L0Point {
         uint8_t group;
         uint8_t pointPerGroup;
