@@ -1,5 +1,5 @@
 /**
-* Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
  * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
  * CANN Open Software License Agreement Version 2.0 (the "License").
  * Please refer to the License for details. You may not use this file except in compliance with the License.
@@ -16,19 +16,17 @@
 #ifndef CONV2D_BACKPROP_FILTER_WINOGRAD_H
 #define CONV2D_BACKPROP_FILTER_WINOGRAD_H
 
-
 #include "conv3d_backprop_filter_v2_tiling_data.h"
 #include "../conv3d_backprop/conv_bp_wino.h"
 #include "../conv3d_backprop/conv_bp_wino_transdata.h"
 
-using namespace AscendC ;
+using namespace AscendC;
 
 template <typename SrcT, typename DstT, uint32_t WinoTilingFlag, bool WinoResidentFlag>
 class Conv2dDwWinograd {
 public:
-    __aicore__ inline void Init(
-        GM_ADDR x, GM_ADDR dedy, GM_ADDR y, GM_ADDR workspace,
-        const conv_bp_v2_kernel::Conv3DBackpropFilterV2TilingData* tilingData)
+    __aicore__ inline void Init(GM_ADDR x, GM_ADDR dedy, GM_ADDR y, GM_ADDR workspace,
+                                const conv_bp_v2_kernel::Conv3DBackpropFilterV2TilingData* tilingData)
     {
         x_ = reinterpret_cast<__gm__ SrcT*>(x);
         dy_ = reinterpret_cast<__gm__ SrcT*>(dedy);
@@ -63,7 +61,7 @@ public:
         transData.TransData2NC1HWC0(dy_, transDy, batch_, cout_, dyH_, dyW_, disableL2);
         transData.End();
 
-        using TilingT = decltype( BuildTilingType());
+        using TilingT = decltype(BuildTilingType());
         WinoFmapFwdTransformer<SrcT, TilingT> fmapFwd(transX, fmapH_, fmapW_, cin_, padH_, padW_);
         WinoDyFwdTransformer<SrcT, TilingT> dyFwd(transDy, dyH_, dyW_, cout_, 0, 0);
         WinoMMAD<SrcT, TilingT> winoMmad(hf32_);
@@ -72,23 +70,14 @@ public:
         uint32_t tileW = WinoDyFwdTransformer<SrcT, TilingT>::SlideWin::SrcLength2Tiles(dyW_);
 
         NK1C1K0C0::Shape<SrcT> nk1c1k0c0Shape = NK1C1K0C0::Shape<SrcT>::template Create<TilingT>(
-            BlockConfig::ResidentTarget<TilingT>() == BlockConfig::InputTensor::FMAP ?
-                cin_ :
-                cout_,
-            tileH, tileW);
+            BlockConfig::ResidentTarget<TilingT>() == BlockConfig::InputTensor::FMAP ? cin_ : cout_, tileH, tileW);
 
-        __gm__ float* tailGm = reinterpret_cast<__gm__ float*>(
-            nk1c1k0c0 + static_cast<uint64_t>(batch_) * nk1c1k0c0Shape.c1 *
-            nk1c1k0c0Shape.c0 *
-            nk1c1k0c0Shape.k0 *
-            nk1c1k0c0Shape.k1);
+        __gm__ float* tailGm = reinterpret_cast<__gm__ float*>(nk1c1k0c0 + static_cast<uint64_t>(batch_) *
+                                                                               nk1c1k0c0Shape.c1 * nk1c1k0c0Shape.c0 *
+                                                                               nk1c1k0c0Shape.k0 * nk1c1k0c0Shape.k1);
 
-        ConvBackpropFilterWinograd<SrcT, DstT, TilingT> winograd(
-            fmapFwd, dyFwd,
-            nk1c1k0c0, nk1c1k0c0Shape, y_, tailGm,
-            winoMmad,
-            tileH, tileW,
-            batch_);
+        ConvBackpropFilterWinograd<SrcT, DstT, TilingT> winograd(fmapFwd, dyFwd, nk1c1k0c0, nk1c1k0c0Shape, y_, tailGm,
+                                                                 winoMmad, tileH, tileW, batch_);
 
         winograd.Init();
         winograd.IterateAll();
@@ -101,16 +90,16 @@ private:
 #if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 3510)
         constexpr uint32_t L2CacheBytes = 128 * 1024 * 1024;
 #else
-        constexpr uint32_t L2CacheBytes = 112*1024*1024;
+        constexpr uint32_t L2CacheBytes = 112 * 1024 * 1024;
 #endif
 
         constexpr uint32_t L2CacheLimit = L2CacheBytes * 0.85f;
-        uint64_t inputBytes = batch_ * sizeof(SrcT) * (
-                                  static_cast<uint64_t>(cin_) * fmapH_ * fmapW_ +
-                                  static_cast<uint64_t>(cout_) * dyH_ * dyW_);
-        //简单实现的判断，没太多考虑，不一定真的有价值
-        //当输出+输入的两倍(原始数据+转置数据) > L2cache的0.85倍(冗余一些，可能有其他的东西占用)就关掉原始数据的L2
-        //有问题在调
+        uint64_t inputBytes = batch_ * sizeof(SrcT) *
+                              (static_cast<uint64_t>(cin_) * fmapH_ * fmapW_ +
+                               static_cast<uint64_t>(cout_) * dyH_ * dyW_);
+        // 简单实现的判断，没太多考虑，不一定真的有价值
+        // 当输出+输入的两倍(原始数据+转置数据) > L2cache的0.85倍(冗余一些，可能有其他的东西占用)就关掉原始数据的L2
+        // 有问题在调
         uint64_t outputBytes = static_cast<uint64_t>(cin_) * cout_ * 3 * 3 * sizeof(DstT);
         return (outputBytes + inputBytes * 2) > L2CacheLimit;
     }
@@ -120,9 +109,9 @@ private:
 
         constexpr static __aicore__ inline SingleShapeTile Get()
         {
-            //TileHTileW组合:
-            //flag1:B16H8W8 B32H4W8
-            //flag2:B16H4W16 B32H2W16
+            // TileHTileW组合:
+            // flag1:B16H8W8 B32H4W8
+            // flag2:B16H4W16 B32H2W16
             constexpr bool isB32 = Std::is_same_v<SrcT, float>;
             if constexpr (WinoTilingFlag == TPL_WINOGRAD_TILING1) {
                 if constexpr (isB32) {
@@ -150,21 +139,13 @@ private:
         constexpr uint32_t invTransBufCnt = 4;
         constexpr uint32_t invTransCout = 8;
         constexpr SingleShapeTile singleShapeTile = SingleShapeTile::Get();
-        constexpr BlockConfig::InputTensor ResidentTensor =
-            WinoResidentFlag == TPL_WINOGRAD_RESIDENT_FMAP ?
-                BlockConfig::InputTensor::FMAP :
-                BlockConfig::InputTensor::DY;
+        constexpr BlockConfig::InputTensor ResidentTensor = WinoResidentFlag == TPL_WINOGRAD_RESIDENT_FMAP ?
+                                                                BlockConfig::InputTensor::FMAP :
+                                                                BlockConfig::InputTensor::DY;
 
-        return BlockConfig::Tiling<singleShapeCout,
-            singleShapeCin,
-            singleShapeTransformC1,
-            singleShapeTile.H,
-            singleShapeTile.W,
-            fwdBufCnt,
-            singleShapeResidentC,
-            ResidentTensor,
-            invTransBufCnt,
-            invTransCout>{};
+        return BlockConfig::Tiling<singleShapeCout, singleShapeCin, singleShapeTransformC1, singleShapeTile.H,
+                                   singleShapeTile.W, fwdBufCnt, singleShapeResidentC, ResidentTensor, invTransBufCnt,
+                                   invTransCout>{};
     }
 
     __gm__ SrcT* x_ = nullptr;

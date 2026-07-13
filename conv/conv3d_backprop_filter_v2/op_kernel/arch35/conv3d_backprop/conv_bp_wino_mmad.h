@@ -1,5 +1,5 @@
 /**
-* Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
  * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
  * CANN Open Software License Agreement Version 2.0 (the "License").
  * Please refer to the License for details. You may not use this file except in compliance with the License.
@@ -24,15 +24,12 @@ using namespace AscendC;
 template <typename T, typename TilingT>
 class WinoMMAD {
 public:
-    __aicore__ explicit WinoMMAD(bool hf32Flag)
-        : hf32Flag_(hf32Flag)
-    {
-    }
+    __aicore__ explicit WinoMMAD(bool hf32Flag) : hf32Flag_(hf32Flag) {}
 
     __aicore__ inline void Init()
     {
-        //TODO L1 要留一个(16-tile.elements%16)的空间
-        // 让load2d取最后一个点的最后一个分形时凑满512字节
+        // TODO L1 要留一个(16-tile.elements%16)的空间
+        //  让load2d取最后一个点的最后一个分形时凑满512字节
 
         TPipe* pipe = GetTPipePtr();
         if ASCEND_IS_AIC {
@@ -65,17 +62,14 @@ public:
     }
 
     template <BlockConfig::InputTensor LoadTarget>
-    __aicore__ inline void LoadL1(
-        const GlobalTensor<T>& gm,
-        const NK1C1K0C0::Shape<T>& shape,
-        NK1C1K0C0::CopyK0Params& copyParams,
-        bool l1PingPongFlag)
+    __aicore__ inline void LoadL1(const GlobalTensor<T>& gm, const NK1C1K0C0::Shape<T>& shape,
+                                  NK1C1K0C0::CopyK0Params& copyParams, bool l1PingPongFlag)
     {
         const EventFlag& mte2mte1 = mte2mte1Flag_[l1PingPongFlag];
         WaitFlag<HardEvent::MTE1_MTE2>(mte2mte1.dst2src);
 
-        //TODO 确认读L1越界的影响，否则 要留一个(tile.elements%16)的空间
-        // 让load2d取最后一个点的最后一个分形时凑满512字节
+        // TODO 确认读L1越界的影响，否则 要留一个(tile.elements%16)的空间
+        //  让load2d取最后一个点的最后一个分形时凑满512字节
         auto l1Buf = GetL1Buf(l1PingPongFlag);
 
         if constexpr (LoadTarget == BlockConfig::InputTensor::FMAP) {
@@ -89,9 +83,8 @@ public:
         SetFlag<HardEvent::MTE2_MTE1>(mte2mte1.src2dst);
     }
 
-    __aicore__ inline void Compute(
-        const HWBox& tiles, uint32_t cout, uint32_t coutC1, uint32_t cin, uint32_t cinC1,
-        bool firstK, bool l1PingPongFlag)
+    __aicore__ inline void Compute(const HWBox& tiles, uint32_t cout, uint32_t coutC1, uint32_t cin, uint32_t cinC1,
+                                   bool firstK, bool l1PingPongFlag)
     {
         if (firstK) {
             WaitFlag<HardEvent::FIX_M>(mad2fixpipeFlag_.dst2src);
@@ -102,7 +95,7 @@ public:
         mad.n = cin;
         mad.k = tiles.elements;
         mad.cmatrixInitVal = firstK;
-        mad.disableGemv = true; //还没搞懂干嘛用的，先禁了
+        mad.disableGemv = true; // 还没搞懂干嘛用的，先禁了
 
         LoadData2DParamsV2 load2d;
         load2d.mStartPosition = 0;
@@ -145,15 +138,15 @@ public:
         LocalTensor<T>& l1a = Std::get<0>(l1Buf);
         LocalTensor<T>& l1b = Std::get<1>(l1Buf);
 
-        //不需要baseK循环,L1上左右Tensor在PingPong后最多一共占用256kb
-        //除以16后单个点最多16kb,L0上一定能全载,除非singleShapeHW传进来为1
-        //然后l0上对齐放大到16这类异常情况,但tiling阶段应该防止这种情况
+        // 不需要baseK循环,L1上左右Tensor在PingPong后最多一共占用256kb
+        // 除以16后单个点最多16kb,L0上一定能全载,除非singleShapeHW传进来为1
+        // 然后l0上对齐放大到16这类异常情况,但tiling阶段应该防止这种情况
         const EventFlag mte2mte1Flag = mte2mte1Flag_[l1PingPongFlag];
         WaitFlag<HardEvent::MTE2_MTE1>(mte2mte1Flag.src2dst);
 
 #pragma unroll
         for (uint8_t g = 0; g < L0POINTS.group; g++) {
-            //通过奇偶性判断l0PingPong
+            // 通过奇偶性判断l0PingPong
             const int l0BufFlag = g % L0_BUF_CNT;
 
             const EventFlag mte1madFlag = mte1madFlag_[l0BufFlag];
@@ -210,13 +203,9 @@ public:
         SetFlag<HardEvent::MTE1_MTE2>(mte2mte1Flag.dst2src);
     }
 
-
     template <typename SyncQueConfig>
-    __aicore__ inline void Fixpipe2UB(
-        CVSyncQue<SyncQueConfig>& syncQue,
-        uint32_t cout,
-        uint32_t cin,
-        const LocalTensor<float>& outputTransformVBuf)
+    __aicore__ inline void Fixpipe2UB(CVSyncQue<SyncQueConfig>& syncQue, uint32_t cout, uint32_t cin,
+                                      const LocalTensor<float>& outputTransformVBuf)
     {
         SetFlag<HardEvent::M_FIX>(mad2fixpipeFlag_.src2dst);
         WaitFlag<HardEvent::M_FIX>(mad2fixpipeFlag_.src2dst);
@@ -231,9 +220,9 @@ public:
         for (uint32_t coutIdx = 0; coutIdx < cout; coutIdx += singleBlockCout) {
             const uint16_t coutLength = Std::min(singleBlockCout, cout - coutIdx);
 
-            //mSize对齐到2用于ub均分,由于实际计算分形一定是16的倍数，所以这么操作应当不会导致地址溢出
-            //假设cout为16，那么对齐后还是16，如果是17那就会变成18，实际计算分形则是32，不存在溢出
-            // //TODO 判断尾块非C0对齐有没有问题
+            // mSize对齐到2用于ub均分,由于实际计算分形一定是16的倍数，所以这么操作应当不会导致地址溢出
+            // 假设cout为16，那么对齐后还是16，如果是17那就会变成18，实际计算分形则是32，不存在溢出
+            //  //TODO 判断尾块非C0对齐有没有问题
             FixpipeParamsC310 fp;
             fp.mSize = aivNums == 2 ? coutLength + (coutLength & 1) : coutLength;
             fp.nSize = cin;
@@ -241,7 +230,7 @@ public:
             fp.dstStride = cin;
             fp.params.ndNum = F23_TRANSFORM_TILE_ELEMENTS_16;
             fp.params.srcNdStride = L0C_SINGLE_POINT_BUF_BYTES / (BLOCK_CUBE * sizeof(float));
-            //到UB上按C0对齐
+            // 到UB上按C0对齐
             fp.params.dstNdStride = WinoInvBufUtil::InvTransSinglePointBufSize<TilingT>();
             if constexpr (aivNums == 2) {
                 fp.dualDstCtl = 1;
@@ -261,9 +250,9 @@ public:
 
     static __aicore__ inline Std::tuple<LocalTensor<T>, LocalTensor<T> > GetL1Buf(bool flagPingPong)
     {
-        //PingPong按L1/2为界
-        //整个L1被均分为2个bank,PingPong以L1SIZE/2为界分配到2个bank上
-        //确保PingBuf上执行mte1/mte2时不会和PongBuf上的mte1/mte2产生bank冲突
+        // PingPong按L1/2为界
+        // 整个L1被均分为2个bank,PingPong以L1SIZE/2为界分配到2个bank上
+        // 确保PingBuf上执行mte1/mte2时不会和PongBuf上的mte1/mte2产生bank冲突
         const LocalTensor<T> l1Buf = LocalTensor<T>(TPosition::A1, 0, TOTAL_L1_SIZE);
 
         constexpr uint32_t offsetPingPong = TOTAL_L1_SIZE / 2 / sizeof(T);
@@ -285,26 +274,23 @@ private:
 
     static __aicore__ inline LocalTensor<float> GetL0CPointBuf(uint8_t pointIdx)
     {
-        //l0c均分16片给每个点使用
-        auto buf = LocalTensor<float>(
-            TPosition::CO1,
-            L0C_SINGLE_POINT_BUF_BYTES * pointIdx,
-            L0C_SINGLE_POINT_BUF_BYTES);
+        // l0c均分16片给每个点使用
+        auto buf = LocalTensor<float>(TPosition::CO1, L0C_SINGLE_POINT_BUF_BYTES * pointIdx,
+                                      L0C_SINGLE_POINT_BUF_BYTES);
         return buf;
     }
 
     constexpr static __aicore__ inline L0Point CalcWinoPointL0Group()
     {
-        constexpr uint32_t l0KSize = ConstexprMaths::AlignUp(
-                                         BlockConfig::SingleShapeTileHW<TilingT>(),
-                                         BLOCK_CUBE) * sizeof(T);
+        constexpr uint32_t l0KSize = ConstexprMaths::AlignUp(BlockConfig::SingleShapeTileHW<TilingT>(), BLOCK_CUBE) *
+                                     sizeof(T);
 
-        constexpr uint32_t singlePointL0ASize = ConstexprMaths::AlignUp(
-                                                    BlockConfig::SingleShapeCout<TilingT>(),
-                                                    BLOCK_CUBE) * l0KSize;
-        constexpr uint32_t singlePointL0BSize = ConstexprMaths::AlignUp(
-                                                    BlockConfig::SingleShapeCin<TilingT>(),
-                                                    BLOCK_CUBE) * l0KSize;
+        constexpr uint32_t singlePointL0ASize = ConstexprMaths::AlignUp(BlockConfig::SingleShapeCout<TilingT>(),
+                                                                        BLOCK_CUBE) *
+                                                l0KSize;
+        constexpr uint32_t singlePointL0BSize = ConstexprMaths::AlignUp(BlockConfig::SingleShapeCin<TilingT>(),
+                                                                        BLOCK_CUBE) *
+                                                l0KSize;
 
         constexpr uint32_t l0BufLimit = TOTAL_L0A_SIZE / L0_BUF_CNT;
         constexpr uint32_t maxPointsL0A = l0BufLimit / singlePointL0ASize;
@@ -312,26 +298,15 @@ private:
         constexpr uint32_t maxPointsL0 = ConstexprMaths::Min(maxPointsL0A, maxPointsL0B);
 
         static_assert(maxPointsL0 >= 1, "illegal points size");
-        //计算最多几个点一起批跑,从1,2,4,8这几个数里挑选,确保整除不会有尾轮处理
-        //因为开了PingPong所以最多8个点一批,16个点一批PingPong就没意义了
-        constexpr uint32_t pointsPerGroup = maxPointsL0 >= 8 ?
-                                                8 :
-                                                maxPointsL0 >= 4 ?
-                                                4 :
-                                                maxPointsL0 >= 2 ?
-                                                2 :
-                                                1;
+        // 计算最多几个点一起批跑,从1,2,4,8这几个数里挑选,确保整除不会有尾轮处理
+        // 因为开了PingPong所以最多8个点一批,16个点一批PingPong就没意义了
+        constexpr uint32_t pointsPerGroup = maxPointsL0 >= 8 ? 8 : maxPointsL0 >= 4 ? 4 : maxPointsL0 >= 2 ? 2 : 1;
 
         constexpr uint8_t outGroup = F23_TRANSFORM_TILE_ELEMENTS_16 / pointsPerGroup;
         constexpr uint8_t outPointPerGroup = pointsPerGroup;
         constexpr uint32_t outL0aSize = outPointPerGroup * singlePointL0ASize;
         constexpr uint32_t outL0bSize = outPointPerGroup * singlePointL0BSize;
-        return {
-            outGroup,
-            outPointPerGroup,
-            outL0aSize,
-            outL0bSize
-        };
+        return {outGroup, outPointPerGroup, outL0aSize, outL0bSize};
     }
 
     struct EventFlag {
@@ -347,15 +322,12 @@ private:
         }
     };
 
-
-    static constexpr uint32_t L1A_LENGTH = F23_TRANSFORM_TILE_ELEMENTS_16 *
-                                           BlockConfig::SingleShapeTileHW<TilingT>() *
+    static constexpr uint32_t L1A_LENGTH = F23_TRANSFORM_TILE_ELEMENTS_16 * BlockConfig::SingleShapeTileHW<TilingT>() *
                                            BlockConfig::SingleShapeCout<TilingT>();
-    static constexpr uint32_t L1B_LENGTH = F23_TRANSFORM_TILE_ELEMENTS_16 *
-                                           BlockConfig::SingleShapeTileHW<TilingT>() *
+    static constexpr uint32_t L1B_LENGTH = F23_TRANSFORM_TILE_ELEMENTS_16 * BlockConfig::SingleShapeTileHW<TilingT>() *
                                            BlockConfig::SingleShapeCin<TilingT>();
 
-    //64*64下，mte1的耗时略高于mmad,当前看开4buf，相比pingpong会减少mte1等待mmad而造成空隙，性能略微好一点
+    // 64*64下，mte1的耗时略高于mmad,当前看开4buf，相比pingpong会减少mte1等待mmad而造成空隙，性能略微好一点
     static constexpr uint8_t L0_BUF_CNT = 4;
     static constexpr L0Point L0POINTS = CalcWinoPointL0Group();
     static constexpr uint32_t L0C_SINGLE_POINT_BUF_BYTES = TOTAL_L0C_SIZE / F23_TRANSFORM_TILE_ELEMENTS_16;
@@ -366,4 +338,4 @@ private:
     const bool hf32Flag_;
 };
 
-#endif //CONV_BP_WINO_MMAD_H
+#endif // CONV_BP_WINO_MMAD_H

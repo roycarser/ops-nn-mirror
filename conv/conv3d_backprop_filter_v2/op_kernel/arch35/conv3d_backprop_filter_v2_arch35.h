@@ -30,8 +30,8 @@ using namespace AscendC;
         op.Process();                                    \
     } while (0)
 
-template <uint32_t conv3DDWTemplateId, bool isSplitKernelHW, bool groupEnlarge,
-          uint32_t winogradTilingFlag, bool winogradResidentFlag>
+template <uint32_t conv3DDWTemplateId, bool isSplitKernelHW, bool groupEnlarge, uint32_t winogradTilingFlag,
+          bool winogradResidentFlag>
 __global__ __aicore__ void conv3d_backprop_filter_v2_arch35(GM_ADDR x, GM_ADDR filter_size, GM_ADDR out_backprop,
                                                             GM_ADDR y, GM_ADDR workSpace, GM_ADDR tiling)
 {

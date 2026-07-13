@@ -1,5 +1,5 @@
 /**
-* Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
  * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
  * CANN Open Software License Agreement Version 2.0 (the "License").
  * Please refer to the License for details. You may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@
 using namespace AscendC;
 
 namespace WinoInvBufUtil {
-//需要申请26个CoutCin空间,16个用来放原始数据,9个用来放逆变换转置后的数据
+// 需要申请26个CoutCin空间,16个用来放原始数据,9个用来放逆变换转置后的数据
 static constexpr uint32_t COUT_CIN_BUF_CNT = 25;
 static constexpr uint8_t CROSS_CORE_INTERLEAVE_MTE3_SYNC_FLAG = 11;
 
@@ -47,14 +47,13 @@ static constexpr __aicore__ inline uint32_t GetInvBufTotalSizeInBytes()
     static_assert(bufSize < TOTAL_UB_SIZE, "illegal buffer size");
     return bufSize;
 }
-}
+} // namespace WinoInvBufUtil
 
 template <typename DstT, typename TilingT>
 class WinoInvTransformer {
 public:
     static constexpr uint32_t INV_TRANS_BUF_SIZE = WinoInvBufUtil::InvTransBufSize<TilingT>();
     static constexpr uint32_t INV_TRANS_SINGLE_POINT_BUF_SIZE = WinoInvBufUtil::InvTransSinglePointBufSize<TilingT>();
-
 
     __aicore__ inline explicit WinoInvTransformer(__gm__ DstT* yGm, __gm__ float* tailGm)
     {
@@ -73,16 +72,10 @@ public:
         v2mte2_[1] = pipe->AllocEventID<HardEvent::V_MTE2>();
     }
 
-
     template <bool WriteToTailGM = false, typename QueConfig>
-    __aicore__ inline void TransformOutput(
-        CVSyncQue<QueConfig>& l0c2ubSync,
-        const CoutCinRange& localBlock,
-        const uint32_t cinSrc,
-        const LocalTensor<float>& vBuf,
-        uint32_t tailKGroupIdx,
-        uint32_t tailKGroups,
-        uint16_t tailBlockId)
+    __aicore__ inline void TransformOutput(CVSyncQue<QueConfig>& l0c2ubSync, const CoutCinRange& localBlock,
+                                           const uint32_t cinSrc, const LocalTensor<float>& vBuf,
+                                           uint32_t tailKGroupIdx, uint32_t tailKGroups, uint16_t tailBlockId)
     {
         constexpr uint16_t aivNums = AivNumInBlock();
         constexpr uint16_t singleShapeInvTransCout = BlockConfig::SingleShapeInvTransformCout<TilingT>();
@@ -98,16 +91,14 @@ public:
 
             const uint16_t localCoutLength = Ops::Base::CeilDiv(coutLengthInBlock, aivNums);
             const uint16_t localCoutOffset = localCoutLength * aivId;
-            //TODO 尾轮不逆变换，累加完在做一次逆变换
+            // TODO 尾轮不逆变换，累加完在做一次逆变换
             if (localCoutOffset < coutLengthInBlock) {
                 const uint32_t processCoutLength = Std::min(localCoutLength, coutLengthInBlock - localCoutOffset);
                 const uint32_t coutCin = processCoutLength * localBlock.cinLength;
 
                 LocalTensor<float> buf = vBuf[bufIdx * INV_TRANS_BUF_SIZE];
-                ProcessInvTransform(
-                    reinterpret_cast<__ubuf__ float*>(buf.GetPhyAddr()),
-                    coutCin,
-                    Ops::Base::CeilDiv(coutCin, VL<float>()));
+                ProcessInvTransform(reinterpret_cast<__ubuf__ float*>(buf.GetPhyAddr()), coutCin,
+                                    Ops::Base::CeilDiv(coutCin, VL<float>()));
 
                 const uint32_t coutIdx = localBlock.coutIdx + coutIdxInBlock + localCoutOffset;
 
@@ -115,7 +106,7 @@ public:
                 WaitFlag<HardEvent::V_MTE3>(v2mte3_);
 
                 if constexpr (WriteToTailGM) {
-                    //尾轮没实现非fp32的输出，当前dw也没必要实现
+                    // 尾轮没实现非fp32的输出，当前dw也没必要实现
                     static_assert(Std::is_same_v<DstT, float>, "only support fp32 when enable tail write");
 
                     DataCopyExtParams params;
@@ -125,8 +116,7 @@ public:
                     params.dstStride = 0;
 
                     constexpr uint32_t TailBlockSize = BlockConfig::SingleShapeCout<TilingT>() *
-                                                       BlockConfig::SingleShapeCin<TilingT>() *
-                                                       KERNEL_3x3;
+                                                       BlockConfig::SingleShapeCin<TilingT>() * KERNEL_3x3;
 
                     uint64_t gmOffset = (tailBlockId * tailKGroups + tailKGroupIdx) * TailBlockSize +
                                         localBlock.cinLength * KERNEL_3x3 * (coutIdx - localBlock.coutIdx);
@@ -135,9 +125,9 @@ public:
                         buf[F23_TRANSFORM_TILE_ELEMENTS_16 * INV_TRANS_SINGLE_POINT_BUF_SIZE].ReinterpretCast<DstT>(),
                         params);
                 } else {
-                    CopyOut(localBlock, processCoutLength, coutIdx, cinSrc,
-                            buf[F23_TRANSFORM_TILE_ELEMENTS_16 * INV_TRANS_SINGLE_POINT_BUF_SIZE]
-                            .ReinterpretCast<DstT>());
+                    CopyOut(
+                        localBlock, processCoutLength, coutIdx, cinSrc,
+                        buf[F23_TRANSFORM_TILE_ELEMENTS_16 * INV_TRANS_SINGLE_POINT_BUF_SIZE].ReinterpretCast<DstT>());
                 }
             }
 
@@ -146,11 +136,8 @@ public:
         }
     }
 
-
-    __aicore__ inline void TailInterleaveWrite(
-        const CoutCinRange& localBlock,
-        const uint32_t cinSrc,
-        uint32_t tailKGroup, uint32_t tailKGroupIdx, uint16_t tailBlockId)
+    __aicore__ inline void TailInterleaveWrite(const CoutCinRange& localBlock, const uint32_t cinSrc,
+                                               uint32_t tailKGroup, uint32_t tailKGroupIdx, uint16_t tailBlockId)
     {
         CrossCoreSetFlag<0, PIPE_MTE3>(WinoInvBufUtil::CROSS_CORE_INTERLEAVE_MTE3_SYNC_FLAG);
         CrossCoreWaitFlag<0, PIPE_MTE2>(WinoInvBufUtil::CROSS_CORE_INTERLEAVE_MTE3_SYNC_FLAG);
@@ -165,16 +152,11 @@ public:
 
         uint32_t bufLength = Ops::Base::CeilAlign(coutLength * localBlock.cinLength * KERNEL_3x3, C0<float>());
         uint32_t availableBufCnt = TOTAL_UB_SIZE / (bufLength * sizeof(float));
-        //切PingPong
-        uint32_t inputCnt = Std::min(
-            (availableBufCnt - 1) / 2,
-            Ops::Base::CeilDiv(tailKGroup, 2u));
+        // 切PingPong
+        uint32_t inputCnt = Std::min((availableBufCnt - 1) / 2, Ops::Base::CeilDiv(tailKGroup, 2u));
 
-        LocalTensor<float> accumulateBuf = AccumulateTailData(
-            localBlock,
-            coutOffset, coutLength,
-            tailKGroup, tailBlockId,
-            bufLength, inputCnt);
+        LocalTensor<float> accumulateBuf = AccumulateTailData(localBlock, coutOffset, coutLength, tailKGroup,
+                                                              tailBlockId, bufLength, inputCnt);
 
         SetFlag<HardEvent::V_MTE3>(v2mte3_);
         WaitFlag<HardEvent::V_MTE3>(v2mte3_);
@@ -189,24 +171,19 @@ public:
     }
 
 private:
-    __aicore__ inline LocalTensor<float> AccumulateTailData(
-        const CoutCinRange& localBlock,
-        uint32_t coutOffset, uint32_t coutLength,
-        uint32_t tailKGroup, uint16_t tailBlockId,
-        uint32_t bufLength, uint32_t inputCnt) const
+    __aicore__ inline LocalTensor<float> AccumulateTailData(const CoutCinRange& localBlock, uint32_t coutOffset,
+                                                            uint32_t coutLength, uint32_t tailKGroup,
+                                                            uint16_t tailBlockId, uint32_t bufLength,
+                                                            uint32_t inputCnt) const
     {
         uint32_t bufLengthInBytes = bufLength * sizeof(float);
         uint32_t inputBufLengthInBytes = inputCnt * bufLengthInBytes;
 
-        LocalTensor<float> accumulateBuf(
-            TPosition::VECCALC,
-            inputCnt * 2 * bufLengthInBytes,
-            bufLengthInBytes);
+        LocalTensor<float> accumulateBuf(TPosition::VECCALC, inputCnt * 2 * bufLengthInBytes, bufLengthInBytes);
 
         bool pingPongFlag = false;
         constexpr uint32_t TailBlockSize = BlockConfig::SingleShapeCout<TilingT>() *
-                                           BlockConfig::SingleShapeCin<TilingT>() *
-                                           KERNEL_3x3;
+                                           BlockConfig::SingleShapeCin<TilingT>() * KERNEL_3x3;
 
         uint32_t loadCnt = Ops::Base::CeilDiv(tailKGroup, inputCnt);
 
@@ -214,10 +191,7 @@ private:
         SetFlag<HardEvent::V_MTE2>(v2mte2_[1]);
 
         for (uint32_t i = 0; i < loadCnt; i++) {
-            LocalTensor<float> inBuf(
-                TPosition::VECCALC,
-                inputBufLengthInBytes * pingPongFlag,
-                inputBufLengthInBytes);
+            LocalTensor<float> inBuf(TPosition::VECCALC, inputBufLengthInBytes * pingPongFlag, inputBufLengthInBytes);
 
             uint32_t startGroupIdx = i * inputCnt;
             uint32_t loadGroups = Std::min(inputCnt, tailKGroup - startGroupIdx);
@@ -230,22 +204,19 @@ private:
             TEventID v2mte2Flag = v2mte2_[pingPongFlag];
             WaitFlag<HardEvent::V_MTE2>(v2mte2Flag);
 
-            DataCopyPad<float, PaddingMode::Normal>(
-                inBuf,
-                tailGm_[(tailBlockId * tailKGroup + startGroupIdx) * TailBlockSize +
-                        localBlock.cinLength * KERNEL_3x3 * coutOffset], params,
-                {false, 0, 0, 0});
+            DataCopyPad<float, PaddingMode::Normal>(inBuf,
+                                                    tailGm_[(tailBlockId * tailKGroup + startGroupIdx) * TailBlockSize +
+                                                            localBlock.cinLength * KERNEL_3x3 * coutOffset],
+                                                    params, {false, 0, 0, 0});
 
             SetFlag<HardEvent::MTE2_V>(mte22v_);
             WaitFlag<HardEvent::MTE2_V>(mte22v_);
             if (i == 0) {
                 Duplicate(accumulateBuf, 0.0f, static_cast<int32_t>(bufLength));
             }
-            Accumulate(
-                reinterpret_cast<__ubuf__ float*>(inBuf.GetPhyAddr()),
-                reinterpret_cast<__ubuf__ float*>(accumulateBuf.GetPhyAddr()),
-                loadGroups, bufLength,
-                Ops::Base::CeilDiv(bufLength, VL<float>()));
+            Accumulate(reinterpret_cast<__ubuf__ float*>(inBuf.GetPhyAddr()),
+                       reinterpret_cast<__ubuf__ float*>(accumulateBuf.GetPhyAddr()), loadGroups, bufLength,
+                       Ops::Base::CeilDiv(bufLength, VL<float>()));
 
             SetFlag<HardEvent::V_MTE2>(v2mte2Flag);
             pingPongFlag = !pingPongFlag;
@@ -257,34 +228,23 @@ private:
         return accumulateBuf;
     }
 
-    __aicore__ inline void CopyOut(
-        const CoutCinRange& localBlock,
-        uint32_t processCoutLength,
-        uint32_t coutIdx, uint32_t cinSrc,
-        const LocalTensor<DstT>& buf)
+    __aicore__ inline void CopyOut(const CoutCinRange& localBlock, uint32_t processCoutLength, uint32_t coutIdx,
+                                   uint32_t cinSrc, const LocalTensor<DstT>& buf)
     {
         DataCopyExtParams params;
         params.blockCount = processCoutLength;
         params.blockLen = localBlock.cinLength * KERNEL_3x3 * sizeof(DstT);
         params.srcStride = 0;
-        params.dstStride = (static_cast<uint64_t>(cinSrc) - localBlock.cinLength) * KERNEL_3x3 * sizeof(
-                               DstT);
+        params.dstStride = (static_cast<uint64_t>(cinSrc) - localBlock.cinLength) * KERNEL_3x3 * sizeof(DstT);
         uint64_t gmOffset = (static_cast<uint64_t>(coutIdx) * cinSrc + localBlock.cinIdx) * KERNEL_3x3;
-        DataCopyPad<DstT, PaddingMode::Compact>(
-            yGm_[gmOffset],
-            buf,
-            params);
+        DataCopyPad<DstT, PaddingMode::Compact>(yGm_[gmOffset], buf, params);
     }
 
     static constexpr uint32_t KERNEL_3 = 3;
     static constexpr uint32_t KERNEL_3x3 = 9;
 
-    __simd_vf__ static inline void Accumulate(
-        __ubuf__ float* buf,
-        __ubuf__ float* accBuf,
-        uint16_t blockCnt,
-        uint32_t blockLength,
-        uint16_t blockLoopCnt)
+    __simd_vf__ static inline void Accumulate(__ubuf__ float* buf, __ubuf__ float* accBuf, uint16_t blockCnt,
+                                              uint32_t blockLength, uint16_t blockLoopCnt)
     {
         uint16_t blockCntOneLess = blockCnt - 1;
         uint32_t maskValue = blockLength;
@@ -313,17 +273,15 @@ private:
         }
     }
 
-    __simd_vf__ static inline void ProcessInvTransform(
-        __ubuf__ float* buf,
-        const uint32_t coutCinLength,
-        const uint16_t loopCnt)
+    __simd_vf__ static inline void ProcessInvTransform(__ubuf__ float* buf, const uint32_t coutCinLength,
+                                                       const uint16_t loopCnt)
     {
         using namespace MicroAPI;
         RegTensor<float> value0P5;
         Duplicate(value0P5, 0.5f);
 
         constexpr uint32_t singlePointSize = INV_TRANS_SINGLE_POINT_BUF_SIZE;
-        //当前正变换结束后点按列优先排列
+        // 当前正变换结束后点按列优先排列
         __ubuf__ float* src0 = buf;
         __ubuf__ float* src1 = buf + singlePointSize;
         __ubuf__ float* src2 = buf + singlePointSize * 2;
@@ -345,63 +303,40 @@ private:
 
             constexpr uint32_t pointRowStride = singlePointSize * F23_TRANSFORM_TILE_SIZE_4;
             RegTensor<float> col0d0, col0d1, col0d2;
-            TransformCol(
-                src0, src1, src2, src3,
-                mask, value0P5, col0d0, col0d1, col0d2,
-                pointRowStride);
+            TransformCol(src0, src1, src2, src3, mask, value0P5, col0d0, col0d1, col0d2, pointRowStride);
 
             RegTensor<float> col1d0, col1d1, col1d2;
-            TransformCol(
-                src0, src1, src2, src3,
-                mask, value0P5, col1d0, col1d1, col1d2,
-                pointRowStride);
+            TransformCol(src0, src1, src2, src3, mask, value0P5, col1d0, col1d1, col1d2, pointRowStride);
 
             RegTensor<float> col2d0, col2d1, col2d2;
-            TransformCol(
-                src0, src1, src2, src3,
-                mask, value0P5, col2d0, col2d1, col2d2,
-                pointRowStride);
+            TransformCol(src0, src1, src2, src3, mask, value0P5, col2d0, col2d1, col2d2, pointRowStride);
 
             RegTensor<float> col3d0, col3d1, col3d2;
             constexpr int32_t nextColStride = -3 * pointRowStride + VL<float>();
-            TransformCol(
-                src0, src1, src2, src3,
-                mask, value0P5, col3d0, col3d1, col3d2,
-                nextColStride);
+            TransformCol(src0, src1, src2, src3, mask, value0P5, col3d0, col3d1, col3d2, nextColStride);
 
             __ubuf__ float* dst0 = dst;
 
-            TransformRowWithCastAndSetter(dst0, col0d0, col1d0, col2d0, col3d0,
-                value0P5, index, mask);
-            TransformRowWithCastAndSetter(dst0, col0d1, col1d1, col2d1, col3d1,
-                value0P5, index, mask);
-            TransformRowWithCastAndSetter(dst0, col0d2, col1d2, col2d2, col3d2,
-                value0P5, index, mask);
+            TransformRowWithCastAndSetter(dst0, col0d0, col1d0, col2d0, col3d0, value0P5, index, mask);
+            TransformRowWithCastAndSetter(dst0, col0d1, col1d1, col2d1, col3d1, value0P5, index, mask);
+            TransformRowWithCastAndSetter(dst0, col0d2, col1d2, col2d2, col3d2, value0P5, index, mask);
 
             dst += VL<float>() * KERNEL_3x3;
         }
 
-        //scatter完后在重新做cast，把float转b16后空的2个字节移除，不能直接用b16做scatter，bank冲突太严重
+        // scatter完后在重新做cast，把float转b16后空的2个字节移除，不能直接用b16做scatter，bank冲突太严重
         if constexpr (!Std::is_same_v<DstT, float>) {
             B32ToB16(transposeBuf, loopCnt, maskValue);
         }
     }
 
-    __simd_callee__ static inline  void TransformRowWithCastAndSetter(
-        __ubuf__ float*& dst0,
-        MicroAPI::RegTensor<float>& c0,
-        MicroAPI::RegTensor<float>& c1,
-        MicroAPI::RegTensor<float>& c2,
-        MicroAPI::RegTensor<float>& c3,
-        MicroAPI::RegTensor<float>& value0P5,
-        MicroAPI::RegTensor<uint32_t>& index,
-        MicroAPI::MaskReg& mask)
+    __simd_callee__ static inline void TransformRowWithCastAndSetter(
+        __ubuf__ float*& dst0, MicroAPI::RegTensor<float>& c0, MicroAPI::RegTensor<float>& c1,
+        MicroAPI::RegTensor<float>& c2, MicroAPI::RegTensor<float>& c3, MicroAPI::RegTensor<float>& value0P5,
+        MicroAPI::RegTensor<uint32_t>& index, MicroAPI::MaskReg& mask)
     {
         MicroAPI::RegTensor<float> r0, r1, r2;
-        TransformRowAndCastInZero(
-            mask, value0P5,
-            c0, c1, c2, c3,
-            r0, r1, r2);
+        TransformRowAndCastInZero(mask, value0P5, c0, c1, c2, c3, r0, r1, r2);
 
         Scatter(dst0, r0, index, mask);
         ++dst0;
@@ -411,10 +346,8 @@ private:
         ++dst0;
     }
 
-    __simd_callee__ static inline void B32ToB16(
-        __ubuf__ float* transposeBuf,
-        uint16_t loopCnt,
-        MicroAPI::MaskReg& maskAll)
+    __simd_callee__ static inline void B32ToB16(__ubuf__ float* transposeBuf, uint16_t loopCnt,
+                                                MicroAPI::MaskReg& maskAll)
     {
         using namespace MicroAPI;
         if constexpr (!Std::is_same_v<DstT, float>) {
@@ -433,17 +366,11 @@ private:
         }
     }
 
-    __simd_callee__ static inline void TransformCol(
-        __ubuf__ float*& src0,
-        __ubuf__ float*& src1,
-        __ubuf__ float*& src2,
-        __ubuf__ float*& src3,
-        MicroAPI::MaskReg& mask,
-        MicroAPI::RegTensor<float>& value0P5,
-        MicroAPI::RegTensor<float>& d0,
-        MicroAPI::RegTensor<float>& d1,
-        MicroAPI::RegTensor<float>& d2,
-        const int32_t postUpdateStride)
+    __simd_callee__ static inline void TransformCol(__ubuf__ float*& src0, __ubuf__ float*& src1, __ubuf__ float*& src2,
+                                                    __ubuf__ float*& src3, MicroAPI::MaskReg& mask,
+                                                    MicroAPI::RegTensor<float>& value0P5,
+                                                    MicroAPI::RegTensor<float>& d0, MicroAPI::RegTensor<float>& d1,
+                                                    MicroAPI::RegTensor<float>& d2, const int32_t postUpdateStride)
     {
         MicroAPI::RegTensor<float> s0;
         MicroAPI::RegTensor<float> s1;
@@ -459,15 +386,9 @@ private:
     }
 
     __simd_callee__ static inline void TransformRowAndCastInZero(
-        MicroAPI::MaskReg& mask,
-        MicroAPI::RegTensor<float>& value0P5,
-        MicroAPI::RegTensor<float>& d0,
-        MicroAPI::RegTensor<float>& d1,
-        MicroAPI::RegTensor<float>& d2,
-        MicroAPI::RegTensor<float>& d3,
-        MicroAPI::RegTensor<float>& out0,
-        MicroAPI::RegTensor<float>& out1,
-        MicroAPI::RegTensor<float>& out2)
+        MicroAPI::MaskReg& mask, MicroAPI::RegTensor<float>& value0P5, MicroAPI::RegTensor<float>& d0,
+        MicroAPI::RegTensor<float>& d1, MicroAPI::RegTensor<float>& d2, MicroAPI::RegTensor<float>& d3,
+        MicroAPI::RegTensor<float>& out0, MicroAPI::RegTensor<float>& out1, MicroAPI::RegTensor<float>& out2)
     {
         if constexpr (Std::is_same_v<DstT, float>) {
             TransformVf(value0P5, d0, d1, d2, d3, out0, out1, out2, mask);
@@ -491,17 +412,11 @@ private:
         }
     }
 
-
-    __simd_callee__ static inline void TransformVf(
-        MicroAPI::RegTensor<float>& value0P5,
-        MicroAPI::RegTensor<float>& s0,
-        MicroAPI::RegTensor<float>& s1,
-        MicroAPI::RegTensor<float>& s2,
-        MicroAPI::RegTensor<float>& s3,
-        MicroAPI::RegTensor<float>& d0,
-        MicroAPI::RegTensor<float>& d1,
-        MicroAPI::RegTensor<float>& d2,
-        MicroAPI::MaskReg& mask)
+    __simd_callee__ static inline void TransformVf(MicroAPI::RegTensor<float>& value0P5, MicroAPI::RegTensor<float>& s0,
+                                                   MicroAPI::RegTensor<float>& s1, MicroAPI::RegTensor<float>& s2,
+                                                   MicroAPI::RegTensor<float>& s3, MicroAPI::RegTensor<float>& d0,
+                                                   MicroAPI::RegTensor<float>& d1, MicroAPI::RegTensor<float>& d2,
+                                                   MicroAPI::MaskReg& mask)
     {
         MicroAPI::RegTensor<float> tmpAdd;
         MicroAPI::RegTensor<float> tmpSub;
@@ -515,7 +430,6 @@ private:
         MicroAPI::Add(d2, tmpAddHalf, s3, mask);
     }
 
-
     TEventID mte32mte2_ = 0;
     TEventID v2mte3_ = 0;
     TEventID mte22v_;
@@ -524,4 +438,4 @@ private:
     GlobalTensor<float> tailGm_;
 };
 
-#endif //CONV_BP_WINO_INV_TRANSFORM_H
+#endif // CONV_BP_WINO_INV_TRANSFORM_H

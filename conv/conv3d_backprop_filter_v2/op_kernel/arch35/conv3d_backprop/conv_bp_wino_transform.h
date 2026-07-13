@@ -1,5 +1,5 @@
 /**
-* Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
  * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
  * CANN Open Software License Agreement Version 2.0 (the "License").
  * Please refer to the License for details. You may not use this file except in compliance with the License.
@@ -7,7 +7,6 @@
  * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
  * See LICENSE in the root of the software repository for the full text of the License.
  */
-
 
 /*!
  * \file conv_bp_wino_transform.h
@@ -19,10 +18,10 @@
 
 #include "conv_bp_wino_util.h"
 
-//Transpose5HD做转置时按照16*16为最小单位的,所以搬运时hw轴要统一按照16元素对齐
+// Transpose5HD做转置时按照16*16为最小单位的,所以搬运时hw轴要统一按照16元素对齐
 static constexpr uint32_t HW_SRC_ALIGNED_16 = 16;
-//tileBuf在满足tile空间的大小下需要pad 1列让宽变成奇数,防止行列变换时跨行读列时
-//一整列都在少数bank产生bank冲突
+// tileBuf在满足tile空间的大小下需要pad 1列让宽变成奇数,防止行列变换时跨行读列时
+// 一整列都在少数bank产生bank冲突
 static constexpr uint8_t TILE_BUF_BANK_CONFLICT_PADDING = 1;
 
 struct CSlice {
@@ -47,16 +46,15 @@ struct TileBox {
 namespace WinoTransformDetail {
 constexpr inline uint32_t __aicore__ CalColUnfoldBufWidth(uint32_t th)
 {
-    //要补一个pad到奇数
+    // 要补一个pad到奇数
     return TileUnfoldSize(th) | TILE_BUF_BANK_CONFLICT_PADDING;
 }
 
 constexpr inline uint32_t __aicore__ Cal16TileHWBufWidth(uint32_t tileHW)
 {
-    //补一个pad到奇数
+    // 补一个pad到奇数
     return tileHW | TILE_BUF_BANK_CONFLICT_PADDING;
 }
-
 
 template <typename T>
 constexpr inline __aicore__ uint32_t GetTransformBufSizeC0(uint32_t tileHW)
@@ -73,9 +71,8 @@ constexpr __aicore__ static inline uint32_t GetInputBufSizeC0()
     using TilingConfigT = typename TransformConfig::TilingT;
     using T = typename TransformConfig::T;
 
-    constexpr uint32_t srcHW =
-        SlideWin::Tiles2SrcLength(BlockConfig::SingleShapeTileH<TilingConfigT>()) *
-        SlideWin::Tiles2SrcLength(BlockConfig::SingleShapeTileW<TilingConfigT>());
+    constexpr uint32_t srcHW = SlideWin::Tiles2SrcLength(BlockConfig::SingleShapeTileH<TilingConfigT>()) *
+                               SlideWin::Tiles2SrcLength(BlockConfig::SingleShapeTileW<TilingConfigT>());
     return srcHW * C0<T>();
 }
 
@@ -109,7 +106,7 @@ constexpr __aicore__ static inline uint32_t GetTmpBufLength()
     constexpr uint32_t srcW = SlideWindows<STRIDE, WINDOW_SIZE>::Tiles2SrcLength(tileW);
     return srcW * CalColUnfoldBufWidth(tileH) * C0<T>();
 }
-}
+} // namespace WinoTransformDetail
 
 namespace WinoTransformDetail {
 template <typename T, typename Impl>
@@ -123,29 +120,21 @@ struct UnfoldIntf {
     }
 
     template <bool isTailTile>
-    static __simd_callee__ inline void UnfoldColsVf(
-        __ubuf__ T* unfoldColBuf,
-        __ubuf__ T* srcBuf,
-        const UnfoldColParamsT& params)
+    static __simd_callee__ inline void UnfoldColsVf(__ubuf__ T* unfoldColBuf, __ubuf__ T* srcBuf,
+                                                    const UnfoldColParamsT& params)
     {
         Impl::template UnfoldColsVf<isTailTile>(unfoldColBuf, srcBuf, params);
     }
 
-    static __simd_callee__ inline void UnfoldRowsVf(
-        __ubuf__ T* outBuf,
-        __ubuf__ T* srcBuf,
-        const UnfoldRowParamsT& params)
+    static __simd_callee__ inline void UnfoldRowsVf(__ubuf__ T* outBuf, __ubuf__ T* srcBuf,
+                                                    const UnfoldRowParamsT& params)
     {
         Impl::UnfoldRowsVf(outBuf, srcBuf, params);
     }
 };
-}
+} // namespace WinoTransformDetail
 
-template <typename Type,
-    uint32_t STRIDE_VAL,
-    uint32_t WINDOWS_SIZE_VAL,
-    typename UnfoldImplType,
-    typename TilingType>
+template <typename Type, uint32_t STRIDE_VAL, uint32_t WINDOWS_SIZE_VAL, typename UnfoldImplType, typename TilingType>
 struct TransformConfig {
     using T = Type;
     using UnfoldImpl = UnfoldImplType;
@@ -154,7 +143,6 @@ struct TransformConfig {
     static constexpr uint32_t STRIDE = STRIDE_VAL;
     static constexpr uint32_t WINDOW_SIZE = WINDOWS_SIZE_VAL;
 };
-
 
 template <typename Config>
 class WinoTransformer {
@@ -166,70 +154,44 @@ public:
     using SlideWin = SlideWindows<STRIDE, WINDOW_SIZE>;
     using UnfoldPolicy = WinoTransformDetail::UnfoldIntf<T, typename Config::UnfoldImpl>;
 
-
-    __aicore__ inline WinoTransformer(
-        __gm__ T* in5HD,
-        const uint32_t srcH,
-        const uint32_t srcW,
-        const uint32_t srcC,
-        const uint16_t padH,
-        const uint16_t padW)
-        : srcH_(srcH),
-          srcW_(srcW),
-          srcC_(srcC),
-          padH_(padH),
-          padW_(padW)
+    __aicore__ inline WinoTransformer(__gm__ T* in5HD, const uint32_t srcH, const uint32_t srcW, const uint32_t srcC,
+                                      const uint16_t padH, const uint16_t padW)
+        : srcH_(srcH), srcW_(srcW), srcC_(srcC), padH_(padH), padW_(padW)
     {
         gm_.SetGlobalBuffer(in5HD);
     }
 
-
     __aicore__ inline TileBox CalculateSrcBox(const HWBox& tile, uint32_t cIdx, uint32_t cLength) const
     {
         TileBox box = {tile, {}, {}, {}};
-        SlideWin::CalculateSrcBox(
-            box.tile, srcH_, srcW_, padH_, padW_,
-            box.src, box.pad);
+        SlideWin::CalculateSrcBox(box.tile, srcH_, srcW_, padH_, padW_, box.src, box.pad);
         box.c.idx = cIdx;
         box.c.length = cLength;
         box.c.c1 = Ops::Base::CeilDiv(cLength, C0<T>());
         return box;
     }
 
-    __aicore__ inline uint32_t SrcH() const
-    {
-        return srcH_;
-    }
+    __aicore__ inline uint32_t SrcH() const { return srcH_; }
 
-    __aicore__ inline uint32_t SrcW() const
-    {
-        return srcW_;
-    }
+    __aicore__ inline uint32_t SrcW() const { return srcW_; }
 
-    __aicore__ inline uint32_t SrcC() const
-    {
-        return srcC_;
-    }
+    __aicore__ inline uint32_t SrcC() const { return srcC_; }
 
-    __aicore__ inline void CopyIn(
-        const AscendC::LocalTensor<T>& srcBuf,
-        const TileBox& box,
-        const uint32_t batchIdx) const
+    __aicore__ inline void CopyIn(const AscendC::LocalTensor<T>& srcBuf, const TileBox& box,
+                                  const uint32_t batchIdx) const
     {
         const HWBox& src = box.src;
-        if (unlikely(src.elements==0)) {
+        if (unlikely(src.elements == 0)) {
             return;
         }
 
         uint32_t srcC1 = Ops::Base::CeilDiv(srcC_, C0<T>());
         uint64_t srcWC0 = srcW_ * C0<T>();
         uint64_t srcHWC0 = srcH_ * srcWC0;
-        //nc1hwc0搬入
-        uint64_t gmOffset =
-            static_cast<uint64_t>(batchIdx) * srcC1 * srcHWC0
-            + static_cast<uint64_t>(box.c.C1Idx<T>()) * srcHWC0
-            + static_cast<uint64_t>(src.hIdx) * srcWC0
-            + static_cast<uint64_t>(src.wIdx) * C0<T>();
+        // nc1hwc0搬入
+        uint64_t gmOffset = static_cast<uint64_t>(batchIdx) * srcC1 * srcHWC0 +
+                            static_cast<uint64_t>(box.c.C1Idx<T>()) * srcHWC0 +
+                            static_cast<uint64_t>(src.hIdx) * srcWC0 + static_cast<uint64_t>(src.wIdx) * C0<T>();
 
         if constexpr (BlockConfig::SingleTransformC1<TilingConfigT>() > 1) {
             AscendC::LoopModeParams loop;
@@ -248,7 +210,7 @@ public:
         params.blockLen = src.wLength;
         params.srcGap = srcW_ - src.wLength;
         params.dstGap = srcFullLenW - src.wLength;
-        //留出位置给pad补0
+        // 留出位置给pad补0
         uint32_t hPadOffset = (box.pad.hTop * srcFullLenW + box.pad.wLeft) * C0<T>();
         AscendC::DataCopy(srcBuf[hPadOffset], gm_[gmOffset], params);
 
@@ -257,19 +219,15 @@ public:
         }
     }
 
-
-    __aicore__ inline void Compute(
-        AscendC::LocalTensor<T>& srcBuf,
-        AscendC::LocalTensor<T>& outBuf,
-        AscendC::LocalTensor<T>& tmpBuf,
-        const TileBox& box) const
+    __aicore__ inline void Compute(AscendC::LocalTensor<T>& srcBuf, AscendC::LocalTensor<T>& outBuf,
+                                   AscendC::LocalTensor<T>& tmpBuf, const TileBox& box) const
     {
         constexpr uint32_t srcBufSizeC0 = WinoTransformDetail::GetInputBufSizeC0<Config>();
         uint32_t outBufSizeC0 = WinoTransformDetail::GetTransformBufSizeC0<T>(box.tile.elements);
         const HWBox& src = box.src;
 
-        if (unlikely(src.elements==0)) {
-            //整个tile都由padding区域产生,不做计算直接置0,
+        if (unlikely(src.elements == 0)) {
+            // 整个tile都由padding区域产生,不做计算直接置0,
             AscendC::Duplicate(outBuf, static_cast<T>(0), outBufSizeC0 * box.c.c1);
             return;
         }
@@ -282,7 +240,7 @@ public:
         __ubuf__ T* srcBufAddr = reinterpret_cast<__ubuf__ T*>(srcBuf.GetPhyAddr());
         __ubuf__ T* outBufAddr = reinterpret_cast<__ubuf__ T*>(outBuf.GetPhyAddr());
 
-        //TODO 当前需要优化的点主要集中在列变换，列变换是不是可以不管尾块统一按标准块处理？
+        // TODO 当前需要优化的点主要集中在列变换，列变换是不是可以不管尾块统一按标准块处理？
         const bool isTail = box.tile.wLength < BlockConfig::SingleShapeTileW<TilingConfigT>() ||
                             box.tile.hLength < BlockConfig::SingleShapeTileH<TilingConfigT>();
 
@@ -292,26 +250,16 @@ public:
         }
         for (uint16_t c1Idx = 0; c1Idx < c1Len; c1Idx++) {
             if (isTail) {
-                UnfoldVf<true>(
-                    outBufAddr, tmpBufAddr, srcBufAddr,
-                    ucp, urp,
-                    box.pad,
-                    src.hLength, src.wLength);
+                UnfoldVf<true>(outBufAddr, tmpBufAddr, srcBufAddr, ucp, urp, box.pad, src.hLength, src.wLength);
             } else {
-                UnfoldVf<false>(
-                    outBufAddr, tmpBufAddr, srcBufAddr,
-                    ucp, urp,
-                    box.pad,
-                    src.hLength, src.wLength);
+                UnfoldVf<false>(outBufAddr, tmpBufAddr, srcBufAddr, ucp, urp, box.pad, src.hLength, src.wLength);
             }
             outBufAddr += outBufSizeC0;
             srcBufAddr += srcBufSizeC0;
         }
     }
 
-    __aicore__ inline void SetNK1C1K0C0CopyParams(
-        NK1C1K0C0::CopyK0Params& copyParams,
-        const TileBox& box) const
+    __aicore__ inline void SetNK1C1K0C0CopyParams(NK1C1K0C0::CopyK0Params& copyParams, const TileBox& box) const
     {
         copyParams.tiles = box.tile.elements;
         copyParams.srcBufWidthBlockStride = WinoTransformDetail::Cal16TileHWBufWidth(box.tile.elements);
@@ -320,33 +268,24 @@ public:
     }
 
 private:
-
     template <bool IsTailTile>
-    __simd_vf__ static inline void UnfoldVf(
-        __ubuf__ T* outBuf,
-        __ubuf__ T* colUnfoldBuf,
-        __ubuf__ T* srcBuf,
-        const typename UnfoldPolicy::UnfoldColParamsT ucp,
-        const typename UnfoldPolicy::UnfoldRowParamsT urp,
-        HWPad pad, uint16_t srcH, uint16_t srcW)
+    __simd_vf__ static inline void UnfoldVf(__ubuf__ T* outBuf, __ubuf__ T* colUnfoldBuf, __ubuf__ T* srcBuf,
+                                            const typename UnfoldPolicy::UnfoldColParamsT ucp,
+                                            const typename UnfoldPolicy::UnfoldRowParamsT urp, HWPad pad, uint16_t srcH,
+                                            uint16_t srcW)
     {
         Padding(srcBuf, pad, srcH, srcW);
 
-        AscendC::MicroAPI::LocalMemBar<
-            AscendC::MicroAPI::MemType::VEC_STORE,
-            AscendC::MicroAPI::MemType::VEC_LOAD>();
+        AscendC::MicroAPI::LocalMemBar<AscendC::MicroAPI::MemType::VEC_STORE, AscendC::MicroAPI::MemType::VEC_LOAD>();
 
         UnfoldPolicy::template UnfoldColsVf<IsTailTile>(colUnfoldBuf, srcBuf, ucp);
 
-        AscendC::MicroAPI::LocalMemBar<
-            AscendC::MicroAPI::MemType::VEC_STORE,
-            AscendC::MicroAPI::MemType::VEC_LOAD>();
+        AscendC::MicroAPI::LocalMemBar<AscendC::MicroAPI::MemType::VEC_STORE, AscendC::MicroAPI::MemType::VEC_LOAD>();
 
         UnfoldPolicy::UnfoldRowsVf(outBuf, colUnfoldBuf, urp);
     }
 
-    __simd_callee__ static inline void Padding(
-        __ubuf__ T* srcBuf, const HWPad& pad, uint16_t srcH, uint16_t srcW)
+    __simd_callee__ static inline void Padding(__ubuf__ T* srcBuf, const HWPad& pad, uint16_t srcH, uint16_t srcW)
     {
         using namespace MicroAPI;
         RegTensor<T> paddingValue;
@@ -390,8 +329,8 @@ private:
             __ubuf__ T* src0 = src + C0<T>() * i;
             for (uint16_t h = 0; h < hRepeatTimes; h++) {
                 MaskReg mask = MicroAPI::UpdateMask<T>(maskValue);
-                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-                    src0, paddingValue, wBlocks, wPadStride, mask);
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(src0, paddingValue, wBlocks,
+                                                                                            wPadStride, mask);
             }
         }
 
@@ -401,12 +340,11 @@ private:
             __ubuf__ T* src0 = src + C0<T>() * i;
             for (uint16_t h = 0; h < hRepeatTimes; h++) {
                 MaskReg mask = MicroAPI::UpdateMask<T>(maskValue);
-                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-                    src0, paddingValue, wBlocks, wPadStride, mask);
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(src0, paddingValue, wBlocks,
+                                                                                            wPadStride, mask);
             }
         }
     }
-
 
     AscendC::GlobalTensor<T> gm_;
     const uint32_t srcH_;
@@ -416,4 +354,4 @@ private:
     const uint16_t padW_;
 };
 
-#endif //CONV_BP_WINO_TRANSFORM_H
+#endif // CONV_BP_WINO_TRANSFORM_H

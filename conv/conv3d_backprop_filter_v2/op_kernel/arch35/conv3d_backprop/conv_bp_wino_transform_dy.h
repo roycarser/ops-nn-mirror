@@ -1,5 +1,5 @@
 /**
-* Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
  * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
  * CANN Open Software License Agreement Version 2.0 (the "License").
  * Please refer to the License for details. You may not use this file except in compliance with the License.
@@ -7,7 +7,6 @@
  * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
  * See LICENSE in the root of the software repository for the full text of the License.
  */
-
 
 /*!
  * \file conv_bp_wino_transform_dy.h
@@ -22,7 +21,6 @@
 namespace WinoTransformDetail {
 constexpr uint32_t F23_DY_STRIDE = 2;
 constexpr uint32_t F23_DY_WINDOWS = 2;
-
 
 using namespace AscendC::MicroAPI;
 
@@ -42,10 +40,8 @@ struct DefaultUnfoldRowParams {
 };
 
 template <typename T, uint32_t F23_STRIDE, uint32_t F23_WINDOW>
-static inline __aicore__ void InitDefaultUnfoldParams(
-    const TileBox& box,
-    DefaultUnfoldColParams& ucp,
-    DefaultUnfoldRowParams& urp)
+static inline __aicore__ void InitDefaultUnfoldParams(const TileBox& box, DefaultUnfoldColParams& ucp,
+                                                      DefaultUnfoldRowParams& urp)
 {
     ucp.wValidElements = SlideWindows<F23_STRIDE, F23_WINDOW>::Tiles2SrcLength(box.tile.wLength) * C0<T>();
     ucp.tileBufWidthBlocks = CalColUnfoldBufWidth(box.tile.hLength);
@@ -58,7 +54,6 @@ static inline __aicore__ void InitDefaultUnfoldParams(
     urp.hRepeatTimes = Ops::Base::CeilDiv(urp.hValidElements, VL<T>());
     urp.tileW = box.tile.wLength;
 }
-
 
 struct Unfold16TileHWStorer {
     template <typename T>
@@ -79,13 +74,9 @@ struct Unfold16TileHWStorer {
         MaskReg highHalfPartMask;
     };
 
-
     template <typename T>
-    static __simd_callee__ inline void CreateStoreInfo(
-        StoreInfo<T>& p,
-        __ubuf__ T* out,
-        uint16_t tileW,
-        uint16_t dstTileBufWidthBlocks)
+    static __simd_callee__ inline void CreateStoreInfo(StoreInfo<T>& p, __ubuf__ T* out, uint16_t tileW,
+                                                       uint16_t dstTileBufWidthBlocks)
     {
         uint32_t dstStride = C0<T>() * F23_TRANSFORM_TILE_SIZE_4 * dstTileBufWidthBlocks;
 
@@ -95,8 +86,8 @@ struct Unfold16TileHWStorer {
         p.dst2 = p.dst1 + dstStride;
         p.dst3 = p.dst2 + dstStride;
 
-        //这些地址用于reg的后半部分写入，需要减掉前半部分的地址偏移
-        //TODO 测试地址减掉后越界
+        // 这些地址用于reg的后半部分写入，需要减掉前半部分的地址偏移
+        // TODO 测试地址减掉后越界
         p.dst4 = p.dst0 + tileW * C0<T>() - C0<T>() * 4 * dstTileBufWidthBlocks;
         p.dst5 = p.dst4 + dstStride;
         p.dst6 = p.dst5 + dstStride;
@@ -122,47 +113,39 @@ struct Unfold16TileHWStorer {
     }
 
     template <typename T>
-    static __simd_callee__ inline void GetHighHalfPartMask(
-        StoreInfo<T>& p,
-        MaskReg& highHalfPartMask,
-        MaskReg& tileHMask)
+    static __simd_callee__ inline void GetHighHalfPartMask(StoreInfo<T>& p, MaskReg& highHalfPartMask,
+                                                           MaskReg& tileHMask)
     {
         And(highHalfPartMask, tileHMask, p.highHalfPartMask, p.maskAll);
     }
 
     template <typename T>
-    static __simd_callee__ inline void store(
-        StoreInfo<T>& p,
-        RegTensor<T>& r0,
-        RegTensor<T>& r1,
-        RegTensor<T>& r2,
-        RegTensor<T>& r3,
-        MaskReg& highHalfPartMask)
+    static __simd_callee__ inline void store(StoreInfo<T>& p, RegTensor<T>& r0, RegTensor<T>& r1, RegTensor<T>& r2,
+                                             RegTensor<T>& r3, MaskReg& highHalfPartMask)
     {
-        //TODO 尝试先gather在select完成block级别的交织
+        // TODO 尝试先gather在select完成block级别的交织
 
-        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-            p.dst0, r0, p.dstTileBufWidthBlocks, 1, p.lowHalfPartMask);
-        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-            p.dst1, r1, p.dstTileBufWidthBlocks, 1, p.lowHalfPartMask);
+        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(p.dst0, r0, p.dstTileBufWidthBlocks,
+                                                                                    1, p.lowHalfPartMask);
+        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(p.dst1, r1, p.dstTileBufWidthBlocks,
+                                                                                    1, p.lowHalfPartMask);
 
-        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-            p.dst2, r2, p.dstTileBufWidthBlocks, 1, p.lowHalfPartMask);
-        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-            p.dst3, r3, p.dstTileBufWidthBlocks, 1, p.lowHalfPartMask);
+        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(p.dst2, r2, p.dstTileBufWidthBlocks,
+                                                                                    1, p.lowHalfPartMask);
+        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(p.dst3, r3, p.dstTileBufWidthBlocks,
+                                                                                    1, p.lowHalfPartMask);
 
-        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-            p.dst4, r0, p.dstTileBufWidthBlocks, 1, highHalfPartMask);
-        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-            p.dst5, r1, p.dstTileBufWidthBlocks, 1, highHalfPartMask);
+        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(p.dst4, r0, p.dstTileBufWidthBlocks,
+                                                                                    1, highHalfPartMask);
+        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(p.dst5, r1, p.dstTileBufWidthBlocks,
+                                                                                    1, highHalfPartMask);
 
-        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-            p.dst6, r2, p.dstTileBufWidthBlocks, 1, highHalfPartMask);
-        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-            p.dst7, r3, p.dstTileBufWidthBlocks, 1, highHalfPartMask);
+        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(p.dst6, r2, p.dstTileBufWidthBlocks,
+                                                                                    1, highHalfPartMask);
+        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(p.dst7, r3, p.dstTileBufWidthBlocks,
+                                                                                    1, highHalfPartMask);
     }
 };
-
 
 template <typename T, typename TilingT>
 struct Dy {
@@ -182,10 +165,8 @@ struct Dy {
     }
 
     template <bool isTailTile>
-    static __simd_callee__ inline void UnfoldColsVf(
-        __ubuf__ T* tileBuf,
-        __ubuf__ T* dyBuf,
-        const DefaultUnfoldColParams& params)
+    static __simd_callee__ inline void UnfoldColsVf(__ubuf__ T* tileBuf, __ubuf__ T* dyBuf,
+                                                    const DefaultUnfoldColParams& params)
     {
         constexpr uint32_t TileH = BlockConfig::SingleShapeTileH<TilingT>();
         constexpr uint32_t TileW = BlockConfig::SingleShapeTileW<TilingT>();
@@ -193,7 +174,7 @@ struct Dy {
         using sw = SlideWindows<F23_DY_STRIDE, F23_DY_WINDOWS>;
         constexpr uint32_t SrcW = sw::Tiles2SrcLength(TileW);
 
-        //大轴在内，小轴在外，scalar都在第一层循环，所以外循环越小scalar占比越低
+        // 大轴在内，小轴在外，scalar都在第一层循环，所以外循环越小scalar占比越低
         constexpr uint32_t LoopH = TileH;
         constexpr uint32_t LoopW = ConstexprMaths::CeilDiv(SrcW * C0<T>(), VL<T>());
 
@@ -204,11 +185,8 @@ struct Dy {
         }
     }
 
-
-    static __simd_callee__ inline void UnfoldColsWFirstVf(
-        __ubuf__ T* tileBuf,
-        __ubuf__ T* dyBuf,
-        const DefaultUnfoldColParams& params)
+    static __simd_callee__ inline void UnfoldColsWFirstVf(__ubuf__ T* tileBuf, __ubuf__ T* dyBuf,
+                                                          const DefaultUnfoldColParams& params)
     {
         const uint32_t wValidElements = params.wValidElements;
         const uint32_t tileBufWidthBlocks = params.tileBufWidthBlocks;
@@ -241,22 +219,20 @@ struct Dy {
 
                 TransformVf(bf16NegativeOne, s0, s1, d0, d1, d2, mask);
 
-                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-                    dst, s0, tileBufWidthBlocks, 1, mask);
-                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-                    dst, d0, tileBufWidthBlocks, 1, mask);
-                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-                    dst, d1, tileBufWidthBlocks, 1, mask);
-                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-                    dst, d2, tileBufWidthBlocks, dstStride, mask);
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, s0, tileBufWidthBlocks,
+                                                                                            1, mask);
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d0, tileBufWidthBlocks,
+                                                                                            1, mask);
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d1, tileBufWidthBlocks,
+                                                                                            1, mask);
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d2, tileBufWidthBlocks,
+                                                                                            dstStride, mask);
             }
         }
     }
 
-    static __simd_callee__ inline void UnfoldColsHFirstVf(
-        __ubuf__ T* tileBuf,
-        __ubuf__ T* dyBuf,
-        const DefaultUnfoldColParams& params)
+    static __simd_callee__ inline void UnfoldColsHFirstVf(__ubuf__ T* tileBuf, __ubuf__ T* dyBuf,
+                                                          const DefaultUnfoldColParams& params)
     {
         const uint32_t wValidElements = params.wValidElements;
         const uint32_t tileBufWidthBlocks = params.tileBufWidthBlocks;
@@ -283,22 +259,20 @@ struct Dy {
 
                 TransformVf(bf16NegativeOne, s0, s1, d0, d1, d2, mask);
 
-                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-                    dst, s0, tileBufWidthBlocks, 1, mask);
-                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-                    dst, d0, tileBufWidthBlocks, 1, mask);
-                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-                    dst, d1, tileBufWidthBlocks, 1, mask);
-                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-                    dst, d2, tileBufWidthBlocks, 1, mask);
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, s0, tileBufWidthBlocks,
+                                                                                            1, mask);
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d0, tileBufWidthBlocks,
+                                                                                            1, mask);
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d1, tileBufWidthBlocks,
+                                                                                            1, mask);
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d2, tileBufWidthBlocks,
+                                                                                            1, mask);
             }
         }
     }
 
-    static __simd_callee__ inline void UnfoldRowsVf(
-        __ubuf__ T* out,
-        __ubuf__ T* buf,
-        const DefaultUnfoldRowParams& params)
+    static __simd_callee__ inline void UnfoldRowsVf(__ubuf__ T* out, __ubuf__ T* buf,
+                                                    const DefaultUnfoldRowParams& params)
     {
         const uint32_t srcTileBufWidth = params.srcTileBufWidth;
         const uint16_t dstTileBufWidthBlocks = params.dstTileBufWidthBlocks;
@@ -335,16 +309,14 @@ struct Dy {
         }
     }
 
-    static __simd_callee__ inline void TransformVf(
-        RegTensor<bfloat16_t>& negativeOne,
-        RegTensor<T>& s0, RegTensor<T>& s1,
-        RegTensor<T>& d0, RegTensor<T>& d1, RegTensor<T>& d2,
-        MaskReg& mask)
+    static __simd_callee__ inline void TransformVf(RegTensor<bfloat16_t>& negativeOne, RegTensor<T>& s0,
+                                                   RegTensor<T>& s1, RegTensor<T>& d0, RegTensor<T>& d1,
+                                                   RegTensor<T>& d2, MaskReg& mask)
     {
         Add(d0, s0, s1, mask);
         Sub(d1, s0, s1, mask);
         if constexpr (Std::is_same_v<bfloat16_t, T>) {
-            //bf16不支持Neg指令，用乘-1替代
+            // bf16不支持Neg指令，用乘-1替代
             Mul(d2, s1, negativeOne, mask);
         } else {
             Neg(d2, s1, mask);
@@ -352,16 +324,11 @@ struct Dy {
     }
 };
 
-
 template <typename T, typename TilingT>
-using DyConfig = TransformConfig<T,
-                                 F23_DY_STRIDE,
-                                 F23_DY_WINDOWS,
-                                 Dy<T, TilingT>, TilingT>;
-}
-
+using DyConfig = TransformConfig<T, F23_DY_STRIDE, F23_DY_WINDOWS, Dy<T, TilingT>, TilingT>;
+} // namespace WinoTransformDetail
 
 template <typename T, typename TilingT>
 using WinoDyFwdTransformer = WinoTransformer<WinoTransformDetail::DyConfig<T, TilingT> >;
 
-#endif //CONV_BP_WINO_TRANSFORM_DY_H
+#endif // CONV_BP_WINO_TRANSFORM_DY_H

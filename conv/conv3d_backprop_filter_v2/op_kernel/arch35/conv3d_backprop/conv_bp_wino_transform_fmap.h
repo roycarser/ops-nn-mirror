@@ -1,5 +1,5 @@
 /**
-* Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
  * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
  * CANN Open Software License Agreement Version 2.0 (the "License").
  * Please refer to the License for details. You may not use this file except in compliance with the License.
@@ -7,7 +7,6 @@
  * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
  * See LICENSE in the root of the software repository for the full text of the License.
  */
-
 
 /*!
  * \file conv_bp_wino_transform_fmap.h
@@ -22,12 +21,11 @@ namespace WinoTransformDetail {
 constexpr uint32_t F23_FMAP_STRIDE = 2;
 constexpr uint32_t F23_FMAP_WINDOWS = 4;
 
-
 using namespace AscendC::MicroAPI;
 
 template <typename T, typename TilingT>
 struct Fmap {
-    //fmap一个循环里展开2个tile,所以额外添加首位轮参数
+    // fmap一个循环里展开2个tile,所以额外添加首位轮参数
     struct UnfoldFmapRowParams : DefaultUnfoldRowParams {
         uint16_t tileWMainRepeatTimes;
         uint16_t tileWTailRepeatTimes;
@@ -60,10 +58,8 @@ struct Fmap {
     }
 
     template <bool IsTailTile>
-    static __simd_callee__ inline void UnfoldColsVf(
-        __ubuf__ T* tileBuf,
-        __ubuf__ T* fmapBuf,
-        const UnfoldFmapColParams& params)
+    static __simd_callee__ inline void UnfoldColsVf(__ubuf__ T* tileBuf, __ubuf__ T* fmapBuf,
+                                                    const UnfoldFmapColParams& params)
     {
         if constexpr (IsTailTile) {
             UnfoldColsDefaultVf(tileBuf, fmapBuf, params);
@@ -71,8 +67,8 @@ struct Fmap {
             constexpr uint32_t TileH = BlockConfig::SingleShapeTileH<TilingT>();
             constexpr uint32_t TileW = BlockConfig::SingleShapeTileW<TilingT>();
             if constexpr (TileH <= 4) {
-                //fmap的正变换为了复用Tile间的重叠数据，是W循环在外，H循环在内
-                //如果H太小则W循环带来的scalar占比会比较大，所以TileH较小的情况下将TileH进行展开
+                // fmap的正变换为了复用Tile间的重叠数据，是W循环在外，H循环在内
+                // 如果H太小则W循环带来的scalar占比会比较大，所以TileH较小的情况下将TileH进行展开
                 UnfoldColsUnRollTileHVf<TileH, TileW>(tileBuf, fmapBuf);
             } else {
                 UnfoldColsDefaultVf(tileBuf, fmapBuf, params);
@@ -88,13 +84,13 @@ struct Fmap {
         RegTensor<T> d[TileH * F23_TRANSFORM_TILE_SIZE_4];
 
         template <uint16_t Idx>
-        static __simd_callee__ inline void InitSrcAddrImpl(TileHUnRollHelper& helper,__ubuf__ T* fmapBuf)
+        static __simd_callee__ inline void InitSrcAddrImpl(TileHUnRollHelper& helper, __ubuf__ T* fmapBuf)
         {
             helper.src[Idx] = fmapBuf + WElements * Idx;
         }
 
         template <uint16_t N = SrcH>
-        static __simd_callee__ inline void InitSrcAddr(TileHUnRollHelper& helper,__ubuf__ T* fmapBuf)
+        static __simd_callee__ inline void InitSrcAddr(TileHUnRollHelper& helper, __ubuf__ T* fmapBuf)
         {
             if constexpr (N > 0) {
                 // 🌟 技巧 2：先调 N-1 的递归，再执行 N-1 的动作。
@@ -105,13 +101,13 @@ struct Fmap {
         }
 
         template <uint16_t Idx>
-        static __simd_callee__ inline void InitDstAddrImpl(TileHUnRollHelper& helper,__ubuf__ T* tileBuf)
+        static __simd_callee__ inline void InitDstAddrImpl(TileHUnRollHelper& helper, __ubuf__ T* tileBuf)
         {
             helper.dst[Idx] = tileBuf + F23_TRANSFORM_TILE_SIZE_4 * C0<T>() * Idx;
         }
 
         template <uint16_t N = TileH>
-        static __simd_callee__ inline void InitDstAddr(TileHUnRollHelper& helper,__ubuf__ T* tileBuf)
+        static __simd_callee__ inline void InitDstAddr(TileHUnRollHelper& helper, __ubuf__ T* tileBuf)
         {
             if constexpr (N > 0) {
                 InitDstAddr<N - 1>(helper, tileBuf);
@@ -135,8 +131,7 @@ struct Fmap {
         }
 
         template <uint16_t Idx>
-        static __simd_callee__ inline void TransformAndStoreImpl(
-            TileHUnRollHelper& helper, MaskReg& mask)
+        static __simd_callee__ inline void TransformAndStoreImpl(TileHUnRollHelper& helper, MaskReg& mask)
         {
             constexpr uint16_t sIdx = Idx * F23_FMAP_STRIDE;
             constexpr uint16_t dIdx = Idx * F23_TRANSFORM_TILE_SIZE_4;
@@ -152,12 +147,12 @@ struct Fmap {
 
             TransformVf(s0, s1, s2, s3, d0, d1, d2, d3, mask);
 
-            StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-                helper.dst[Idx], d0, TileBufWidthBlocks, 1, mask);
-            StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-                helper.dst[Idx], d1, TileBufWidthBlocks, 1, mask);
-            StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-                helper.dst[Idx], d2, TileBufWidthBlocks, 1, mask);
+            StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(helper.dst[Idx], d0,
+                                                                                        TileBufWidthBlocks, 1, mask);
+            StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(helper.dst[Idx], d1,
+                                                                                        TileBufWidthBlocks, 1, mask);
+            StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(helper.dst[Idx], d2,
+                                                                                        TileBufWidthBlocks, 1, mask);
             StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
                 helper.dst[Idx], d3, TileBufWidthBlocks, DstStride, mask);
         }
@@ -173,9 +168,7 @@ struct Fmap {
     };
 
     template <uint16_t TileH, uint16_t TileW>
-    static __simd_callee__ inline void UnfoldColsUnRollTileHVf(
-        __ubuf__ T* tileBuf,
-        __ubuf__ T* fmapBuf)
+    static __simd_callee__ inline void UnfoldColsUnRollTileHVf(__ubuf__ T* tileBuf, __ubuf__ T* fmapBuf)
     {
         using SlideWin = SlideWindows<F23_FMAP_STRIDE, F23_FMAP_WINDOWS>;
         constexpr uint16_t SrcH = SlideWin::Tiles2SrcLength(TileH);
@@ -184,7 +177,7 @@ struct Fmap {
         constexpr uint16_t tileBufWidthBlocks = CalColUnfoldBufWidth(TileH);
         constexpr uint32_t DstStride = tileBufWidthBlocks * (VL<T>() / C0<T>()) - F23_TRANSFORM_TILE_SIZE_4 + 1;
 
-        //vf里面直接用pragma roll发现会有编译失败，不展开循环似乎没法用数组，所以手动用模板把代码展开
+        // vf里面直接用pragma roll发现会有编译失败，不展开循环似乎没法用数组，所以手动用模板把代码展开
         using HelperT = TileHUnRollHelper<TileH, SrcH, WElements, tileBufWidthBlocks, DstStride>;
         HelperT helper;
 
@@ -199,10 +192,8 @@ struct Fmap {
         }
     }
 
-    static __simd_callee__ inline void UnfoldColsDefaultVf(
-        __ubuf__ T* tileBuf,
-        __ubuf__ T* fmapBuf,
-        const UnfoldFmapColParams& params)
+    static __simd_callee__ inline void UnfoldColsDefaultVf(__ubuf__ T* tileBuf, __ubuf__ T* fmapBuf,
+                                                           const UnfoldFmapColParams& params)
     {
         const uint32_t wValidElements = params.wValidElements;
         const uint32_t tileBufWidthBlocks = params.tileBufWidthBlocks;
@@ -223,7 +214,7 @@ struct Fmap {
             // 所以这里按照最朴素的方式展开循环一个循环内处理2个连续滑窗,
             // 如果滑窗为奇数,则通过tileHTailRepeatTimes额外执行一次滑窗
 
-            //循环fmapW
+            // 循环fmapW
             const uint32_t wOffset = i * VL<T>();
 
             __ubuf__ T* src = fmapBuf + wOffset;
@@ -254,25 +245,21 @@ struct Fmap {
         }
     }
 
-    static __simd_callee__ inline void UnfoldColsDefaultStoreAlign(
-        __ubuf__ T* dst,
-        RegTensor<T>& d0, RegTensor<T>& d1, RegTensor<T>& d2, RegTensor<T>& d3,
-        uint32_t tileBufWidthBlocks, MaskReg& mask)
+    static __simd_callee__ inline void UnfoldColsDefaultStoreAlign(__ubuf__ T* dst, RegTensor<T>& d0, RegTensor<T>& d1,
+                                                                   RegTensor<T>& d2, RegTensor<T>& d3,
+                                                                   uint32_t tileBufWidthBlocks, MaskReg& mask)
     {
-        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-            dst, d0, tileBufWidthBlocks, 1, mask);
-        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-            dst, d1, tileBufWidthBlocks, 1, mask);
-        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-            dst, d2, tileBufWidthBlocks, 1, mask);
-        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(
-            dst, d3, tileBufWidthBlocks, 1, mask);
+        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d0, tileBufWidthBlocks, 1,
+                                                                                    mask);
+        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d1, tileBufWidthBlocks, 1,
+                                                                                    mask);
+        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d2, tileBufWidthBlocks, 1,
+                                                                                    mask);
+        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d3, tileBufWidthBlocks, 1,
+                                                                                    mask);
     }
 
-    static __simd_callee__ inline void UnfoldRowsVf(
-        __ubuf__ T* out,
-        __ubuf__ T* buf,
-        const UnfoldFmapRowParams& params)
+    static __simd_callee__ inline void UnfoldRowsVf(__ubuf__ T* out, __ubuf__ T* buf, const UnfoldFmapRowParams& params)
     {
         const uint32_t srcTileBufWidth = params.srcTileBufWidth;
         const uint16_t dstTileBufWidthBlocks = params.dstTileBufWidthBlocks;
@@ -326,10 +313,9 @@ struct Fmap {
         }
     }
 
-    static __simd_callee__ inline void TransformVf(
-        RegTensor<T>& s0, RegTensor<T>& s1, RegTensor<T>& s2, RegTensor<T>& s3,
-        RegTensor<T>& d0, RegTensor<T>& d1, RegTensor<T>& d2, RegTensor<T>& d3,
-        MaskReg& mask)
+    static __simd_callee__ inline void TransformVf(RegTensor<T>& s0, RegTensor<T>& s1, RegTensor<T>& s2,
+                                                   RegTensor<T>& s3, RegTensor<T>& d0, RegTensor<T>& d1,
+                                                   RegTensor<T>& d2, RegTensor<T>& d3, MaskReg& mask)
     {
         Sub(d0, s0, s2, mask);
         Add(d1, s1, s2, mask);
@@ -339,15 +325,11 @@ struct Fmap {
 };
 
 template <typename T, typename TilingT>
-using FmapConfig = TransformConfig<T,
-                                   F23_FMAP_STRIDE,
-                                   F23_FMAP_WINDOWS,
-                                   Fmap<T, TilingT>, TilingT>;
+using FmapConfig = TransformConfig<T, F23_FMAP_STRIDE, F23_FMAP_WINDOWS, Fmap<T, TilingT>, TilingT>;
 
-}
+} // namespace WinoTransformDetail
 
 template <typename T, typename TilingT>
 using WinoFmapFwdTransformer = WinoTransformer<WinoTransformDetail::FmapConfig<T, TilingT> >;
 
-
-#endif //CONV_BP_WINO_TRANSFORM_FMAP_H
+#endif // CONV_BP_WINO_TRANSFORM_FMAP_H

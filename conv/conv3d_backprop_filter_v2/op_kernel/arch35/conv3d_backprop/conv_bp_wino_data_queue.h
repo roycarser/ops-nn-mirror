@@ -1,5 +1,5 @@
 /**
-* Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
  * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
  * CANN Open Software License Agreement Version 2.0 (the "License").
  * Please refer to the License for details. You may not use this file except in compliance with the License.
@@ -13,20 +13,16 @@
 
 #include "conv_bp_wino_util.h"
 
-//正变换后在gm上的排布[N,k1(TileH/SingleShapeTileH * TileW/SingleShapeTileW),C1,k0(16,SingleShapeTileHW),C0]
+// 正变换后在gm上的排布[N,k1(TileH/SingleShapeTileH * TileW/SingleShapeTileW),C1,k0(16,SingleShapeTileHW),C0]
 namespace NK1C1K0C0 {
 template <typename T>
 struct Shape {
     template <typename TilingT>
-    __aicore__ inline static Shape Create(
-        const uint32_t c,
-        const uint32_t tileH,
-        const uint32_t tileW)
+    __aicore__ inline static Shape Create(const uint32_t c, const uint32_t tileH, const uint32_t tileW)
     {
         constexpr uint32_t singleShapeTileH = BlockConfig::SingleShapeTileH<TilingT>();
         constexpr uint32_t singleShapeTileW = BlockConfig::SingleShapeTileW<TilingT>();
-        uint32_t k1 = Ops::Base::CeilDiv(tileH, singleShapeTileH) *
-                      Ops::Base::CeilDiv(tileW, singleShapeTileW);
+        uint32_t k1 = Ops::Base::CeilDiv(tileH, singleShapeTileH) * Ops::Base::CeilDiv(tileW, singleShapeTileW);
 
         constexpr uint32_t k0 = singleShapeTileH * singleShapeTileW * F23_TRANSFORM_TILE_ELEMENTS_16;
 
@@ -35,21 +31,9 @@ struct Shape {
         return Shape(k1, c1, k0);
     }
 
+    __aicore__ inline Shape(const uint32_t k1, const uint32_t c1, const uint32_t k0) : k1(k1), c1(c1), k0(k0) {}
 
-    __aicore__ inline Shape(
-        const uint32_t k1,
-        const uint32_t c1,
-        const uint32_t k0)
-        : k1(k1),
-          c1(c1),
-          k0(k0)
-    {
-    }
-
-    __aicore__ inline uint64_t GetOffset(
-        uint32_t nIdx,
-        uint32_t k1Idx,
-        uint32_t c1Idx) const
+    __aicore__ inline uint64_t GetOffset(uint32_t nIdx, uint32_t k1Idx, uint32_t c1Idx) const
     {
         uint64_t k0c0 = static_cast<uint64_t>(k0) * c0;
         uint64_t c1k0c0 = static_cast<uint64_t>(c1) * k0c0;
@@ -64,7 +48,6 @@ struct Shape {
     static constexpr uint8_t c0 = C0<T>();
 };
 
-
 struct CopyK0Params {
     uint32_t batchIdx = 0;
     uint32_t k1Idx = 0;
@@ -74,13 +57,9 @@ struct CopyK0Params {
     uint32_t c1Length = 0;
 };
 
-
 template <typename T>
-__aicore__ inline void CopyK0UB2GM(
-    const CopyK0Params& p,
-    const AscendC::LocalTensor<T>& ub,
-    const AscendC::GlobalTensor<T>& gm,
-    const Shape<T>& shape)
+__aicore__ inline void CopyK0UB2GM(const CopyK0Params& p, const AscendC::LocalTensor<T>& ub,
+                                   const AscendC::GlobalTensor<T>& gm, const Shape<T>& shape)
 {
     uint64_t gmOffset = shape.GetOffset(p.batchIdx, p.k1Idx, p.c1Idx);
 
@@ -103,11 +82,8 @@ __aicore__ inline void CopyK0UB2GM(
 }
 
 template <typename T>
-__aicore__ inline void CopyK0GM2L1(
-    const CopyK0Params& p,
-    const AscendC::GlobalTensor<T>& gm,
-    const AscendC::LocalTensor<T>& l1,
-    const Shape<T>& shape)
+__aicore__ inline void CopyK0GM2L1(const CopyK0Params& p, const AscendC::GlobalTensor<T>& gm,
+                                   const AscendC::LocalTensor<T>& l1, const Shape<T>& shape)
 {
     uint64_t gmOffset = shape.GetOffset(p.batchIdx, p.k1Idx, p.c1Idx);
 
@@ -121,10 +97,8 @@ __aicore__ inline void CopyK0GM2L1(
 }
 
 template <typename T>
-__aicore__ inline void CopyK0UB2L1(
-    const CopyK0Params& p,
-    const AscendC::LocalTensor<T>& ub,
-    const AscendC::LocalTensor<T>& l1)
+__aicore__ inline void CopyK0UB2L1(const CopyK0Params& p, const AscendC::LocalTensor<T>& ub,
+                                   const AscendC::LocalTensor<T>& l1)
 {
     for (uint32_t c1 = 0; c1 < p.c1Length; c1++) {
         AscendC::DataCopyParams params;
@@ -138,31 +112,28 @@ __aicore__ inline void CopyK0UB2L1(
         AscendC::DataCopy(l1[l1Offset], ub[ubOffset], params);
     }
 }
-}
+} // namespace NK1C1K0C0
 
-
-//CrossCoreSetFlag内计数器上限不能超过15
-//这里设置连续EnQue12次就要等待DeQue通知，防止计数器超限
+// CrossCoreSetFlag内计数器上限不能超过15
+// 这里设置连续EnQue12次就要等待DeQue通知，防止计数器超限
 static constexpr uint8_t DEFAULT_FREE_SLOTS = 12;
-//纯PingPong写入,只允许连续EnQue2次就要等DeQue通知
+// 纯PingPong写入,只允许连续EnQue2次就要等DeQue通知
 static constexpr uint8_t PINGPONG_FREE_SLOTS = 2;
-//没有pingpong,只允许一个写入
+// 没有pingpong,只允许一个写入
 static constexpr uint8_t SINGLE_FREE_SLOTS = 1;
 
-//SrcPipe 输出数据的pipe
-//DST_PIPE 数据输出后触发执行的pipe
-//POP_PIPE 将数据搬出的pipe，该pipe执行完后即代表存在空闲空间
+// SrcPipe 输出数据的pipe
+// DST_PIPE 数据输出后触发执行的pipe
+// POP_PIPE 将数据搬出的pipe，该pipe执行完后即代表存在空闲空间
 //
-//典型场景:
-//fixpipe搬入ub后做InPlace计算在搬出:
-//FIXPIPE(SrcPipe)->V(DST_PIPE)->MTE3(POP_PIPE)
-//ub计算后cube搬入
-//MTE3(SrcPipe)->MTE1(DST_PIPE&POP_PIPE)
+// 典型场景:
+// fixpipe搬入ub后做InPlace计算在搬出:
+// FIXPIPE(SrcPipe)->V(DST_PIPE)->MTE3(POP_PIPE)
+// ub计算后cube搬入
+// MTE3(SrcPipe)->MTE1(DST_PIPE&POP_PIPE)
 //
 
-template <pipe_t Src, pipe_t Dst, pipe_t Pop,
-    uint8_t PushFlag, uint8_t PopFlag, uint8_t FreeSlots,
-    bool C2v>
+template <pipe_t Src, pipe_t Dst, pipe_t Pop, uint8_t PushFlag, uint8_t PopFlag, uint8_t FreeSlots, bool C2v>
 struct CVSyncQueConfig {
     static constexpr pipe_t SRC_PIPE = Src;
     static constexpr pipe_t DST_PIPE = Dst;
@@ -188,8 +159,8 @@ public:
     {
         if (freeSlots_ == 0) {
             if constexpr (C2V) {
-                //整个队列是按模式2实现的，但是模式2跑仿真时有bug,会产生多余的set
-                //先用模式4模拟模式2
+                // 整个队列是按模式2实现的，但是模式2跑仿真时有bug,会产生多余的set
+                // 先用模式4模拟模式2
 #pragma unroll
                 for (uint8_t i = 0; i < AivNumInBlock(); i++) {
                     AscendC::CrossCoreWaitFlag<4, SRC_PIPE>(POP_FLAG + 16 * i);
@@ -243,7 +214,7 @@ public:
 
     __aicore__ inline void End()
     {
-        //如果CrossCoreSetFlag是最后的指令可能因为一执行完核就退出导致没能成功set,整个核结束前加个全量等待
+        // 如果CrossCoreSetFlag是最后的指令可能因为一执行完核就退出导致没能成功set,整个核结束前加个全量等待
         AscendC::PipeBarrier<PIPE_ALL>();
     }
 
@@ -254,29 +225,24 @@ private:
     uint8_t freeSlots_ = FREE_SLOTS;
 };
 
-//ub正变换到l1的队列,分成ub->l1和ub->gm->l1这2类
-//使用接口:
-//  Init()初始化
-//  1.ub写出
-//    q.WaitSlot() 等待队列空间
-//    q.Write() 写入数据
-//    q.EnQue() 完成写入,执行CrossCore通知可读
-// 2. l1读出
-//    q.WaitData() 等待队列数据
-//    LoadL1 读取数据到L1
-//    q.DeQue() 释放队列空间
-// End()释放资源
+// ub正变换到l1的队列,分成ub->l1和ub->gm->l1这2类
+// 使用接口:
+//   Init()初始化
+//   1.ub写出
+//     q.WaitSlot() 等待队列空间
+//     q.Write() 写入数据
+//     q.EnQue() 完成写入,执行CrossCore通知可读
+//  2. l1读出
+//     q.WaitData() 等待队列数据
+//     LoadL1 读取数据到L1
+//     q.DeQue() 释放队列空间
+//  End()释放资源
 //
 
 template <typename T, uint8_t PUSH_FLAG, uint8_t POP_FLAG>
-class UB2L1Queue : public CVSyncQue<
-        CVSyncQueConfig<PIPE_MTE3,
-            PIPE_MTE1,
-            PIPE_MTE1,
-            PUSH_FLAG,
-            POP_FLAG,
-            PINGPONG_FREE_SLOTS,
-            false> > {
+class UB2L1Queue
+    : public CVSyncQue<
+          CVSyncQueConfig<PIPE_MTE3, PIPE_MTE1, PIPE_MTE1, PUSH_FLAG, POP_FLAG, PINGPONG_FREE_SLOTS, false> > {
 public:
     __aicore__ inline void Init(AscendC::LocalTensor<T> (&l1FmapBuf)[2], AscendC::LocalTensor<T> (&l1DyBuf)[2])
     {
@@ -286,18 +252,14 @@ public:
         l1Dy_[1] = l1DyBuf[1];
     }
 
-    __aicore__ inline void WriteFmap(
-        const NK1C1K0C0::CopyK0Params& p,
-        const AscendC::LocalTensor<T>& ub,
-        const uint32_t l1Offset)
+    __aicore__ inline void WriteFmap(const NK1C1K0C0::CopyK0Params& p, const AscendC::LocalTensor<T>& ub,
+                                     const uint32_t l1Offset)
     {
         Write<true>(p, ub, l1Offset);
     }
 
-    __aicore__ inline void WriteDy(
-        const NK1C1K0C0::CopyK0Params& p,
-        const AscendC::LocalTensor<T>& ub,
-        const uint32_t l1Offset)
+    __aicore__ inline void WriteDy(const NK1C1K0C0::CopyK0Params& p, const AscendC::LocalTensor<T>& ub,
+                                   const uint32_t l1Offset)
     {
         Write<false>(p, ub, l1Offset);
     }
@@ -313,10 +275,8 @@ public:
 
 private:
     template <bool WriteFmap>
-    __aicore__ inline void Write(
-        const NK1C1K0C0::CopyK0Params& p,
-        const AscendC::LocalTensor<T>& ub,
-        const uint32_t l1Offset)
+    __aicore__ inline void Write(const NK1C1K0C0::CopyK0Params& p, const AscendC::LocalTensor<T>& ub,
+                                 const uint32_t l1Offset)
     {
         if ASCEND_IS_AIV {
             if constexpr (WriteFmap) {
@@ -333,26 +293,17 @@ private:
     bool writeDyPingPongFlag_ = false;
 };
 
-
 template <typename T, uint8_t PUSH_FLAG, uint8_t POP_FLAG, uint8_t AIC_MTE2_SYNC_FLAG>
-class GM2L1Queue : public CVSyncQue<
-        CVSyncQueConfig<PIPE_MTE3,
-            PIPE_MTE2,
-            PIPE_MTE2,
-            PUSH_FLAG,
-            POP_FLAG,
-            DEFAULT_FREE_SLOTS,
-            false> > {
+class GM2L1Queue
+    : public CVSyncQue<
+          CVSyncQueConfig<PIPE_MTE3, PIPE_MTE2, PIPE_MTE2, PUSH_FLAG, POP_FLAG, DEFAULT_FREE_SLOTS, false> > {
 public:
-    __aicore__ inline GM2L1Queue(__gm__ T* gm, const NK1C1K0C0::Shape<T>& shape)
-        : shape_(shape)
+    __aicore__ inline GM2L1Queue(__gm__ T* gm, const NK1C1K0C0::Shape<T>& shape) : shape_(shape)
     {
         gm_.SetGlobalBuffer(gm);
     }
 
-    __aicore__ inline void Write(
-        const NK1C1K0C0::CopyK0Params& p,
-        const AscendC::LocalTensor<T>& ub)
+    __aicore__ inline void Write(const NK1C1K0C0::CopyK0Params& p, const AscendC::LocalTensor<T>& ub)
     {
         if ASCEND_IS_AIV {
             NK1C1K0C0::CopyK0UB2GM(p, ub, gm_, shape_);
@@ -362,14 +313,14 @@ public:
     __aicore__ inline void WaitData()
     {
         if ASCEND_IS_AIC {
-            //所有cube核接收到aiv发送的通知后才表示这一轮数据都准备好了
-            //但整个矩阵都变换完后就不需要对cube做全局同步额外等通知
+            // 所有cube核接收到aiv发送的通知后才表示这一轮数据都准备好了
+            // 但整个矩阵都变换完后就不需要对cube做全局同步额外等通知
 
-            //这里aiv通知后trigger的pipe为Fixpipe而非MTE2
-            //如果直接触发mte2,后续全核同步就需要在mte2做SetWaitFlag，
-            //这需要等待全核当前所有mte2搬运操作完成，从而大大降低mte2的并行度
-            //Fixpipe负责L0C的搬出，一版只有在k轴完成累加后才触发，执行频率相对mte2低不少
-            //因此这里借用执行Fixpipe作为中转流水,通过Fixpipe做全核同步降低对整体并行度的影响
+            // 这里aiv通知后trigger的pipe为Fixpipe而非MTE2
+            // 如果直接触发mte2,后续全核同步就需要在mte2做SetWaitFlag，
+            // 这需要等待全核当前所有mte2搬运操作完成，从而大大降低mte2的并行度
+            // Fixpipe负责L0C的搬出，一版只有在k轴完成累加后才触发，执行频率相对mte2低不少
+            // 因此这里借用执行Fixpipe作为中转流水,通过Fixpipe做全核同步降低对整体并行度的影响
             GM2L1Queue::QueT::template WaitData<PIPE_FIX>();
             AscendC::CrossCoreSetFlag<0, PIPE_FIX>(AIC_MTE2_SYNC_FLAG);
             AscendC::CrossCoreWaitFlag<0, PIPE_MTE2>(AIC_MTE2_SYNC_FLAG);
@@ -397,20 +348,13 @@ public:
         }
     }
 
-    __aicore__ inline const AscendC::GlobalTensor<T>& GetGlobalTensor() const
-    {
-        return gm_;
-    }
+    __aicore__ inline const AscendC::GlobalTensor<T>& GetGlobalTensor() const { return gm_; }
 
-    __aicore__ inline const NK1C1K0C0::Shape<T>& GetGMShape() const
-    {
-        return shape_;
-    }
+    __aicore__ inline const NK1C1K0C0::Shape<T>& GetGMShape() const { return shape_; }
 
 private:
     AscendC::GlobalTensor<T> gm_;
     const NK1C1K0C0::Shape<T> shape_;
 };
 
-
-#endif //CONV_BP_WINO_DATA_QUEUE_H
+#endif // CONV_BP_WINO_DATA_QUEUE_H
