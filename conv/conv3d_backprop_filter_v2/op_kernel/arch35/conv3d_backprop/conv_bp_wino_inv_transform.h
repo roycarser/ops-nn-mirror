@@ -135,17 +135,9 @@ public:
                         buf[F23_TRANSFORM_TILE_ELEMENTS_16 * INV_TRANS_SINGLE_POINT_BUF_SIZE].ReinterpretCast<DstT>(),
                         params);
                 } else {
-                    DataCopyExtParams params;
-                    params.blockCount = processCoutLength;
-                    params.blockLen = localBlock.cinLength * KERNEL_3x3 * sizeof(DstT);
-                    params.srcStride = 0;
-                    params.dstStride = (static_cast<uint64_t>(cinSrc) - localBlock.cinLength) * KERNEL_3x3 * sizeof(
-                                           DstT);
-                    uint64_t gmOffset = (static_cast<uint64_t>(coutIdx) * cinSrc + localBlock.cinIdx) * KERNEL_3x3;
-                    DataCopyPad<DstT, PaddingMode::Compact>(
-                        yGm_[gmOffset],
-                        buf[F23_TRANSFORM_TILE_ELEMENTS_16 * INV_TRANS_SINGLE_POINT_BUF_SIZE].ReinterpretCast<DstT>(),
-                        params);
+                    CopyOut(localBlock, processCoutLength, coutIdx, cinSrc,
+                            buf[F23_TRANSFORM_TILE_ELEMENTS_16 * INV_TRANS_SINGLE_POINT_BUF_SIZE]
+                            .ReinterpretCast<DstT>());
                 }
             }
 
@@ -239,19 +231,7 @@ public:
         SetFlag<HardEvent::V_MTE3>(v2mte3_);
         WaitFlag<HardEvent::V_MTE3>(v2mte3_);
 
-        DataCopyExtParams params;
-        params.blockCount = coutLength;
-        params.blockLen = localBlock.cinLength * KERNEL_3x3 * sizeof(float);
-        params.srcStride = 0;
-        params.dstStride = (static_cast<uint64_t>(cinSrc) - localBlock.cinLength) * KERNEL_3x3 * sizeof(float);
-
-        uint64_t gmOffset = (static_cast<uint64_t>(localBlock.coutIdx + coutOffset) * cinSrc + localBlock.cinIdx) *
-                            KERNEL_3x3;
-
-        DataCopyPad<float, PaddingMode::Compact>(
-            yGm_[gmOffset],
-            accumulateBuf,
-            params);
+        CopyOut(localBlock, coutLength, localBlock.coutIdx + coutOffset, cinSrc, accumulateBuf);
     }
 
     __aicore__ inline void BlockMTE2ByMTE3() const
@@ -261,6 +241,25 @@ public:
     }
 
 private:
+    __aicore__ inline void CopyOut(
+        const CoutCinRange& localBlock,
+        uint32_t processCoutLength,
+        uint32_t coutIdx, uint32_t cinSrc,
+        const LocalTensor<DstT>& buf)
+    {
+        DataCopyExtParams params;
+        params.blockCount = processCoutLength;
+        params.blockLen = localBlock.cinLength * KERNEL_3x3 * sizeof(DstT);
+        params.srcStride = 0;
+        params.dstStride = (static_cast<uint64_t>(cinSrc) - localBlock.cinLength) * KERNEL_3x3 * sizeof(
+                               DstT);
+        uint64_t gmOffset = (static_cast<uint64_t>(coutIdx) * cinSrc + localBlock.cinIdx) * KERNEL_3x3;
+        DataCopyPad<DstT, PaddingMode::Compact>(
+            yGm_[gmOffset],
+            buf,
+            params);
+    }
+
     static constexpr uint32_t KERNEL_3 = 3;
     static constexpr uint32_t KERNEL_3x3 = 9;
 
