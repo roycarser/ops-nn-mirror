@@ -255,19 +255,18 @@ struct Fmap {
         }
     }
 
-    static __simd_callee__ inline void UnfoldColsDefaultStore(__ubuf__ T*& dst,
-                                                              RegTensor<T>& d0, RegTensor<T>& d1,
+    static __simd_callee__ inline void UnfoldColsDefaultStore(__ubuf__ T*& dst, RegTensor<T>& d0, RegTensor<T>& d1,
                                                               RegTensor<T>& d2, RegTensor<T>& d3,
                                                               uint32_t tileBufWidthBlocks, MaskReg& mask)
     {
-        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d0, tileBufWidthBlocks,
-                                                                                           1, mask);
-        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d1, tileBufWidthBlocks,
-                                                                                    1, mask);
-        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d2, tileBufWidthBlocks,
-                                                                                    1, mask);
-        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d3, tileBufWidthBlocks,
-                                                                                    1, mask);
+        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d0, tileBufWidthBlocks, 1,
+                                                                                    mask);
+        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d1, tileBufWidthBlocks, 1,
+                                                                                    mask);
+        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d2, tileBufWidthBlocks, 1,
+                                                                                    mask);
+        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d3, tileBufWidthBlocks, 1,
+                                                                                    mask);
     }
 
     static __simd_callee__ inline void UnfoldRowsVf(__ubuf__ T* out, __ubuf__ T* buf, const UnfoldFmapRowParams& params)
