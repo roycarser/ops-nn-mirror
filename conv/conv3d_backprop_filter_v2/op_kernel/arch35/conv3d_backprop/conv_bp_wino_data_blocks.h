@@ -165,7 +165,11 @@ public:
     //                    +-----+-----+-----+-----+-----+-----+-----+
     //                                       WCnt
 
-    __aicore__ static inline void CalBlockGrid(uint32_t h, uint32_t w, uint16_t& outBlockH, uint16_t& outBlockW)
+    struct BlockHW {
+        uint16_t h;
+        uint16_t w;
+    };
+    __aicore__ static inline BlockHW CalBlockGrid(uint32_t h, uint32_t w)
     {
         uint16_t coreNum = GetBlockNum();
         uint16_t bestH = 1;
@@ -190,6 +194,7 @@ public:
             }
         }
 
+        uint16_t outBlockH, outBlockW;
         // 形状匹配：将较大的维度分配给张量中较大的那个轴，进一步减少跨行/跨列跳跃
         if (h >= w) {
             outBlockH = Std::max(bestH, bestW);
@@ -198,11 +203,13 @@ public:
             outBlockH = Std::min(bestH, bestW);
             outBlockW = Std::max(bestH, bestW);
         }
+        return {outBlockH, outBlockW};
     }
 
-    __aicore__ inline SwizzleTopology2D(uint32_t h, uint32_t w, uint16_t blockH, uint16_t blockW)
-        : h_(h), w_(w), blockH_(blockH), blockW_(blockW), fullSuperRows_(h / blockH), totalCnt_(h * w)
-    {}
+    __aicore__ inline SwizzleTopology2D(uint32_t h, uint32_t w)
+        : h_(h), w_(w), blockHW_(CalBlockGrid(h, w)), fullSuperRows_(h / blockHW_.h), totalCnt_(h * w)
+    {
+    }
 
     __aicore__ inline bool GetHW(uint32_t loopIdx, uint16_t coreId, uint32_t& outH, uint32_t& outW) const
     {
@@ -257,7 +264,7 @@ public:
         }
         // =========================================================
 
-        boundH = endSuperIdx * blockH_ + Std::min(blockH_, h_ - endSuperIdx * blockH_) - 1;
+        boundH = endSuperIdx * blockHW_.h + Std::min(blockHW_.h, h_ - endSuperIdx * blockHW_.h) - 1;
     }
 
     __aicore__ inline uint32_t TotalCnt() const { return totalCnt_; }
@@ -265,12 +272,12 @@ public:
 private:
     __aicore__ inline void ComputeHW(uint32_t flattenIdx, uint32_t& outH, uint32_t& outW, uint32_t& outSuperIdx) const
     {
-        const uint32_t superRowElements = blockH_ * w_;
+        const uint32_t superRowElements = blockHW_.h * w_;
         const uint32_t fullSuperRowElements = fullSuperRows_ * superRowElements;
         const uint32_t superIdx = flattenIdx < fullSuperRowElements ? flattenIdx / superRowElements : fullSuperRows_;
         const uint32_t localIdx = flattenIdx - superIdx * superRowElements;
-        const uint32_t superRowH = superIdx * blockH_;
-        const uint32_t localBlockH = Std::min(blockH_, h_ - superRowH);
+        const uint32_t superRowH = superIdx * blockHW_.h;
+        const uint32_t localBlockH = Std::min(blockHW_.h, h_ - superRowH);
         // 每个BlockHW里面按H方向优先递进,也就是连续核的范围为(H0,W0),(H1,W0),(H2,W0)
         // 列H方向优先按当前实现起来较为简单
         outH = superRowH + localIdx % localBlockH;
@@ -282,8 +289,7 @@ private:
 
     const uint32_t h_;
     const uint32_t w_;
-    const uint16_t blockH_;
-    const uint16_t blockW_;
+    const BlockHW blockHW_;
     const uint32_t fullSuperRows_;
     const uint32_t totalCnt_;
 };
@@ -360,17 +366,15 @@ public:
         uint32_t cinCnt = Ops::Base::CeilDiv(cin, SingleShapeCin);
         uint32_t topologyH = (IterDir == CIN) ? coutCnt : cinCnt;
         uint32_t topologyW = (IterDir == CIN) ? cinCnt : coutCnt;
-        uint16_t blockH, blockW;
-        SwizzleTopology2D::CalBlockGrid(topologyH, topologyW, blockH, blockW);
-        return BlockIterator(cout, cin, topologyH, topologyW, blockH, blockW, onlyIterMainBlocks);
+        return BlockIterator(cout, cin, topologyH, topologyW, onlyIterMainBlocks);
     }
 
 private:
     inline __aicore__ explicit BlockIterator(uint32_t cout, uint32_t cin, uint32_t topologyH, uint32_t topologyW,
-                                             uint16_t topologyBlockH, uint16_t topologyBlockW, bool onlyIterMainBlocks)
+                                             bool onlyIterMainBlocks)
         : cout_(cout),
           cin_(cin),
-          topology_(topologyH, topologyW, topologyBlockH, topologyBlockW),
+          topology_(topologyH, topologyW),
           blocksIterCnt_(GetBlockIterCnt(onlyIterMainBlocks, topology_.TotalCnt()))
     {}
 

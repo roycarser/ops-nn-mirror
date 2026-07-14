@@ -46,6 +46,9 @@ public:
     __aicore__ inline void TransData2NC1HWC0(__gm__ T* in, __gm__ T* out, uint32_t n, uint32_t c, uint32_t h,
                                              uint32_t w, bool disableInputL2Cache)
     {
+        if (unlikely(h == 0 || w == 0)) {
+            return;
+        }
         GlobalTensor<T> src, dst;
         src.SetGlobalBuffer(in);
         if (disableInputL2Cache) {

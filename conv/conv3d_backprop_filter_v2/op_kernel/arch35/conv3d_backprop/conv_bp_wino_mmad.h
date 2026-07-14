@@ -201,10 +201,9 @@ public:
     }
 
 private:
-    __aicore__ inline void ComputePoints(const HWBox& tiles, const MmadParams& mad,
-                                         LocalTensor<T>& l1a, LocalTensor<T>& l1b,
-                                         uint32_t l0aMStep, uint32_t l0aKStep,
-                                         uint32_t l0bMStep, uint32_t l0bKStep)
+    __aicore__ inline void ComputePoints(const HWBox& tiles, const MmadParams& mad, LocalTensor<T>& l1a,
+                                         LocalTensor<T>& l1b, uint32_t l0aMStep, uint32_t l0aKStep, uint32_t l0bMStep,
+                                         uint32_t l0bKStep)
     {
         LoadData2DParamsV2 load2d;
         load2d.mStartPosition = 0;
