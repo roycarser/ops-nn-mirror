@@ -26,7 +26,7 @@ namespace Ops {
 namespace NN {
 namespace Conv {
 namespace {
-bool CheckDtype(const Conv3dBpFilterV2RunInfo& runInfo, const char_t* opName)
+bool CheckWinoDtype(const Conv3dBpFilterV2RunInfo& runInfo, const char* opName)
 {
     // float16/bfloat16浮点误差比较严重，禁用，如果有int量化到时可以开下
     if (runInfo.a_dtype != ge::DataType::DT_FLOAT || runInfo.b_dtype != ge::DataType::DT_FLOAT ||
@@ -37,7 +37,7 @@ bool CheckDtype(const Conv3dBpFilterV2RunInfo& runInfo, const char_t* opName)
     return true;
 }
 
-bool CheckAttrs(const Conv3dBpFilterV2RunInfo& runInfo, const char_t* opName)
+bool CheckWinoAttrs(const Conv3dBpFilterV2RunInfo& runInfo, const char* opName)
 {
     if (runInfo.di != 1 || runInfo.dout != 1 || runInfo.kd != 1 || runInfo.dilation_d != 1 || runInfo.stride_d != 1 ||
         runInfo.pad_f != 0 || runInfo.pad_b != 0) {
@@ -64,7 +64,7 @@ bool CheckAttrs(const Conv3dBpFilterV2RunInfo& runInfo, const char_t* opName)
     return true;
 }
 
-bool CheckShape(const Conv3dBpFilterV2RunInfo& runInfo, const char_t* opName)
+bool CheckWinoShape(const Conv3dBpFilterV2RunInfo& runInfo, const char* opName)
 {
     uint64_t tileH = Ops::Base::CeilDiv(runInfo.ho, 2);
     uint64_t tileW = Ops::Base::CeilDiv(runInfo.wo, 2);
@@ -92,15 +92,15 @@ bool Conv3DBackpropFilterV2WinogradTiling::IsCapable()
         return false;
     }
 
-    if (!CheckDtype(runInfo_, opName_)) {
+    if (!CheckWinoDtype(runInfo_, opName_)) {
         return false;
     }
 
-    if (!CheckAttrs(runInfo_, opName_)) {
+    if (!CheckWinoAttrs(runInfo_, opName_)) {
         return false;
     }
 
-    if (!CheckShape(runInfo_, opName_)) {
+    if (!CheckWinoShape(runInfo_, opName_)) {
         return false;
     }
 

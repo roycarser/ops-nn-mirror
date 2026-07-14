@@ -96,8 +96,7 @@ public:
 
         StreamTaskInfo streamT1;
         ResidentTaskInfo residentT1;
-        ComputeT1TaskInfo<TensorT1>(localBlock, residentCBound,
-                                    watermarkResidentC, streamT1, residentT1);
+        ComputeT1TaskInfo<TensorT1>(localBlock, residentCBound, watermarkResidentC, streamT1, residentT1);
 
         uint32_t residentTaskOffset = 0;
         while (kIter.More()) {
