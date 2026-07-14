@@ -23,6 +23,7 @@ constexpr uint32_t F23_DY_STRIDE = 2;
 constexpr uint32_t F23_DY_WINDOWS = 2;
 
 using namespace AscendC::MicroAPI;
+using namespace AscendC;
 
 struct DefaultUnfoldColParams {
     uint32_t wValidElements;
@@ -210,13 +211,14 @@ struct Dy {
             for (uint16_t i = 0; i < wRepeatTimes; i++) {
                 MaskReg mask = UpdateMask<T>(maskValue);
 
-                RegTensor<T> s0, s1;
-
+                RegTensor<T> s0;
+                RegTensor<T> s1;
                 LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s0, src0, VL<T>());
                 LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s1, src1, VL<T>());
 
-                RegTensor<T> d0, d1, d2;
-
+                RegTensor<T> d0;
+                RegTensor<T> d1;
+                RegTensor<T> d2;
                 TransformVf(bf16NegativeOne, s0, s1, d0, d1, d2, mask);
 
                 StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, s0, tileBufWidthBlocks,
@@ -295,12 +297,15 @@ struct Dy {
             Unfold16TileHWStorer::GetHighHalfPartMask(s, storeMask, mask);
 
             for (uint16_t th = 0; th < tileW; th++) {
-                RegTensor<T> s0, s1;
+                RegTensor<T> s0;
+                RegTensor<T> s1;
 
                 LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s0, src, srcTileBufWidth);
                 LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s1, src, srcTileBufWidth);
 
-                RegTensor<T> d0, d1, d2;
+                RegTensor<T> d0;
+                RegTensor<T> d1;
+                RegTensor<T> d2;
                 TransformVf(bf16NegativeOne, s0, s1, d0, d1, d2, mask);
 
                 Unfold16TileHWStorer::store(s, s0, d0, d1, d2, storeMask);

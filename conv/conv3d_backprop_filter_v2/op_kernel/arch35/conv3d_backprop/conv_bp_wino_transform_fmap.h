@@ -204,7 +204,15 @@ struct Fmap {
         uint32_t maskValue = wValidElements;
         for (uint16_t i = 0; i < wRepeatTimes; i++) {
             MaskReg mask = UpdateMask<T>(maskValue);
-            RegTensor<T> s0, s1, s2, s3, d0, d1, d2, d3;
+            RegTensor<T> s0;
+            RegTensor<T> s1;
+            RegTensor<T> s2;
+            RegTensor<T> s3;
+
+            RegTensor<T> d0;
+            RegTensor<T> d1;
+            RegTensor<T> d2;
+            RegTensor<T> d3;
 
             // 从最上方的tile开始滑窗
             // 先读取fmap首2行,每次循环往下读2行凑成4行执行变换
@@ -227,36 +235,48 @@ struct Fmap {
             for (uint16_t th = 0; th < tileHMainRepeatTimes; th++) {
                 LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s2, src, wValidElements);
                 LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s3, src, wValidElements);
+
                 TransformVf(s0, s1, s2, s3, d0, d1, d2, d3, mask);
-                UnfoldColsDefaultStoreAlign(dst, d0, d1, d2, d3, tileBufWidthBlocks, mask);
+
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d0, tileBufWidthBlocks,
+                                                                                            1, mask);
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d1, tileBufWidthBlocks,
+                                                                                            1, mask);
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d2, tileBufWidthBlocks,
+                                                                                            1, mask);
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d3, tileBufWidthBlocks,
+                                                                                            1, mask);
 
                 LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s0, src, wValidElements);
                 LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s1, src, wValidElements);
+
                 TransformVf(s2, s3, s0, s1, d0, d1, d2, d3, mask);
-                UnfoldColsDefaultStoreAlign(dst, d0, d1, d2, d3, tileBufWidthBlocks, mask);
+
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d0, tileBufWidthBlocks,
+                                                                                            1, mask);
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d1, tileBufWidthBlocks,
+                                                                                            1, mask);
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d2, tileBufWidthBlocks,
+                                                                                            1, mask);
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d3, tileBufWidthBlocks,
+                                                                                            1, mask);
             }
 
             for (uint16_t th = 0; th < tileHTailRepeatTimes; th++) {
                 LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s2, src, wValidElements);
                 LoadAlign<T, PostLiteral::POST_MODE_UPDATE>(s3, src, wValidElements);
                 TransformVf(s0, s1, s2, s3, d0, d1, d2, d3, mask);
-                UnfoldColsDefaultStoreAlign(dst, d0, d1, d2, d3, tileBufWidthBlocks, mask);
+
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d0, tileBufWidthBlocks,
+                                                                                            1, mask);
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d1, tileBufWidthBlocks,
+                                                                                            1, mask);
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d2, tileBufWidthBlocks,
+                                                                                            1, mask);
+                StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d3, tileBufWidthBlocks,
+                                                                                            1, mask);
             }
         }
-    }
-
-    static __simd_callee__ inline void UnfoldColsDefaultStoreAlign(__ubuf__ T* dst, RegTensor<T>& d0, RegTensor<T>& d1,
-                                                                   RegTensor<T>& d2, RegTensor<T>& d3,
-                                                                   uint32_t tileBufWidthBlocks, MaskReg& mask)
-    {
-        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d0, tileBufWidthBlocks, 1,
-                                                                                    mask);
-        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d1, tileBufWidthBlocks, 1,
-                                                                                    mask);
-        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d2, tileBufWidthBlocks, 1,
-                                                                                    mask);
-        StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(dst, d3, tileBufWidthBlocks, 1,
-                                                                                    mask);
     }
 
     static __simd_callee__ inline void UnfoldRowsVf(__ubuf__ T* out, __ubuf__ T* buf, const UnfoldFmapRowParams& params)
@@ -277,7 +297,15 @@ struct Fmap {
             MaskReg storeMask;
             Unfold16TileHWStorer::GetHighHalfPartMask(s, storeMask, mask);
 
-            RegTensor<T> s0, s1, s2, s3, d0, d1, d2, d3;
+            RegTensor<T> s0;
+            RegTensor<T> s1;
+            RegTensor<T> s2;
+            RegTensor<T> s3;
+
+            RegTensor<T> d0;
+            RegTensor<T> d1;
+            RegTensor<T> d2;
+            RegTensor<T> d3;
 
             __ubuf__ T* src = buf + VL<T>() * i;
 
