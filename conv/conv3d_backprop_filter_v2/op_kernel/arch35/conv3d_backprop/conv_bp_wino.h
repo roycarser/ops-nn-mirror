@@ -17,6 +17,7 @@
 #define CONV_BP_WINO_H
 
 #include "conv_bp_wino_detail.h"
+#include "conv_bp_wino_inv_transform.h"
 
 using namespace AscendC;
 

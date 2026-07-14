@@ -326,7 +326,7 @@ private:
 
         // scatter完后在重新做cast，把float转b16后空的2个字节移除，不能直接用b16做scatter，bank冲突太严重
         if constexpr (!Std::is_same_v<DstT, float>) {
-            B32ToB16(transposeBuf, loopCnt, maskValue);
+            B32ToB16(transposeBuf, loopCnt, maskAll);
         }
     }
 

@@ -17,7 +17,6 @@
 #define CONV_BP_WINO_DETAIL_H
 
 #include "conv_bp_wino_mmad.h"
-#include "conv_bp_wino_inv_transform.h"
 #include "conv_bp_wino_transform_dy.h"
 #include "conv_bp_wino_transform_fmap.h"
 #include "conv_bp_wino_data_blocks.h"
@@ -97,9 +96,8 @@ public:
 
         StreamTaskInfo streamT1;
         ResidentTaskInfo residentT1;
-        ComputeT1TaskInfo(localBlock.GetIdx<TensorT1>(), localBlock.GetLen<TensorT1>(), residentCBound,
-                          watermarkResidentC, BlockConfig::SingleShapeC<TilingT, ResidentTarget>(), streamT1,
-                          residentT1);
+        ComputeT1TaskInfo<TensorT1>(localBlock, residentCBound,
+                                    watermarkResidentC, streamT1, residentT1);
 
         uint32_t residentTaskOffset = 0;
         while (kIter.More()) {
