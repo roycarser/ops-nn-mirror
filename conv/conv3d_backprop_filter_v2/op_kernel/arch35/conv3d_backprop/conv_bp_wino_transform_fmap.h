@@ -81,7 +81,6 @@ struct Fmap {
         __ubuf__ T* src[SrcH];
         __ubuf__ T* dst[TileH];
         RegTensor<T> s[SrcH];
-        RegTensor<T> d[TileH * F23_TRANSFORM_TILE_SIZE_4];
 
         template <uint16_t Idx>
         static __simd_callee__ inline void InitSrcAddrImpl(TileHUnRollHelper& helper, __ubuf__ T* fmapBuf)
@@ -134,16 +133,15 @@ struct Fmap {
         static __simd_callee__ inline void TransformAndStoreImpl(TileHUnRollHelper& helper, MaskReg& mask)
         {
             constexpr uint16_t sIdx = Idx * F23_FMAP_STRIDE;
-            constexpr uint16_t dIdx = Idx * F23_TRANSFORM_TILE_SIZE_4;
             RegTensor<T>& s0 = helper.s[sIdx];
             RegTensor<T>& s1 = helper.s[sIdx + 1];
             RegTensor<T>& s2 = helper.s[sIdx + 2];
             RegTensor<T>& s3 = helper.s[sIdx + 3];
 
-            RegTensor<T>& d0 = helper.d[dIdx];
-            RegTensor<T>& d1 = helper.d[dIdx + 1];
-            RegTensor<T>& d2 = helper.d[dIdx + 2];
-            RegTensor<T>& d3 = helper.d[dIdx + 3];
+            RegTensor<T> d0;
+            RegTensor<T> d1;
+            RegTensor<T> d2;
+            RegTensor<T> d3;
 
             TransformVf(s0, s1, s2, s3, d0, d1, d2, d3, mask);
 
