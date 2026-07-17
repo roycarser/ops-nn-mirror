@@ -34,6 +34,11 @@ bool CheckWinoDtype(const Conv3dBpFilterV2RunInfo& runInfo, const char* opName)
         OP_LOGD(opName, "Winograd tiling only support float");
         return false;
     }
+    // 当前目标网络case里面没有hf32且能命中winograd的，先不测了，后面有时间有需求了在实测下效果放开
+    if (runInfo.hf32Flag == 1) {
+        OP_LOGD(opName, "Winograd tiling not support hf32");
+        return false;
+    }
     return true;
 }
 

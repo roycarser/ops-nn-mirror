@@ -149,6 +149,60 @@ private:
     bool end_ = false;
 };
 
+template<typename TilingT>
+class SegmentTileKIterator {
+public:
+    __aicore__ explicit inline SegmentTileKIterator(uint32_t segmentsHint, BatchTileKIterator<TilingT>& kIter)
+        : kIter_(kIter),
+          segments_(segmentsHint)
+    {
+    }
+
+    __aicore__ inline uint32_t StepInSingleK() const { return kIter_.StepInSingleK(); }
+
+    __aicore__ inline HWBox TileBox() const
+    {
+        return kIter_.TileBox();
+    }
+
+    __aicore__ inline void Next()
+    {
+        if (likely(More())) {
+            count_++;
+            kIter_.Next();
+        }
+    }
+
+    __aicore__ inline bool More() const
+    {
+        return ReachSegmentsLimit() ? false : kIter_.More();
+    }
+
+    __aicore__ inline uint32_t TileKIdx() const { return kIter_.TileKIdx(); }
+
+    __aicore__ inline uint32_t BatchIdx() const { return kIter_.BatchIdx(); }
+
+    __aicore__ inline void ResetSegmentsLimit()
+    {
+        count_ = 0;
+    }
+
+    __aicore__ inline bool AllSegmentsHasDone() const
+    {
+        return !kIter_.More();
+    }
+
+private:
+    __aicore__ inline bool ReachSegmentsLimit() const
+    {
+        return count_ >= segments_;
+    }
+
+    BatchTileKIterator<TilingT>& kIter_;
+    const uint32_t segments_;
+    uint32_t count_ = 0;
+};
+
 class SwizzleTopology2D {
 public:
     // 实现简单的Tile和蛇形走位，所有核构成一个blockHW块进行递进，提升L2cache的命中率

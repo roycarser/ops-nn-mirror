@@ -75,15 +75,18 @@ public:
     template <bool WriteToTailGM = false, typename QueConfig>
     __aicore__ inline void TransformOutput(CVSyncQue<QueConfig>& l0c2ubSync, const CoutCinRange& localBlock,
                                            const uint32_t cinSrc, const LocalTensor<float>& vBuf,
-                                           uint32_t tailKGroupIdx, uint32_t tailKGroups, uint16_t tailBlockId)
+                                           uint32_t tailKGroupIdx, uint32_t tailKGroups, uint16_t tailBlockId,
+                                           bool atomicAdd)
     {
         constexpr uint16_t aivNums = AivNumInBlock();
         constexpr uint16_t singleShapeInvTransCout = BlockConfig::SingleShapeInvTransformCout<TilingT>();
         constexpr uint16_t singleBlockCout = singleShapeInvTransCout * aivNums;
         constexpr uint8_t BufCnt = BlockConfig::InvTransformBufCnt<TilingT>();
         const uint16_t aivId = GetSubBlockIdx();
+        if (atomicAdd) {
+            SetAtomicAdd<DstT>();
+        }
 
-        uint32_t bufIdx = 0;
         for (uint32_t coutIdxInBlock = 0; coutIdxInBlock < localBlock.coutLength; coutIdxInBlock += singleBlockCout) {
             const uint16_t coutLengthInBlock = Std::min(singleBlockCout, localBlock.coutLength - coutIdxInBlock);
 
@@ -96,7 +99,7 @@ public:
                 const uint32_t processCoutLength = Std::min(localCoutLength, coutLengthInBlock - localCoutOffset);
                 const uint32_t coutCin = processCoutLength * localBlock.cinLength;
 
-                LocalTensor<float> buf = vBuf[bufIdx * INV_TRANS_BUF_SIZE];
+                LocalTensor<float> buf = vBuf[bufIdx_ * INV_TRANS_BUF_SIZE];
                 ProcessInvTransform(reinterpret_cast<__ubuf__ float*>(buf.GetPhyAddr()), coutCin,
                                     Ops::Base::CeilDiv(coutCin, VL<float>()));
 
@@ -132,7 +135,11 @@ public:
             }
 
             l0c2ubSync.DeQue();
-            bufIdx = (bufIdx + 1) % BufCnt;
+            bufIdx_ = (bufIdx_ + 1) % BufCnt;
+        }
+
+        if (atomicAdd) {
+            SetAtomicNone();
         }
     }
 
@@ -434,6 +441,7 @@ private:
     TEventID v2mte3_ = 0;
     TEventID mte22v_;
     TEventID v2mte2_[2];
+    uint8_t bufIdx_ = 0;
     GlobalTensor<DstT> yGm_;
     GlobalTensor<float> tailGm_;
 };

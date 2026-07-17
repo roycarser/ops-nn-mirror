@@ -124,60 +124,69 @@ private:
                                     uint32_t residentCBound, uint32_t watermarkResidentC,
                                     const WinoDetail::SplitKState& splitKState, bool appendResidentCrossCoreSync)
     {
+        constexpr uint32_t singleShapeTileH = BlockConfig::SingleShapeTileH<TilingT>();
+        constexpr uint32_t singleShapeTileW = BlockConfig::SingleShapeTileW<TilingT>();
+        constexpr uint32_t ReduceKTileSegmentsLimit = 32768 / (singleShapeTileH * singleShapeTileW);
+        WinoDetail::SegmentTileKIterator<TilingT> segmentKIter(ReduceKTileSegmentsLimit, kIter);
+
         bool shouldResidentTransform = residentCBound > watermarkResidentC;
+        bool firstIter = true;
+        while (!kIter.AllSegmentsHasDone()) {
+            if ASCEND_IS_AIC {
+                dwMmad_.IterateK(localBlock, segmentKIter, gm2l1_, ub2l1_, shouldResidentTransform);
 
-        if ASCEND_IS_AIC {
-            dwMmad_.IterateK(localBlock, kIter, gm2l1_, ub2l1_, shouldResidentTransform);
-
-            if constexpr (IsTailSplitK) {
-                if (appendResidentCrossCoreSync && shouldResidentTransform) {
-                    // 尾轮处理时切k不均衡需要额外补一次全核同步
-                    // 要是芯片跨核同步支持分组不强制全核一起来就好了
-                    for (uint32_t i = 0; i != kIter.StepInSingleK(); i++) {
-                        gm2l1_.WaitData();
-                        gm2l1_.DeQue();
+                if constexpr (IsTailSplitK) {
+                    if (appendResidentCrossCoreSync && shouldResidentTransform && kIter.AllSegmentsHasDone()) {
+                        // 尾轮处理时切k不均衡需要额外补一次全核同步
+                        // 要是芯片跨核同步支持分组不强制全核一起来就好了
+                        for (uint32_t i = 0; i != kIter.StepInSingleK(); i++) {
+                            gm2l1_.WaitData();
+                            gm2l1_.DeQue();
+                        }
                     }
                 }
             }
-        }
 
-        if ASCEND_IS_AIV {
-            dwFwd_.IterateK(localBlock, kIter, gm2l1_, ub2l1_, watermarkResidentC, residentCBound,
-                            IsTailSplitK ? splitKState.kGroupStartCoreId : 0,
-                            IsTailSplitK ? splitKState.kGroupCoreNum : GetBlockNum());
+            if ASCEND_IS_AIV {
+                dwFwd_.IterateK(localBlock, segmentKIter, gm2l1_, ub2l1_, watermarkResidentC, residentCBound,
+                                IsTailSplitK ? splitKState.kGroupStartCoreId : 0,
+                                IsTailSplitK ? splitKState.kGroupCoreNum : GetBlockNum());
 
-            if constexpr (IsTailSplitK) {
-                if (appendResidentCrossCoreSync && shouldResidentTransform) {
-                    for (uint32_t i = 0; i != kIter.StepInSingleK(); i++) {
-                        gm2l1_.WaitSlot();
-                        gm2l1_.EnQue();
+                if constexpr (IsTailSplitK) {
+                    if (appendResidentCrossCoreSync && shouldResidentTransform && kIter.AllSegmentsHasDone()) {
+                        for (uint32_t i = 0; i != kIter.StepInSingleK(); i++) {
+                            gm2l1_.WaitSlot();
+                            gm2l1_.EnQue();
+                        }
                     }
                 }
             }
-        }
 
-        TransformOutput<IsTailSplitK>(localBlock, splitKState);
+            TransformOutput<IsTailSplitK>(localBlock, splitKState, !firstIter);
+
+            segmentKIter.ResetSegmentsLimit();
+            firstIter = false;
+        }
     }
 
     template <bool IsTailSplitK>
-    __aicore__ inline void TransformOutput(const CoutCinRange& localBlock, const WinoDetail::SplitKState& splitKState)
+    __aicore__ inline void TransformOutput(const CoutCinRange& localBlock, const WinoDetail::SplitKState& splitKState,
+                                           bool atomicAdd)
     {
         // 当前ub很难同时放下正变换和逆变换的速率，所以逆变换需要停掉整个正变换，并空出整个ub来逆变换，
         constexpr uint32_t invBufSize = WinoInvBufUtil::GetInvBufTotalSizeInBytes<TilingT>();
         static_assert(invBufSize < TOTAL_UB_SIZE, "illegal buffer size");
         auto invBuf = LocalTensor<float>(TPosition::VECIN, 0, invBufSize);
 
-        if (localBlock.NotEmpty()) {
+        if (likely(localBlock.NotEmpty())) {
             if ASCEND_IS_AIC {
                 dwMmad_.Fixpipe2UB(l0c2ubSync_, localBlock, invBuf);
             }
             if ASCEND_IS_AIV {
                 dwInv_.template TransformOutput<IsTailSplitK>(l0c2ubSync_, localBlock, cin_, invBuf,
                                                               splitKState.kGroupIdx, splitKState.kGroups,
-                                                              splitKState.tailBlockId);
-                if constexpr (!IsTailSplitK) {
-                    dwInv_.BlockMTE2ByMTE3();
-                }
+                                                              splitKState.tailBlockId, atomicAdd);
+                dwInv_.BlockMTE2ByMTE3();
             }
         }
     }

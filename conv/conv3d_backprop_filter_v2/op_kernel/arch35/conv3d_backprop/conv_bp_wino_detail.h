@@ -81,7 +81,7 @@ public:
         }
     }
 
-    __aicore__ inline void IterateK(const CoutCinRange& localBlock, BatchTileKIterator<TilingT>& kIter,
+    __aicore__ inline void IterateK(const CoutCinRange& localBlock, SegmentTileKIterator<TilingT>& kIter,
                                     FwdTransformGM2L1Queue<T>& gm2l1Que, FwdTransformUB2L1Queue<T>& ub2l1Que,
                                     uint32_t watermarkResidentC, uint32_t residentCBound,
                                     uint16_t residentKGroupStartCoreIdx, uint16_t residentKGroupCoreNum)
@@ -431,7 +431,7 @@ public:
 
     inline void __aicore__ End() { winoMmad_.End(); }
 
-    __aicore__ inline void IterateK(const CoutCinRange& blockRange, BatchTileKIterator<TilingT>& kIter,
+    __aicore__ inline void IterateK(const CoutCinRange& blockRange, SegmentTileKIterator<TilingT>& kIter,
                                     FwdTransformGM2L1Queue<T>& gm2l1, FwdTransformUB2L1Queue<T>& ub2l1,
                                     bool waitResidentTransform)
     {
@@ -451,7 +451,7 @@ public:
 
 private:
     template <bool NotIdle>
-    __aicore__ inline void RunMmad(const CoutCinRange& cRange, BatchTileKIterator<TilingT>& iter,
+    __aicore__ inline void RunMmad(const CoutCinRange& cRange, SegmentTileKIterator<TilingT>& iter,
                                    FwdTransformGM2L1Queue<T>& gm2l1, FwdTransformUB2L1Queue<T>& ub2l1,
                                    bool waitResidentTransform)
     {

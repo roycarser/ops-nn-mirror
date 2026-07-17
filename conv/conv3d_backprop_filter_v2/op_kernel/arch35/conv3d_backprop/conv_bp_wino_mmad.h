@@ -175,10 +175,10 @@ public:
             syncQue.WaitSlot();
             static constexpr FixpipeConfig cfg = {CO2Layout::ROW_MAJOR, true};
             const uint32_t srcOffset = singleBlockCout * BLOCK_CUBE * index;
-            const uint32_t dstOffset = invTransSingleBufSize * (index % invTransBufCnt);
+            const uint32_t dstOffset = invTransSingleBufSize * invBufIdx_;
             Fixpipe<float, float, cfg>(outputTransformVBuf[dstOffset], l0c[srcOffset], fp);
             syncQue.EnQue();
-
+            invBufIdx_ = (invBufIdx_ + 1) % invTransBufCnt;
             index++;
         }
         SetFlag<HardEvent::FIX_M>(mad2fixpipeFlag_.dst2src);
@@ -340,6 +340,7 @@ private:
     EventFlag mad2fixpipeFlag_;
     EventFlag mte2mte1Flag_[2];
     EventFlag mte1madFlag_[L0_BUF_CNT];
+    uint8_t invBufIdx_ = 0;
     const bool hf32Flag_;
 };
 
