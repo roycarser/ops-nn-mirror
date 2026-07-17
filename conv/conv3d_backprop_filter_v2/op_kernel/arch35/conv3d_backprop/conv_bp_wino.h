@@ -131,7 +131,7 @@ private:
 
         bool shouldResidentTransform = residentCBound > watermarkResidentC;
         bool firstIter = true;
-        while (!kIter.AllSegmentsHasDone()) {
+        while (!segmentKIter.AllSegmentsHasDone()) {
             if ASCEND_IS_AIC {
                 dwMmad_.IterateK(localBlock, segmentKIter, gm2l1_, ub2l1_, shouldResidentTransform);
 
