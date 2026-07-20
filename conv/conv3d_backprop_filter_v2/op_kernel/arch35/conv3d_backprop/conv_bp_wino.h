@@ -134,14 +134,14 @@ private:
 
         bool appendTailKSync = false;
         if constexpr (IsTailSplitK) {
-            appendTailKSync = appendResidentCrossCoreSync && shouldResidentTransform && kIter.AllSegmentsHasDone();
+            appendTailKSync = appendResidentCrossCoreSync && shouldResidentTransform;
         }
 
         while (!segmentKIter.AllSegmentsHasDone()) {
             if ASCEND_IS_AIC {
                 dwMmad_.IterateK(localBlock, segmentKIter, gm2l1_, ub2l1_, shouldResidentTransform);
 
-                if (appendTailKSync) {
+                if (appendTailKSync && kIter.AllSegmentsHasDone()) {
                     // 尾轮处理时切k不均衡需要额外补一次全核同步
                     // 要是芯片跨核同步支持分组不强制全核一起来就好了
                     for (uint32_t i = 0; i != kIter.StepInSingleK(); i++) {
@@ -156,7 +156,7 @@ private:
                                 IsTailSplitK ? splitKState.kGroupStartCoreId : 0,
                                 IsTailSplitK ? splitKState.kGroupCoreNum : GetBlockNum());
 
-                if (appendTailKSync) {
+                if (appendTailKSync && kIter.AllSegmentsHasDone()) {
                     for (uint32_t i = 0; i != kIter.StepInSingleK(); i++) {
                         gm2l1_.WaitSlot();
                         gm2l1_.EnQue();
