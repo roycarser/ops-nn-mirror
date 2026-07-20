@@ -337,9 +337,8 @@ private:
     }
 
     __simd_callee__ static inline void TransformRowWithCastAndSetter(
-        __ubuf__ float*& dst0, Reg::RegTensor<float>& c0, Reg::RegTensor<float>& c1,
-        Reg::RegTensor<float>& c2, Reg::RegTensor<float>& c3, Reg::RegTensor<float>& value0P5,
-        Reg::RegTensor<uint32_t>& index, Reg::MaskReg& mask)
+        __ubuf__ float*& dst0, Reg::RegTensor<float>& c0, Reg::RegTensor<float>& c1, Reg::RegTensor<float>& c2,
+        Reg::RegTensor<float>& c3, Reg::RegTensor<float>& value0P5, Reg::RegTensor<uint32_t>& index, Reg::MaskReg& mask)
     {
         Reg::RegTensor<float> r0, r1, r2;
         TransformRowAndCastInZero(mask, value0P5, c0, c1, c2, c3, r0, r1, r2);
@@ -352,8 +351,7 @@ private:
         ++dst0;
     }
 
-    __simd_callee__ static inline void B32ToB16(__ubuf__ float* transposeBuf, uint16_t loopCnt,
-                                                Reg::MaskReg& maskAll)
+    __simd_callee__ static inline void B32ToB16(__ubuf__ float* transposeBuf, uint16_t loopCnt, Reg::MaskReg& maskAll)
     {
         using namespace Reg;
         if constexpr (!Std::is_same_v<DstT, float>) {
@@ -374,9 +372,9 @@ private:
 
     __simd_callee__ static inline void TransformCol(__ubuf__ float*& src0, __ubuf__ float*& src1, __ubuf__ float*& src2,
                                                     __ubuf__ float*& src3, Reg::MaskReg& mask,
-                                                    Reg::RegTensor<float>& value0P5,
-                                                    Reg::RegTensor<float>& d0, Reg::RegTensor<float>& d1,
-                                                    Reg::RegTensor<float>& d2, const int32_t postUpdateStride)
+                                                    Reg::RegTensor<float>& value0P5, Reg::RegTensor<float>& d0,
+                                                    Reg::RegTensor<float>& d1, Reg::RegTensor<float>& d2,
+                                                    const int32_t postUpdateStride)
     {
         Reg::RegTensor<float> s0;
         Reg::RegTensor<float> s1;
@@ -391,10 +389,12 @@ private:
         TransformVf(value0P5, s0, s1, s2, s3, d0, d1, d2, mask);
     }
 
-    __simd_callee__ static inline void TransformRowAndCastInZero(
-        Reg::MaskReg& mask, Reg::RegTensor<float>& value0P5, Reg::RegTensor<float>& d0,
-        Reg::RegTensor<float>& d1, Reg::RegTensor<float>& d2, Reg::RegTensor<float>& d3,
-        Reg::RegTensor<float>& out0, Reg::RegTensor<float>& out1, Reg::RegTensor<float>& out2)
+    __simd_callee__ static inline void TransformRowAndCastInZero(Reg::MaskReg& mask, Reg::RegTensor<float>& value0P5,
+                                                                 Reg::RegTensor<float>& d0, Reg::RegTensor<float>& d1,
+                                                                 Reg::RegTensor<float>& d2, Reg::RegTensor<float>& d3,
+                                                                 Reg::RegTensor<float>& out0,
+                                                                 Reg::RegTensor<float>& out1,
+                                                                 Reg::RegTensor<float>& out2)
     {
         if constexpr (Std::is_same_v<DstT, float>) {
             TransformVf(value0P5, d0, d1, d2, d3, out0, out1, out2, mask);
