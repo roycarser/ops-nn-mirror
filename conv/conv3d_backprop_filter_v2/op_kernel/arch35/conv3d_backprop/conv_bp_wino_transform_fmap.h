@@ -21,7 +21,7 @@ namespace WinoTransformDetail {
 constexpr uint32_t F23_FMAP_STRIDE = 2;
 constexpr uint32_t F23_FMAP_WINDOWS = 4;
 
-using namespace AscendC::MicroAPI;
+using namespace AscendC::Reg;
 
 template <typename T, typename TilingT>
 struct Fmap {

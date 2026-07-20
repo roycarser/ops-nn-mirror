@@ -22,7 +22,7 @@ namespace WinoTransformDetail {
 constexpr uint32_t F23_DY_STRIDE = 2;
 constexpr uint32_t F23_DY_WINDOWS = 2;
 
-using namespace AscendC::MicroAPI;
+using namespace AscendC::Reg;
 using namespace AscendC;
 
 struct DefaultUnfoldColParams {

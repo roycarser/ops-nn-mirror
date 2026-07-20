@@ -276,18 +276,18 @@ private:
     {
         Padding(srcBuf, pad, srcH, srcW);
 
-        AscendC::MicroAPI::LocalMemBar<AscendC::MicroAPI::MemType::VEC_STORE, AscendC::MicroAPI::MemType::VEC_LOAD>();
+        AscendC::Reg::LocalMemBar<AscendC::Reg::MemType::VEC_STORE, AscendC::Reg::MemType::VEC_LOAD>();
 
         UnfoldPolicy::template UnfoldColsVf<IsTailTile>(colUnfoldBuf, srcBuf, ucp);
 
-        AscendC::MicroAPI::LocalMemBar<AscendC::MicroAPI::MemType::VEC_STORE, AscendC::MicroAPI::MemType::VEC_LOAD>();
+        AscendC::Reg::LocalMemBar<AscendC::Reg::MemType::VEC_STORE, AscendC::Reg::MemType::VEC_LOAD>();
 
         UnfoldPolicy::UnfoldRowsVf(outBuf, colUnfoldBuf, urp);
     }
 
     __simd_callee__ static inline void Padding(__ubuf__ T* srcBuf, const HWPad& pad, uint16_t srcH, uint16_t srcW)
     {
-        using namespace MicroAPI;
+        using namespace Reg;
         RegTensor<T> paddingValue;
         Duplicate(paddingValue, 0);
 
@@ -305,7 +305,7 @@ private:
         __ubuf__ T* src = srcBuf;
         uint32_t hTopMaskValue = hTopElements;
         for (uint16_t i = 0; i < hTopRepeatTimes; i++) {
-            MaskReg mask = MicroAPI::UpdateMask<T>(hTopMaskValue);
+            MaskReg mask = Reg::UpdateMask<T>(hTopMaskValue);
             StoreAlign<T, PostLiteral::POST_MODE_UPDATE>(src, paddingValue, VL<T>(), mask);
         }
 
@@ -315,7 +315,7 @@ private:
         src = srcBuf + (padHTop + srcH) * wElements;
         uint32_t hBtnMaskValue = hBtnElements;
         for (uint16_t i = 0; i < hBtnRepeatTimes; i++) {
-            MaskReg mask = MicroAPI::UpdateMask<T>(hBtnMaskValue);
+            MaskReg mask = Reg::UpdateMask<T>(hBtnMaskValue);
             StoreAlign<T, PostLiteral::POST_MODE_UPDATE>(src, paddingValue, VL<T>(), mask);
         }
 
@@ -328,7 +328,7 @@ private:
             uint32_t maskValue = hElements;
             __ubuf__ T* src0 = src + C0<T>() * i;
             for (uint16_t h = 0; h < hRepeatTimes; h++) {
-                MaskReg mask = MicroAPI::UpdateMask<T>(maskValue);
+                MaskReg mask = Reg::UpdateMask<T>(maskValue);
                 StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(src0, paddingValue, wBlocks,
                                                                                             wPadStride, mask);
             }
@@ -339,7 +339,7 @@ private:
             uint32_t maskValue = hElements;
             __ubuf__ T* src0 = src + C0<T>() * i;
             for (uint16_t h = 0; h < hRepeatTimes; h++) {
-                MaskReg mask = MicroAPI::UpdateMask<T>(maskValue);
+                MaskReg mask = Reg::UpdateMask<T>(maskValue);
                 StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(src0, paddingValue, wBlocks,
                                                                                             wPadStride, mask);
             }

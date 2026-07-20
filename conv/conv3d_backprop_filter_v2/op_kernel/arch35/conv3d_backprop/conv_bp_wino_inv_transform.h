@@ -282,7 +282,7 @@ private:
     __simd_vf__ static inline void ProcessInvTransform(__ubuf__ float* buf, const uint32_t coutCinLength,
                                                        const uint16_t loopCnt)
     {
-        using namespace MicroAPI;
+        using namespace Reg;
         RegTensor<float> value0P5;
         Duplicate(value0P5, 0.5f);
 
@@ -337,11 +337,11 @@ private:
     }
 
     __simd_callee__ static inline void TransformRowWithCastAndSetter(
-        __ubuf__ float*& dst0, MicroAPI::RegTensor<float>& c0, MicroAPI::RegTensor<float>& c1,
-        MicroAPI::RegTensor<float>& c2, MicroAPI::RegTensor<float>& c3, MicroAPI::RegTensor<float>& value0P5,
-        MicroAPI::RegTensor<uint32_t>& index, MicroAPI::MaskReg& mask)
+        __ubuf__ float*& dst0, Reg::RegTensor<float>& c0, Reg::RegTensor<float>& c1,
+        Reg::RegTensor<float>& c2, Reg::RegTensor<float>& c3, Reg::RegTensor<float>& value0P5,
+        Reg::RegTensor<uint32_t>& index, Reg::MaskReg& mask)
     {
-        MicroAPI::RegTensor<float> r0, r1, r2;
+        Reg::RegTensor<float> r0, r1, r2;
         TransformRowAndCastInZero(mask, value0P5, c0, c1, c2, c3, r0, r1, r2);
 
         Scatter(dst0, r0, index, mask);
@@ -353,9 +353,9 @@ private:
     }
 
     __simd_callee__ static inline void B32ToB16(__ubuf__ float* transposeBuf, uint16_t loopCnt,
-                                                MicroAPI::MaskReg& maskAll)
+                                                Reg::MaskReg& maskAll)
     {
-        using namespace MicroAPI;
+        using namespace Reg;
         if constexpr (!Std::is_same_v<DstT, float>) {
             LocalMemBar<MemType::VEC_STORE, MemType::VEC_LOAD>();
 
@@ -373,67 +373,67 @@ private:
     }
 
     __simd_callee__ static inline void TransformCol(__ubuf__ float*& src0, __ubuf__ float*& src1, __ubuf__ float*& src2,
-                                                    __ubuf__ float*& src3, MicroAPI::MaskReg& mask,
-                                                    MicroAPI::RegTensor<float>& value0P5,
-                                                    MicroAPI::RegTensor<float>& d0, MicroAPI::RegTensor<float>& d1,
-                                                    MicroAPI::RegTensor<float>& d2, const int32_t postUpdateStride)
+                                                    __ubuf__ float*& src3, Reg::MaskReg& mask,
+                                                    Reg::RegTensor<float>& value0P5,
+                                                    Reg::RegTensor<float>& d0, Reg::RegTensor<float>& d1,
+                                                    Reg::RegTensor<float>& d2, const int32_t postUpdateStride)
     {
-        MicroAPI::RegTensor<float> s0;
-        MicroAPI::RegTensor<float> s1;
-        MicroAPI::RegTensor<float> s2;
-        MicroAPI::RegTensor<float> s3;
+        Reg::RegTensor<float> s0;
+        Reg::RegTensor<float> s1;
+        Reg::RegTensor<float> s2;
+        Reg::RegTensor<float> s3;
 
-        MicroAPI::LoadAlign<float, MicroAPI::PostLiteral::POST_MODE_UPDATE>(s0, src0, postUpdateStride);
-        MicroAPI::LoadAlign<float, MicroAPI::PostLiteral::POST_MODE_UPDATE>(s1, src1, postUpdateStride);
-        MicroAPI::LoadAlign<float, MicroAPI::PostLiteral::POST_MODE_UPDATE>(s2, src2, postUpdateStride);
-        MicroAPI::LoadAlign<float, MicroAPI::PostLiteral::POST_MODE_UPDATE>(s3, src3, postUpdateStride);
+        Reg::LoadAlign<float, Reg::PostLiteral::POST_MODE_UPDATE>(s0, src0, postUpdateStride);
+        Reg::LoadAlign<float, Reg::PostLiteral::POST_MODE_UPDATE>(s1, src1, postUpdateStride);
+        Reg::LoadAlign<float, Reg::PostLiteral::POST_MODE_UPDATE>(s2, src2, postUpdateStride);
+        Reg::LoadAlign<float, Reg::PostLiteral::POST_MODE_UPDATE>(s3, src3, postUpdateStride);
 
         TransformVf(value0P5, s0, s1, s2, s3, d0, d1, d2, mask);
     }
 
     __simd_callee__ static inline void TransformRowAndCastInZero(
-        MicroAPI::MaskReg& mask, MicroAPI::RegTensor<float>& value0P5, MicroAPI::RegTensor<float>& d0,
-        MicroAPI::RegTensor<float>& d1, MicroAPI::RegTensor<float>& d2, MicroAPI::RegTensor<float>& d3,
-        MicroAPI::RegTensor<float>& out0, MicroAPI::RegTensor<float>& out1, MicroAPI::RegTensor<float>& out2)
+        Reg::MaskReg& mask, Reg::RegTensor<float>& value0P5, Reg::RegTensor<float>& d0,
+        Reg::RegTensor<float>& d1, Reg::RegTensor<float>& d2, Reg::RegTensor<float>& d3,
+        Reg::RegTensor<float>& out0, Reg::RegTensor<float>& out1, Reg::RegTensor<float>& out2)
     {
         if constexpr (Std::is_same_v<DstT, float>) {
             TransformVf(value0P5, d0, d1, d2, d3, out0, out1, out2, mask);
         } else {
-            MicroAPI::RegTensor<float> tmp0;
-            MicroAPI::RegTensor<float> tmp1;
-            MicroAPI::RegTensor<float> tmp2;
+            Reg::RegTensor<float> tmp0;
+            Reg::RegTensor<float> tmp1;
+            Reg::RegTensor<float> tmp2;
             TransformVf(value0P5, d0, d1, d2, d3, tmp0, tmp1, tmp2, mask);
 
             static_assert(sizeof(DstT) == 2);
-            static constexpr MicroAPI::CastTrait castTraitB322B16 = {
-                MicroAPI::RegLayout::ZERO,
-                MicroAPI::SatMode::NO_SAT,
-                MicroAPI::MaskMergeMode::ZEROING,
+            static constexpr Reg::CastTrait castTraitB322B16 = {
+                Reg::RegLayout::ZERO,
+                Reg::SatMode::NO_SAT,
+                Reg::MaskMergeMode::ZEROING,
                 RoundMode::CAST_RINT,
             };
 
-            Cast<DstT, float, castTraitB322B16>(reinterpret_cast<MicroAPI::RegTensor<DstT>&>(out0), tmp0, mask);
-            Cast<DstT, float, castTraitB322B16>(reinterpret_cast<MicroAPI::RegTensor<DstT>&>(out1), tmp1, mask);
-            Cast<DstT, float, castTraitB322B16>(reinterpret_cast<MicroAPI::RegTensor<DstT>&>(out2), tmp2, mask);
+            Cast<DstT, float, castTraitB322B16>(reinterpret_cast<Reg::RegTensor<DstT>&>(out0), tmp0, mask);
+            Cast<DstT, float, castTraitB322B16>(reinterpret_cast<Reg::RegTensor<DstT>&>(out1), tmp1, mask);
+            Cast<DstT, float, castTraitB322B16>(reinterpret_cast<Reg::RegTensor<DstT>&>(out2), tmp2, mask);
         }
     }
 
-    __simd_callee__ static inline void TransformVf(MicroAPI::RegTensor<float>& value0P5, MicroAPI::RegTensor<float>& s0,
-                                                   MicroAPI::RegTensor<float>& s1, MicroAPI::RegTensor<float>& s2,
-                                                   MicroAPI::RegTensor<float>& s3, MicroAPI::RegTensor<float>& d0,
-                                                   MicroAPI::RegTensor<float>& d1, MicroAPI::RegTensor<float>& d2,
-                                                   MicroAPI::MaskReg& mask)
+    __simd_callee__ static inline void TransformVf(Reg::RegTensor<float>& value0P5, Reg::RegTensor<float>& s0,
+                                                   Reg::RegTensor<float>& s1, Reg::RegTensor<float>& s2,
+                                                   Reg::RegTensor<float>& s3, Reg::RegTensor<float>& d0,
+                                                   Reg::RegTensor<float>& d1, Reg::RegTensor<float>& d2,
+                                                   Reg::MaskReg& mask)
     {
-        MicroAPI::RegTensor<float> tmpAdd;
-        MicroAPI::RegTensor<float> tmpSub;
-        MicroAPI::RegTensor<float> tmpAddHalf;
+        Reg::RegTensor<float> tmpAdd;
+        Reg::RegTensor<float> tmpSub;
+        Reg::RegTensor<float> tmpAddHalf;
 
-        MicroAPI::Add(tmpAdd, s1, s2, mask);
-        MicroAPI::Sub(tmpSub, s1, s2, mask);
-        MicroAPI::Mul(tmpAddHalf, tmpAdd, value0P5, mask);
-        MicroAPI::Add(d0, s0, tmpAddHalf, mask);
-        MicroAPI::Mul(d1, tmpSub, value0P5, mask);
-        MicroAPI::Add(d2, tmpAddHalf, s3, mask);
+        Reg::Add(tmpAdd, s1, s2, mask);
+        Reg::Sub(tmpSub, s1, s2, mask);
+        Reg::Mul(tmpAddHalf, tmpAdd, value0P5, mask);
+        Reg::Add(d0, s0, tmpAddHalf, mask);
+        Reg::Mul(d1, tmpSub, value0P5, mask);
+        Reg::Add(d2, tmpAddHalf, s3, mask);
     }
 
     TEventID mte32mte2_ = 0;
