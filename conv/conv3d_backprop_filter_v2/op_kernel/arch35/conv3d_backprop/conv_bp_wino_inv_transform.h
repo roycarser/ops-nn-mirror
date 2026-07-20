@@ -79,8 +79,7 @@ public:
                                            bool atomicAdd)
     {
         constexpr uint16_t aivNums = AivNumInBlock();
-        constexpr uint16_t singleShapeInvTransCout = BlockConfig::SingleShapeInvTransformCout<TilingT>();
-        constexpr uint16_t singleBlockCout = singleShapeInvTransCout * aivNums;
+        constexpr uint16_t singleBlockCout = BlockConfig::SingleShapeInvTransformCout<TilingT>() * aivNums;
         constexpr uint8_t BufCnt = BlockConfig::InvTransformBufCnt<TilingT>();
         const uint16_t aivId = GetSubBlockIdx();
         if (atomicAdd) {
