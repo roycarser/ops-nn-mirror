@@ -92,6 +92,45 @@ bool CheckWinoShape(const Conv3dBpFilterV2RunInfo& runInfo, const char* opName)
     }
     return true;
 }
+
+bool GetSingleShapeTileHW(Conv3DBackpropFilterV2WinogradTiling::SingleShapeTile tileShape, bool isFp32,
+                          uint32_t& outTileH, uint32_t& outTileW)
+{
+    using ST = Conv3DBackpropFilterV2WinogradTiling::SingleShapeTile;
+    uint32_t b16h8w8_h = 8;
+    uint32_t b16h8w8_w = 8;
+
+    uint32_t b16h4w16_h = 4;
+    uint32_t b16h4w16_w = 16;
+
+    uint32_t b32h4w8_h = 4;
+    uint32_t b32h4w8_w = 8;
+
+    uint32_t b32h2w16_h = 2;
+    uint32_t b32h2w16_w = 16;
+
+    if (tileShape == Conv3DBackpropFilterV2WinogradTiling::SingleShapeTile::B16H4W16_B32H2W16) {
+        if (isFp32) {
+            outTileH = b32h2w16_h;
+            outTileW = b32h2w16_w;
+        } else {
+            outTileH = b16h4w16_h;
+            outTileW = b16h4w16_w;
+        }
+        return true;
+    } else if (tileShape == Conv3DBackpropFilterV2WinogradTiling::SingleShapeTile::B16H8W8_B32H4W8) {
+        if (isFp32) {
+            outTileH = b32h4w8_h;
+            outTileW = b32h4w8_w;
+        } else {
+            outTileH = b16h8w8_h;
+            outTileW = b16h8w8_w;
+        }
+        return true;
+    }
+    return false;
+}
+
 } // namespace
 
 bool Conv3DBackpropFilterV2WinogradTiling::IsCapable()
@@ -165,16 +204,19 @@ uint64_t Conv3DBackpropFilterV2WinogradTiling::GetTilingKey() const
 Conv3DBackpropFilterV2WinogradTiling::SingleShapeTile SelectTemplate(uint32_t tileH, uint32_t tileW, bool isFp32)
 {
     // B16H8W8_B32H4W8
-    uint32_t singleShapeTileH1 = isFp32 ? 4 : 8;
-    uint32_t singleShapeTileW1 = TILE_W_8;
+    uint32_t singleShapeTileH1;
+    uint32_t singleShapeTileW1;
+    GetSingleShapeTileHW(Conv3DBackpropFilterV2WinogradTiling::SingleShapeTile::B16H8W8_B32H4W8, isFp32,
+                         singleShapeTileH1, singleShapeTileW1);
 
     // B16H4W16_B32H2W16
-    uint32_t singleShapeTileH2 = isFp32 ? 2 : 4;
-    uint32_t singleShapeTileW2 = TILE_W_16;
+    uint32_t singleShapeTileH2;
+    uint32_t singleShapeTileW2;
+    GetSingleShapeTileHW(Conv3DBackpropFilterV2WinogradTiling::SingleShapeTile::B16H4W16_B32H2W16, isFp32,
+                         singleShapeTileH2, singleShapeTileW2);
 
     uint32_t clusters1 = Ops::Base::CeilDiv(tileH, singleShapeTileH1) * Ops::Base::CeilDiv(tileW, singleShapeTileW1);
     uint32_t clusters2 = Ops::Base::CeilDiv(tileH, singleShapeTileH2) * Ops::Base::CeilDiv(tileW, singleShapeTileW2);
-
     // 谁的空转块更少选谁,计算块一样多时，当前选择H4W16,内轴更大，可能会有一些优势
     if (clusters1 < clusters2) {
         return Conv3DBackpropFilterV2WinogradTiling::SingleShapeTile::B16H8W8_B32H4W8;
@@ -199,13 +241,8 @@ ge::graphStatus Conv3DBackpropFilterV2WinogradTiling::GetWorkspaceSize()
 
     uint32_t singleShapeTileH;
     uint32_t singleShapeTileW;
-    if (singleShapeTile_ == SingleShapeTile::B16H8W8_B32H4W8) {
-        singleShapeTileH = runInfo_.a_dtype_bytes == FP16_BYTES ? 8 : 4;
-        singleShapeTileW = TILE_W_8;
-    } else if (singleShapeTile_ == SingleShapeTile::B16H4W16_B32H2W16) {
-        singleShapeTileH = runInfo_.a_dtype_bytes == FP16_BYTES ? 4 : 2;
-        singleShapeTileW = TILE_W_16;
-    } else {
+    if (!GetSingleShapeTileHW(singleShapeTile_, runInfo_.a_dtype_bytes == FP32_BYTES, singleShapeTileH,
+                              singleShapeTileW)) {
         return ge::GRAPH_FAILED;
     }
 

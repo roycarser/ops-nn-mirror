@@ -205,7 +205,6 @@ private:
                                          LocalTensor<T>& l1b, uint32_t l0aMStep, uint32_t l0aKStep, uint32_t l0bMStep,
                                          uint32_t l0bKStep)
     {
-        constexpr uint32_t FP32_DST_STRIDE_DIVISOR = 2;
         LoadData2DParamsV2 load2d;
         load2d.mStartPosition = 0;
         load2d.kStartPosition = 0;
@@ -231,24 +230,19 @@ private:
             for (uint8_t i = 0; i < L0POINTS.pointPerGroup; i++) {
                 uint8_t pointIdx = pointGroupOffset + i;
                 uint32_t offsetL1 = pointIdx * tiles.elements * C0<T>();
+                constexpr uint32_t FP32_DST_STRIDE_DIVISOR = 2;
 
                 load2d.mStep = l0aMStep;
                 load2d.kStep = l0aKStep;
-                if constexpr (sizeof(T) == 4) {
-                    load2d.dstStride = static_cast<int32_t>(l0aKStep) / FP32_DST_STRIDE_DIVISOR;
-                } else {
-                    load2d.dstStride = static_cast<int32_t>(l0aKStep);
-                }
+                load2d.dstStride = sizeof(T) == 4 ? static_cast<int32_t>(l0aKStep) / FP32_DST_STRIDE_DIVISOR :
+                                                    static_cast<int32_t>(l0aKStep);
 
                 LoadData(l0a[i * l0aPointElements], l1a[offsetL1], load2d);
 
                 load2d.mStep = l0bMStep;
                 load2d.kStep = l0bKStep;
-                if constexpr (sizeof(T) == 4) {
-                    load2d.dstStride = static_cast<int32_t>(l0bKStep) / FP32_DST_STRIDE_DIVISOR;
-                } else {
-                    load2d.dstStride = static_cast<int32_t>(l0bKStep);
-                }
+                load2d.dstStride = sizeof(T) == 4 ? static_cast<int32_t>(l0bKStep) / FP32_DST_STRIDE_DIVISOR :
+                                                    static_cast<int32_t>(l0bKStep);
 
                 LoadData(l0b[i * l0bPointElements], l1b[offsetL1], load2d);
             }
