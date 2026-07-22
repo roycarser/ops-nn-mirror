@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * Copyright (c) 2026 Huawei Technologies Co., Ltd.
  * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
  * CANN Open Software License Agreement Version 2.0 (the "License").
  * Please refer to the License for details. You may not use this file except in compliance with the License.
@@ -34,7 +34,6 @@ constexpr uint32_t FP16_BYTES = 2;
 constexpr uint32_t TILE_W_8 = 8;
 constexpr uint32_t TILE_W_16 = 16;
 constexpr uint32_t WINO_TRANSFORM_MATRIX_SIZE = 64;
-constexpr uint32_t TILING_FLAG_H4W16 = 2;
 
 bool CheckWinoDtype(const Conv3dBpFilterV2RunInfo& runInfo, const char* opName)
 {
@@ -146,11 +145,13 @@ bool Conv3DBackpropFilterV2WinogradTiling::CheckFormat()
 
 uint64_t Conv3DBackpropFilterV2WinogradTiling::GetTilingKey() const
 {
-    uint8_t tilingFlag = 1;
+    constexpr uint8_t TilingFlag1 = 1;
+    constexpr uint8_t TilingFlag2 = 2;
+    uint8_t tilingFlag = TilingFlag1;
     if (singleShapeTile_ == SingleShapeTile::B16H8W8_B32H4W8) {
-        tilingFlag = 1;
+        tilingFlag = TilingFlag1;
     } else if (singleShapeTile_ == SingleShapeTile::B16H4W16_B32H2W16) {
-        tilingFlag = TILING_FLAG_H4W16;
+        tilingFlag = TilingFlag2;
     }
 
     constexpr uint8_t ResidentFmap = 0;
