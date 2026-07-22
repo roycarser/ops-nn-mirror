@@ -234,15 +234,15 @@ private:
 
                 load2d.mStep = l0aMStep;
                 load2d.kStep = l0aKStep;
-                load2d.dstStride = sizeof(T) == 4 ? static_cast<int32_t>(l0aKStep) / FP32_DST_STRIDE_DIVISOR :
-                                                    static_cast<int32_t>(l0aKStep);
+                load2d.dstStride = Std::is_same_v<T, float> ? static_cast<int32_t>(l0aKStep) / FP32_DST_STRIDE_DIVISOR :
+                                                              static_cast<int32_t>(l0aKStep);
 
                 LoadData(l0a[i * l0aPointElements], l1a[offsetL1], load2d);
 
                 load2d.mStep = l0bMStep;
                 load2d.kStep = l0bKStep;
-                load2d.dstStride = sizeof(T) == 4 ? static_cast<int32_t>(l0bKStep) / FP32_DST_STRIDE_DIVISOR :
-                                                    static_cast<int32_t>(l0bKStep);
+                load2d.dstStride = Std::is_same_v<T, float> ? static_cast<int32_t>(l0bKStep) / FP32_DST_STRIDE_DIVISOR :
+                                                              static_cast<int32_t>(l0bKStep);
 
                 LoadData(l0b[i * l0bPointElements], l1b[offsetL1], load2d);
             }
