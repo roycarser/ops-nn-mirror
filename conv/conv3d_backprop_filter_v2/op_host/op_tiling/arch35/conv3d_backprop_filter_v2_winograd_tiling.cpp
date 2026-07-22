@@ -120,12 +120,12 @@ bool Conv3DBackpropFilterV2WinogradTiling::IsCapable()
     return true;
 }
 
-constexpr size_t Y_INDEX = 2;
-constexpr size_t FILTER_INDEX = 0;
-constexpr size_t OUTPUT_BP_INDEX = 0;
-
 bool Conv3DBackpropFilterV2WinogradTiling::CheckFormat()
 {
+    constexpr size_t Y_INDEX = 2;
+    constexpr size_t FILTER_INDEX = 0;
+    constexpr size_t OUTPUT_BP_INDEX = 0;
+
     const auto fmapDesc = context_->GetInputDesc(OUTPUT_BP_INDEX);
     OP_TILING_CHECK(fmapDesc == nullptr, CUBE_INNER_ERR_REPORT("Conv3DBackpropFilterV2", "fmap_desc is null"),
                     return false);
@@ -227,8 +227,8 @@ ge::graphStatus Conv3DBackpropFilterV2WinogradTiling::GetWorkspaceSize()
     userWorkSpaceSize += static_cast<size_t>(runInfo_.batch) * c1c0Dy * runInfo_.ho * runInfo_.wo;
 
     // 切k的空间
-    userWorkSpaceSize += SINGLE_SHAPE_C * SINGLE_SHAPE_C * WINO_KERNEL_SIZE_3 * WINO_KERNEL_SIZE_3 *
-                         sizeof(float) * platformInfo_.core_num;
+    userWorkSpaceSize += SINGLE_SHAPE_C * SINGLE_SHAPE_C * WINO_KERNEL_SIZE_3 * WINO_KERNEL_SIZE_3 * sizeof(float) *
+                         platformInfo_.core_num;
 
     workspaces[0] = WORKSPACE + userWorkSpaceSize;
     return ge::GRAPH_SUCCESS;
