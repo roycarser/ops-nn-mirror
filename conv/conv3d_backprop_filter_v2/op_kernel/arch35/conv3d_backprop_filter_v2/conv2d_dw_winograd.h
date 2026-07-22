@@ -17,8 +17,8 @@
 #define CONV2D_BACKPROP_FILTER_WINOGRAD_H
 
 #include "conv3d_backprop_filter_v2_tiling_data.h"
-#include "../conv3d_backprop/conv_bp_wino.h"
-#include "../conv3d_backprop/conv_bp_wino_transdata.h"
+#include "../conv3d_backprop/winograd/conv_bp_wino.h"
+#include "../conv3d_backprop/winograd/conv_bp_wino_transdata.h"
 
 using namespace AscendC;
 
