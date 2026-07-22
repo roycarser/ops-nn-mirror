@@ -227,8 +227,8 @@ ge::graphStatus Conv3DBackpropFilterV2WinogradTiling::GetWorkspaceSize()
     userWorkSpaceSize += static_cast<size_t>(runInfo_.batch) * c1c0Dy * runInfo_.ho * runInfo_.wo;
 
     // 切k的空间
-    userWorkSpaceSize += WINO_TRANSFORM_MATRIX_SIZE * WINO_TRANSFORM_MATRIX_SIZE *
-                         WINO_KERNEL_SIZE * WINO_KERNEL_SIZE * sizeof(float) * platformInfo_.core_num;
+    userWorkSpaceSize += WINO_TRANSFORM_MATRIX_SIZE * WINO_TRANSFORM_MATRIX_SIZE * WINO_KERNEL_SIZE * WINO_KERNEL_SIZE *
+                         sizeof(float) * platformInfo_.core_num;
 
     workspaces[0] = WORKSPACE + userWorkSpaceSize;
     return ge::GRAPH_SUCCESS;
