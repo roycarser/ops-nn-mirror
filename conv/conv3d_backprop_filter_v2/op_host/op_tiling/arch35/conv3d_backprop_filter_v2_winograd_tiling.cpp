@@ -33,7 +33,6 @@ constexpr uint32_t FP32_BYTES = 4;
 constexpr uint32_t FP16_BYTES = 2;
 constexpr uint32_t TILE_W_8 = 8;
 constexpr uint32_t TILE_W_16 = 16;
-constexpr uint32_t WINO_TRANSFORM_MATRIX_SIZE = 64;
 
 bool CheckWinoDtype(const Conv3dBpFilterV2RunInfo& runInfo, const char* opName)
 {
