@@ -20,8 +20,8 @@
 #define TPL_STREAM_K 1
 #define TPL_MN_STREAM_K 2
 #define TPL_WINOGRAD_DISABLE 0
-#define TPL_WINOGRAD_TILING1 1
-#define TPL_WINOGRAD_TILING2 2
+#define TPL_WINOGRAD_SINGLESHAPE_TILEHW_1 1
+#define TPL_WINOGRAD_SINGLESHAPE_TILEHW_2 2
 #define TPL_WINOGRAD_RESIDENT_FMAP 0
 #define TPL_WINOGRAD_RESIDENT_DY 1
 
@@ -31,7 +31,8 @@ ASCENDC_TPL_ARGS_DECL(Conv3dBackPropFilterV2,
                                             TPL_MN_STREAM_K), // LIST模式, 穷举
                       ASCENDC_TPL_BOOL_DECL(isSplitKernelHW, 0, 1), ASCENDC_TPL_BOOL_DECL(groupEnlarge, 0, 1),
                       ASCENDC_TPL_UINT_DECL(winogradTilingFlag, ASCENDC_TPL_8_BW, ASCENDC_TPL_UI_LIST,
-                                            TPL_WINOGRAD_DISABLE, TPL_WINOGRAD_TILING1, TPL_WINOGRAD_TILING2),
+                                            TPL_WINOGRAD_DISABLE, TPL_WINOGRAD_SINGLESHAPE_TILEHW_1,
+                                            TPL_WINOGRAD_SINGLESHAPE_TILEHW_2),
                       ASCENDC_TPL_BOOL_DECL(winogradResidentFlag, 0, 1));
 
 // 模板参数组合
@@ -81,22 +82,26 @@ ASCENDC_TPL_SEL(
     ASCENDC_TPL_ARGS_SEL(ASCENDC_TPL_KERNEL_TYPE_SEL(ASCENDC_TPL_MIX_AIC_1_2),
                          ASCENDC_TPL_UINT_SEL(conv3DDWTemplateId, ASCENDC_TPL_UI_LIST, TPL_STREAM_K),
                          ASCENDC_TPL_BOOL_SEL(isSplitKernelHW, 0), ASCENDC_TPL_BOOL_SEL(groupEnlarge, 0),
-                         ASCENDC_TPL_UINT_SEL(winogradTilingFlag, ASCENDC_TPL_UI_LIST, TPL_WINOGRAD_TILING1),
+                         ASCENDC_TPL_UINT_SEL(winogradTilingFlag, ASCENDC_TPL_UI_LIST,
+                                              TPL_WINOGRAD_SINGLESHAPE_TILEHW_1),
                          ASCENDC_TPL_BOOL_SEL(winogradResidentFlag, TPL_WINOGRAD_RESIDENT_FMAP), ),
     ASCENDC_TPL_ARGS_SEL(ASCENDC_TPL_KERNEL_TYPE_SEL(ASCENDC_TPL_MIX_AIC_1_2),
                          ASCENDC_TPL_UINT_SEL(conv3DDWTemplateId, ASCENDC_TPL_UI_LIST, TPL_STREAM_K),
                          ASCENDC_TPL_BOOL_SEL(isSplitKernelHW, 0), ASCENDC_TPL_BOOL_SEL(groupEnlarge, 0),
-                         ASCENDC_TPL_UINT_SEL(winogradTilingFlag, ASCENDC_TPL_UI_LIST, TPL_WINOGRAD_TILING2),
+                         ASCENDC_TPL_UINT_SEL(winogradTilingFlag, ASCENDC_TPL_UI_LIST,
+                                              TPL_WINOGRAD_SINGLESHAPE_TILEHW_2),
                          ASCENDC_TPL_BOOL_SEL(winogradResidentFlag, TPL_WINOGRAD_RESIDENT_FMAP), ),
     ASCENDC_TPL_ARGS_SEL(ASCENDC_TPL_KERNEL_TYPE_SEL(ASCENDC_TPL_MIX_AIC_1_2),
                          ASCENDC_TPL_UINT_SEL(conv3DDWTemplateId, ASCENDC_TPL_UI_LIST, TPL_STREAM_K),
                          ASCENDC_TPL_BOOL_SEL(isSplitKernelHW, 0), ASCENDC_TPL_BOOL_SEL(groupEnlarge, 0),
-                         ASCENDC_TPL_UINT_SEL(winogradTilingFlag, ASCENDC_TPL_UI_LIST, TPL_WINOGRAD_TILING1),
+                         ASCENDC_TPL_UINT_SEL(winogradTilingFlag, ASCENDC_TPL_UI_LIST,
+                                              TPL_WINOGRAD_SINGLESHAPE_TILEHW_1),
                          ASCENDC_TPL_BOOL_SEL(winogradResidentFlag, TPL_WINOGRAD_RESIDENT_DY), ),
     ASCENDC_TPL_ARGS_SEL(ASCENDC_TPL_KERNEL_TYPE_SEL(ASCENDC_TPL_MIX_AIC_1_2),
                          ASCENDC_TPL_UINT_SEL(conv3DDWTemplateId, ASCENDC_TPL_UI_LIST, TPL_STREAM_K),
                          ASCENDC_TPL_BOOL_SEL(isSplitKernelHW, 0), ASCENDC_TPL_BOOL_SEL(groupEnlarge, 0),
-                         ASCENDC_TPL_UINT_SEL(winogradTilingFlag, ASCENDC_TPL_UI_LIST, TPL_WINOGRAD_TILING2),
+                         ASCENDC_TPL_UINT_SEL(winogradTilingFlag, ASCENDC_TPL_UI_LIST,
+                                              TPL_WINOGRAD_SINGLESHAPE_TILEHW_2),
                          ASCENDC_TPL_BOOL_SEL(winogradResidentFlag, TPL_WINOGRAD_RESIDENT_DY), ));
 
 #endif // CONV3D_BACKPROP_FILTER_V2_TILING_KEY_ARCH35_H

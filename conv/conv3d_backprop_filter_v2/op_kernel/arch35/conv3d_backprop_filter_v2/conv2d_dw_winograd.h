@@ -111,16 +111,16 @@ private:
         constexpr static __aicore__ inline SingleShapeTile Get()
         {
             // TileHTileW组合:
-            // flag1:B16H8W8 B32H4W8
-            // flag2:B16H4W16 B32H2W16
+            // 1.fp16/bf16: H8W8  fp32:H4W8
+            // 2.fp16/bf16: H4W16 fp32:H2W16
             constexpr bool isB32 = Std::is_same_v<SrcT, float>;
-            if constexpr (WinoTilingFlag == TPL_WINOGRAD_TILING1) {
+            if constexpr (WinoTilingFlag == TPL_WINOGRAD_SINGLESHAPE_TILEHW_1) {
                 if constexpr (isB32) {
                     return {4, 8};
                 } else {
                     return {8, 8};
                 }
-            } else if constexpr (WinoTilingFlag == TPL_WINOGRAD_TILING2) {
+            } else if constexpr (WinoTilingFlag == TPL_WINOGRAD_SINGLESHAPE_TILEHW_2) {
                 if constexpr (isB32) {
                     return {2, 16};
                 } else {

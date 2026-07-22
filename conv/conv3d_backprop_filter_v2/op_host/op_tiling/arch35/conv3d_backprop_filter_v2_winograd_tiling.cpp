@@ -26,9 +26,9 @@ namespace Ops {
 namespace NN {
 namespace Conv {
 namespace {
-constexpr uint32_t WINO_KERNEL_SIZE = 3;
-constexpr uint32_t C0_SIZE = 64;
-constexpr uint32_t MIN_WINO_BLOCKS = 16;
+constexpr uint32_t WINO_KERNEL_SIZE_3 = 3;
+constexpr uint32_t SINGLE_SHAPE_C = 64;
+constexpr uint32_t MIN_SINGLE_SHAPE_BLOCKS = 16;
 constexpr uint32_t FP32_BYTES = 4;
 constexpr uint32_t FP16_BYTES = 2;
 constexpr uint32_t TILE_W_8 = 8;
@@ -65,7 +65,7 @@ bool CheckWinoAttrs(const Conv3dBpFilterV2RunInfo& runInfo, const char* opName)
         return false;
     }
 
-    if (runInfo.kh != WINO_KERNEL_SIZE || runInfo.kw != WINO_KERNEL_SIZE) {
+    if (runInfo.kh != WINO_KERNEL_SIZE_3 || runInfo.kw != WINO_KERNEL_SIZE_3) {
         OP_LOGD(opName, "Winograd tiling only support 3*3 kernel");
         return false;
     }
@@ -86,8 +86,8 @@ bool CheckWinoShape(const Conv3dBpFilterV2RunInfo& runInfo, const char* opName)
         OP_LOGD(opName, "current reduce asix is too large for Winograd impl");
         return false;
     }
-
-    if ((runInfo.co / C0_SIZE) * (runInfo.ci / C0_SIZE) < MIN_WINO_BLOCKS) {
+    // c轴太小时winograd性能不一定比原始kernel性能好，所以当前限制c轴能划出至少16个基本块
+    if ((runInfo.co / SINGLE_SHAPE_C) * (runInfo.ci / SINGLE_SHAPE_C) < MIN_SINGLE_SHAPE_BLOCKS) {
         OP_LOGD(opName, "the cout/cin is too small for winograd");
         return false;
     }
@@ -228,7 +228,7 @@ ge::graphStatus Conv3DBackpropFilterV2WinogradTiling::GetWorkspaceSize()
     userWorkSpaceSize += static_cast<size_t>(runInfo_.batch) * c1c0Dy * runInfo_.ho * runInfo_.wo;
 
     // 切k的空间
-    userWorkSpaceSize += WINO_TRANSFORM_MATRIX_SIZE * WINO_TRANSFORM_MATRIX_SIZE * WINO_KERNEL_SIZE * WINO_KERNEL_SIZE *
+    userWorkSpaceSize += SINGLE_SHAPE_C * SINGLE_SHAPE_C * WINO_KERNEL_SIZE_3 * WINO_KERNEL_SIZE_3 *
                          sizeof(float) * platformInfo_.core_num;
 
     workspaces[0] = WORKSPACE + userWorkSpaceSize;
