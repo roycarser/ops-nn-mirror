@@ -93,7 +93,7 @@ public:
 
             const uint16_t localCoutLength = Ops::Base::CeilDiv(coutLengthInBlock, aivNums);
             const uint16_t localCoutOffset = localCoutLength * aivId;
-            // TODO 尾轮不逆变换，累加完在做一次逆变换
+            // 尾轮不逆变换，累加完在做一次逆变换
             if (localCoutOffset < coutLengthInBlock) {
                 const uint32_t processCoutLength = Std::min(localCoutLength, coutLengthInBlock - localCoutOffset);
                 const uint32_t coutCin = processCoutLength * localBlock.cinLength;
@@ -185,7 +185,9 @@ private:
         uint32_t bufLengthInBytes = bufLength * sizeof(float);
         uint32_t inputBufLengthInBytes = inputCnt * bufLengthInBytes;
 
-        LocalTensor<float> accumulateBuf(TPosition::VECCALC, inputCnt * 2 * bufLengthInBytes, bufLengthInBytes);
+        constexpr uint32_t PING_PONG_BUF_CNT = 2;
+        LocalTensor<float> accumulateBuf(TPosition::VECCALC, inputCnt * PING_PONG_BUF_CNT * bufLengthInBytes,
+                                         bufLengthInBytes);
 
         bool pingPongFlag = false;
         constexpr uint32_t TailBlockSize = BlockConfig::SingleShapeCout<TilingT>() *

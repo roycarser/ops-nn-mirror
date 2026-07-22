@@ -38,7 +38,7 @@ public:
 
     ~Conv3DBackpropFilterV2WinogradTiling() override = default;
 
-    enum SingleShapeTile {
+    enum class SingleShapeTile {
         B16H8W8_B32H4W8,
         B16H4W16_B32H2W16,
     };

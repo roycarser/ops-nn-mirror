@@ -240,7 +240,7 @@ public:
         __ubuf__ T* srcBufAddr = reinterpret_cast<__ubuf__ T*>(srcBuf.GetPhyAddr());
         __ubuf__ T* outBufAddr = reinterpret_cast<__ubuf__ T*>(outBuf.GetPhyAddr());
 
-        // TODO 当前需要优化的点主要集中在列变换，列变换是不是可以不管尾块统一按标准块处理？
+        // 当前需要优化的点主要集中在列变换，列变换是不是可以不管尾块统一按标准块处理？
         const bool isTail = box.tile.wLength < BlockConfig::SingleShapeTileW<TilingConfigT>() ||
                             box.tile.hLength < BlockConfig::SingleShapeTileH<TilingConfigT>();
 

@@ -559,7 +559,7 @@ private:
 
         if constexpr (NotIdle) {
             winoMmad_.Compute(tiles, cout, coutC1, cin, cinC1, firstK, l1PingPongFlag);
-            // TODO pingpong和ub2l1更新同步
+            // pingpong和ub2l1更新同步
             l1PingPongFlag = !l1PingPongFlag;
         }
 

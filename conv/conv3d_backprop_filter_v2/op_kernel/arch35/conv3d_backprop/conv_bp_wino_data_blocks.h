@@ -190,7 +190,6 @@ class SwizzleTopology2D {
 public:
     // 实现简单的Tile和蛇形走位，所有核构成一个blockHW块进行递进，提升L2cache的命中率
     // 尾轮自适应，仅最后一轮才会产生空转
-    //
     //                          blockW(4)
     //                    |-----------------------|
     //                 -  +-----+-----+-----+-----+-----+-----+-----+
@@ -204,20 +203,29 @@ public:
 
     __aicore__ static inline void CalBlockGrid(uint32_t h, uint32_t w, uint16_t& outBlockH, uint16_t& outBlockW)
     {
+        constexpr uint16_t CORE_NUM_32 = 32;
+        constexpr uint16_t CORE_NUM_28 = 28;
+        constexpr uint16_t CORE_NUM_36 = 36;
+        constexpr uint16_t GRID_H_32C = 4;
+        constexpr uint16_t GRID_W_32C = 8;
+        constexpr uint16_t GRID_H_28C = 4;
+        constexpr uint16_t GRID_W_28C = 7;
+        constexpr uint16_t GRID_H_36C = 6;
+        constexpr uint16_t GRID_W_36C = 6;
         uint16_t coreNum = GetBlockNum();
         uint16_t bestH = 1;
         uint16_t bestW = coreNum;
 
         // 常用核数配置直接写死，不用再去跑一遍循环
-        if (coreNum == 32) {
-            bestH = 4;
-            bestW = 8;
-        } else if (coreNum == 28) {
-            bestH = 4;
-            bestW = 7;
-        } else if (coreNum == 36) {
-            bestH = 6;
-            bestW = 6;
+        if (coreNum == CORE_NUM_32) {
+            bestH = GRID_H_32C;
+            bestW = GRID_W_32C;
+        } else if (coreNum == CORE_NUM_28) {
+            bestH = GRID_H_28C;
+            bestW = GRID_W_28C;
+        } else if (coreNum == CORE_NUM_36) {
+            bestH = GRID_H_36C;
+            bestW = GRID_W_36C;
         } else {
             for (uint16_t i = 1; i * i <= coreNum; i++) {
                 if (coreNum % i == 0) {
@@ -244,7 +252,6 @@ public:
     __aicore__ inline bool GetHW(uint32_t loopIdx, uint16_t coreId, uint32_t& outH, uint32_t& outW) const
     {
         uint32_t flattenIdx = loopIdx * GetBlockNum() + coreId;
-
         // 拦截越界
         if (unlikely(flattenIdx >= totalCnt_)) {
             outH = h_;
@@ -279,12 +286,12 @@ public:
         if (startSuperIdx == endSuperIdx) {
             // 1. 未换行：直接取最大值
             boundW = Std::max(startW, endW);
-        } else if (endSuperIdx - startSuperIdx >= 2) {
+        } else if (endSuperIdx - startSuperIdx >= SNAKE_PATTERN_PERIOD) {
             // 2. 跨越多行：中间必然包含一个完整的偶数行，绝对会撞击右侧墙壁
             boundW = w_ - 1;
         } else {
             // 3. 恰好相邻跨越 1 行
-            if (startSuperIdx % 2 == 0) {
+            if (startSuperIdx % SNAKE_PATTERN_PERIOD == 0) {
                 // 偶切奇：在右侧墙壁折返，必然触碰 w_ - 1
                 boundW = w_ - 1;
             } else {
@@ -298,6 +305,8 @@ public:
     }
 
     __aicore__ inline uint32_t TotalCnt() const { return totalCnt_; }
+
+    static constexpr uint32_t SNAKE_PATTERN_PERIOD = 2;
 
 private:
     __aicore__ inline void ComputeHW(uint32_t flattenIdx, uint32_t& outH, uint32_t& outW, uint32_t& outSuperIdx) const
@@ -313,7 +322,7 @@ private:
         outH = superRowH + localIdx % localBlockH;
         const uint32_t forwardW = localIdx / localBlockH;
         // 蛇形走位，先从头走到尾，在从尾走到头
-        outW = (superIdx % 2 == 0) ? forwardW : (w_ - 1 - forwardW);
+        outW = (superIdx % SNAKE_PATTERN_PERIOD == 0) ? forwardW : (w_ - 1 - forwardW);
         outSuperIdx = superIdx;
     }
 
@@ -453,7 +462,6 @@ class TailBlockSplitKIterator {
 public:
     // 由于主轮的走位不是按照固定的矩形方式走的，TailBlocks在整个基本块里的形状不一定能用一个矩形表示，所以构造函数里需要
     // 传入主轮使用的SwizzleTopology2D解算实际坐标
-    //
     inline __aicore__ TailBlockSplitKIterator(uint32_t tailBlockCnt, const SwizzleTopology2D& topology, uint32_t totalK,
                                               uint32_t cout, uint32_t cin)
         : topology_(topology),

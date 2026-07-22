@@ -28,7 +28,7 @@ public:
 
     __aicore__ inline void Init()
     {
-        // TODO L1 要留一个(16-tile.elements%16)的空间
+        // L1 要留一个(16-tile.elements%16)的空间
         //  让load2d取最后一个点的最后一个分形时凑满512字节
 
         TPipe* pipe = GetTPipePtr();
@@ -68,7 +68,7 @@ public:
         const EventFlag& mte2mte1 = mte2mte1Flag_[l1PingPongFlag];
         WaitFlag<HardEvent::MTE1_MTE2>(mte2mte1.dst2src);
 
-        // TODO 确认读L1越界的影响，否则 要留一个(tile.elements%16)的空间
+        // 确认读L1越界的影响，否则 要留一个(tile.elements%16)的空间
         //  让load2d取最后一个点的最后一个分形时凑满512字节
         auto l1Buf = GetL1Buf(l1PingPongFlag);
 
@@ -158,7 +158,7 @@ public:
 
             // mSize对齐到2用于ub均分,由于实际计算分形一定是16的倍数，所以这么操作应当不会导致地址溢出
             // 假设cout为16，那么对齐后还是16，如果是17那就会变成18，实际计算分形则是32，不存在溢出
-            //  //TODO 判断尾块非C0对齐有没有问题
+            //  判断尾块非C0对齐有没有问题
             FixpipeParamsC310 fp;
             fp.mSize = aivNums == 2 ? coutLength + (coutLength & 1) : coutLength;
             fp.nSize = cin;
@@ -205,6 +205,7 @@ private:
                                          LocalTensor<T>& l1b, uint32_t l0aMStep, uint32_t l0aKStep, uint32_t l0bMStep,
                                          uint32_t l0bKStep)
     {
+        constexpr uint32_t FP32_DST_STRIDE_DIVISOR = 2;
         LoadData2DParamsV2 load2d;
         load2d.mStartPosition = 0;
         load2d.kStartPosition = 0;
@@ -234,7 +235,7 @@ private:
                 load2d.mStep = l0aMStep;
                 load2d.kStep = l0aKStep;
                 if constexpr (sizeof(T) == 4) {
-                    load2d.dstStride = static_cast<int32_t>(l0aKStep) / 2;
+                    load2d.dstStride = static_cast<int32_t>(l0aKStep) / FP32_DST_STRIDE_DIVISOR;
                 } else {
                     load2d.dstStride = static_cast<int32_t>(l0aKStep);
                 }
@@ -244,7 +245,7 @@ private:
                 load2d.mStep = l0bMStep;
                 load2d.kStep = l0bKStep;
                 if constexpr (sizeof(T) == 4) {
-                    load2d.dstStride = static_cast<int32_t>(l0bKStep) / 2;
+                    load2d.dstStride = static_cast<int32_t>(l0bKStep) / FP32_DST_STRIDE_DIVISOR;
                 } else {
                     load2d.dstStride = static_cast<int32_t>(l0bKStep);
                 }

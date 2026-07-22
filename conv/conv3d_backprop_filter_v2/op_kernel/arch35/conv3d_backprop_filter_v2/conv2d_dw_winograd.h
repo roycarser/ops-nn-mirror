@@ -101,7 +101,8 @@ private:
         // 当输出+输入的两倍(原始数据+转置数据) > L2cache的0.85倍(冗余一些，可能有其他的东西占用)就关掉原始数据的L2
         // 有问题在调
         uint64_t outputBytes = static_cast<uint64_t>(cin_) * cout_ * 3 * 3 * sizeof(DstT);
-        return (outputBytes + inputBytes * 2) > L2CacheLimit;
+        constexpr uint32_t INPUT_DATA_COPIES = 2;
+        return (outputBytes + inputBytes * INPUT_DATA_COPIES) > L2CacheLimit;
     }
 
     struct SingleShapeTile {

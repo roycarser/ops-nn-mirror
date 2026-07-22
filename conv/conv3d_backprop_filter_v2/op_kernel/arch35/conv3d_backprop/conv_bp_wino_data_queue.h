@@ -154,6 +154,7 @@ public:
     static constexpr uint8_t POP_FLAG = Config::POP_FLAG;
     static constexpr uint8_t FREE_SLOTS = Config::FREE_SLOTS;
     static constexpr bool C2V = Config::C2V;
+    static constexpr uint8_t CROSS_CORE_SYNC_MODE = 4;
 
     __aicore__ inline void WaitSlot()
     {
@@ -163,11 +164,10 @@ public:
                 // 先用模式4模拟模式2
 #pragma unroll
                 for (uint8_t i = 0; i < AivNumInBlock(); i++) {
-                    AscendC::CrossCoreWaitFlag<4, SRC_PIPE>(POP_FLAG + 16 * i);
+                    AscendC::CrossCoreWaitFlag<CROSS_CORE_SYNC_MODE, SRC_PIPE>(POP_FLAG + 16 * i);
                 }
-
             } else {
-                AscendC::CrossCoreWaitFlag<4, SRC_PIPE>(POP_FLAG);
+                AscendC::CrossCoreWaitFlag<CROSS_CORE_SYNC_MODE, SRC_PIPE>(POP_FLAG);
             }
         }
     }
@@ -177,10 +177,10 @@ public:
         if constexpr (C2V) {
 #pragma unroll
             for (uint8_t i = 0; i < AivNumInBlock(); i++) {
-                AscendC::CrossCoreSetFlag<4, SRC_PIPE>(PUSH_FLAG + 16 * i);
+                AscendC::CrossCoreSetFlag<CROSS_CORE_SYNC_MODE, SRC_PIPE>(PUSH_FLAG + 16 * i);
             }
         } else {
-            AscendC::CrossCoreSetFlag<4, SRC_PIPE>(PUSH_FLAG);
+            AscendC::CrossCoreSetFlag<CROSS_CORE_SYNC_MODE, SRC_PIPE>(PUSH_FLAG);
         }
         if (freeSlots_ > 0) {
             freeSlots_--;
@@ -191,11 +191,11 @@ public:
     __aicore__ inline void WaitData()
     {
         if constexpr (C2V) {
-            AscendC::CrossCoreWaitFlag<4, SYNC_DST_PIPE>(PUSH_FLAG);
+            AscendC::CrossCoreWaitFlag<CROSS_CORE_SYNC_MODE, SYNC_DST_PIPE>(PUSH_FLAG);
         } else {
 #pragma unroll
             for (uint8_t i = 0; i < AivNumInBlock(); i++) {
-                AscendC::CrossCoreWaitFlag<4, SYNC_DST_PIPE>(PUSH_FLAG + 16 * i);
+                AscendC::CrossCoreWaitFlag<CROSS_CORE_SYNC_MODE, SYNC_DST_PIPE>(PUSH_FLAG + 16 * i);
             }
         }
     }
@@ -203,11 +203,11 @@ public:
     __aicore__ inline void DeQue()
     {
         if constexpr (C2V) {
-            AscendC::CrossCoreSetFlag<4, POP_PIPE>(POP_FLAG);
+            AscendC::CrossCoreSetFlag<CROSS_CORE_SYNC_MODE, POP_PIPE>(POP_FLAG);
         } else {
 #pragma unroll
             for (uint8_t i = 0; i < AivNumInBlock(); i++) {
-                AscendC::CrossCoreSetFlag<4, POP_PIPE>(POP_FLAG + 16 * i);
+                AscendC::CrossCoreSetFlag<CROSS_CORE_SYNC_MODE, POP_PIPE>(POP_FLAG + 16 * i);
             }
         }
     }

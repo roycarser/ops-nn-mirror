@@ -26,6 +26,16 @@ namespace Ops {
 namespace NN {
 namespace Conv {
 namespace {
+constexpr uint32_t WINO_KERNEL_SIZE = 3;
+constexpr uint32_t C0_SIZE = 64;
+constexpr uint32_t MIN_WINO_BLOCKS = 16;
+constexpr uint32_t FP32_BYTES = 4;
+constexpr uint32_t FP16_BYTES = 2;
+constexpr uint32_t TILE_W_8 = 8;
+constexpr uint32_t TILE_W_16 = 16;
+constexpr uint32_t WINO_TRANSFORM_MATRIX_SIZE = 64;
+constexpr uint32_t TILING_FLAG_H4W16 = 2;
+
 bool CheckWinoDtype(const Conv3dBpFilterV2RunInfo& runInfo, const char* opName)
 {
     // float16/bfloat16浮点误差比较严重，禁用，如果有int量化到时可以开下
@@ -56,7 +66,7 @@ bool CheckWinoAttrs(const Conv3dBpFilterV2RunInfo& runInfo, const char* opName)
         return false;
     }
 
-    if (runInfo.kh != 3 || runInfo.kw != 3) {
+    if (runInfo.kh != WINO_KERNEL_SIZE || runInfo.kw != WINO_KERNEL_SIZE) {
         OP_LOGD(opName, "Winograd tiling only support 3*3 kernel");
         return false;
     }
@@ -78,7 +88,7 @@ bool CheckWinoShape(const Conv3dBpFilterV2RunInfo& runInfo, const char* opName)
         return false;
     }
 
-    if ((runInfo.co / 64) * (runInfo.ci / 64) < 16) {
+    if ((runInfo.co / C0_SIZE) * (runInfo.ci / C0_SIZE) < MIN_WINO_BLOCKS) {
         OP_LOGD(opName, "the cout/cin is too small for winograd");
         return false;
     }
@@ -137,10 +147,10 @@ bool Conv3DBackpropFilterV2WinogradTiling::CheckFormat()
 uint64_t Conv3DBackpropFilterV2WinogradTiling::GetTilingKey() const
 {
     uint8_t tilingFlag = 1;
-    if (singleShapeTile_ == B16H8W8_B32H4W8) {
+    if (singleShapeTile_ == SingleShapeTile::B16H8W8_B32H4W8) {
         tilingFlag = 1;
-    } else if (singleShapeTile_ == B16H4W16_B32H2W16) {
-        tilingFlag = 2;
+    } else if (singleShapeTile_ == SingleShapeTile::B16H4W16_B32H2W16) {
+        tilingFlag = TILING_FLAG_H4W16;
     }
 
     constexpr uint8_t ResidentFmap = 0;
@@ -156,21 +166,20 @@ Conv3DBackpropFilterV2WinogradTiling::SingleShapeTile SelectTemplate(uint32_t ti
 {
     // B16H8W8_B32H4W8
     uint32_t singleShapeTileH1 = isFp32 ? 4 : 8;
-    uint32_t singleShapeTileW1 = 8;
+    uint32_t singleShapeTileW1 = TILE_W_8;
 
     // B16H4W16_B32H2W16
     uint32_t singleShapeTileH2 = isFp32 ? 2 : 4;
-    uint32_t singleShapeTileW2 = 16;
+    uint32_t singleShapeTileW2 = TILE_W_16;
 
     uint32_t clusters1 = Ops::Base::CeilDiv(tileH, singleShapeTileH1) * Ops::Base::CeilDiv(tileW, singleShapeTileW1);
-
     uint32_t clusters2 = Ops::Base::CeilDiv(tileH, singleShapeTileH2) * Ops::Base::CeilDiv(tileW, singleShapeTileW2);
 
     // 谁的空转块更少选谁,计算块一样多时，当前选择H4W16,内轴更大，可能会有一些优势
     if (clusters1 < clusters2) {
-        return Conv3DBackpropFilterV2WinogradTiling::B16H8W8_B32H4W8;
+        return Conv3DBackpropFilterV2WinogradTiling::SingleShapeTile::B16H8W8_B32H4W8;
     }
-    return Conv3DBackpropFilterV2WinogradTiling::B16H4W16_B32H2W16;
+    return Conv3DBackpropFilterV2WinogradTiling::SingleShapeTile::B16H4W16_B32H2W16;
 }
 
 ge::graphStatus Conv3DBackpropFilterV2WinogradTiling::DoOpTiling()
@@ -178,7 +187,7 @@ ge::graphStatus Conv3DBackpropFilterV2WinogradTiling::DoOpTiling()
     uint32_t tileH = Ops::Base::CeilDiv(runInfo_.ho, 2);
     uint32_t tileW = Ops::Base::CeilDiv(runInfo_.wo, 2);
 
-    singleShapeTile_ = SelectTemplate(tileH, tileW, runInfo_.a_dtype_bytes == 4);
+    singleShapeTile_ = SelectTemplate(tileH, tileW, runInfo_.a_dtype_bytes == FP32_BYTES);
     return ge::GRAPH_SUCCESS;
 }
 
@@ -190,12 +199,12 @@ ge::graphStatus Conv3DBackpropFilterV2WinogradTiling::GetWorkspaceSize()
 
     uint32_t singleShapeTileH;
     uint32_t singleShapeTileW;
-    if (singleShapeTile_ == B16H8W8_B32H4W8) {
-        singleShapeTileH = runInfo_.a_dtype_bytes == 2 ? 8 : 4;
-        singleShapeTileW = 8;
-    } else if (singleShapeTile_ == B16H4W16_B32H2W16) {
-        singleShapeTileH = runInfo_.a_dtype_bytes == 2 ? 4 : 2;
-        singleShapeTileW = 16;
+    if (singleShapeTile_ == SingleShapeTile::B16H8W8_B32H4W8) {
+        singleShapeTileH = runInfo_.a_dtype_bytes == FP16_BYTES ? 8 : 4;
+        singleShapeTileW = TILE_W_8;
+    } else if (singleShapeTile_ == SingleShapeTile::B16H4W16_B32H2W16) {
+        singleShapeTileH = runInfo_.a_dtype_bytes == FP16_BYTES ? 4 : 2;
+        singleShapeTileW = TILE_W_16;
     } else {
         return ge::GRAPH_FAILED;
     }
@@ -218,7 +227,8 @@ ge::graphStatus Conv3DBackpropFilterV2WinogradTiling::GetWorkspaceSize()
     userWorkSpaceSize += static_cast<size_t>(runInfo_.batch) * c1c0Dy * runInfo_.ho * runInfo_.wo;
 
     // 切k的空间
-    userWorkSpaceSize += 64 * 64 * 3 * 3 * sizeof(float) * platformInfo_.core_num;
+    userWorkSpaceSize += WINO_TRANSFORM_MATRIX_SIZE * WINO_TRANSFORM_MATRIX_SIZE *
+                         WINO_KERNEL_SIZE * WINO_KERNEL_SIZE * sizeof(float) * platformInfo_.core_num;
 
     workspaces[0] = WORKSPACE + userWorkSpaceSize;
     return ge::GRAPH_SUCCESS;

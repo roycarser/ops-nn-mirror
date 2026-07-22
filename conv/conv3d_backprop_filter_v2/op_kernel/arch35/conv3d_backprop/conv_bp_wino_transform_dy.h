@@ -88,7 +88,7 @@ struct Unfold16TileHWStorer {
         p.dst3 = p.dst2 + dstStride;
 
         // 这些地址用于reg的后半部分写入，需要减掉前半部分的地址偏移
-        // TODO 测试地址减掉后越界
+        // 测试地址减掉后越界
         p.dst4 = p.dst0 + tileW * C0<T>() - C0<T>() * 4 * dstTileBufWidthBlocks;
         p.dst5 = p.dst4 + dstStride;
         p.dst6 = p.dst5 + dstStride;
@@ -124,7 +124,7 @@ struct Unfold16TileHWStorer {
     static __simd_callee__ inline void store(StoreInfo<T>& p, RegTensor<T>& r0, RegTensor<T>& r1, RegTensor<T>& r2,
                                              RegTensor<T>& r3, MaskReg& highHalfPartMask)
     {
-        // TODO 尝试先gather在select完成block级别的交织
+        // 尝试先gather在select完成block级别的交织
 
         StoreAlign<T, DataCopyMode::DATA_BLOCK_COPY, PostLiteral::POST_MODE_UPDATE>(p.dst0, r0, p.dstTileBufWidthBlocks,
                                                                                     1, p.lowHalfPartMask);
