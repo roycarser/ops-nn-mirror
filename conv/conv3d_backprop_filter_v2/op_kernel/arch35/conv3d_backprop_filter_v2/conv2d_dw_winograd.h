@@ -114,13 +114,13 @@ private:
             // 1.fp16/bf16: H8W8  fp32:H4W8
             // 2.fp16/bf16: H4W16 fp32:H2W16
             constexpr bool isB32 = Std::is_same_v<SrcT, float>;
-            if constexpr (WinoTilingFlag == TPL_WINOGRAD_SINGLESHAPE_TILEHW_1) {
+            if constexpr (WinoTilingFlag == TPL_WINOGRAD_SINGLE_SHAPE_TILE_1) {
                 if constexpr (isB32) {
                     return {4, 8};
                 } else {
                     return {8, 8};
                 }
-            } else if constexpr (WinoTilingFlag == TPL_WINOGRAD_SINGLESHAPE_TILEHW_2) {
+            } else if constexpr (WinoTilingFlag == TPL_WINOGRAD_SINGLE_SHAPE_TILE_2) {
                 if constexpr (isB32) {
                     return {2, 16};
                 } else {
