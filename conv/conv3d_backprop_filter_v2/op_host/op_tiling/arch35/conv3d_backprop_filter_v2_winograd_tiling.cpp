@@ -95,7 +95,7 @@ bool CheckWinoShape(const Conv3dBpFilterV2RunInfo& runInfo, const char* opName)
     // 有效fmap区域(不含pad)对应的tile数与总tile数(含pad)的比值需达标
     // 有效输出尺寸 = fmap尺寸 - (kernel - 1)，stride=1时有效ho = hi - 2
     int32_t validHo = runInfo.hi - (runInfo.kh - 1);
-    int32_t validWo = runInfo.wo - (runInfo.kw - 1);
+    int32_t validWo = runInfo.wi - (runInfo.kw - 1);
     if (validHo <= 0 || validWo <= 0) {
         OP_LOGD(opName, "valid fmap area is too small for winograd");
         return false;
