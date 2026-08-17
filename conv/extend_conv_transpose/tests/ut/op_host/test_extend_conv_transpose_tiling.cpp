@@ -97,9 +97,25 @@ static string TilingData2Str(const gert::TilingData* tiling_data)
     auto data = tiling_data->GetData();
     string result;
 
-    // 16个u8类型的值
+    // 6个u32类型的值: batchDim, groupDim, mDim, kDim, nDim, dDim
     uint32_t startField = 0;
-    uint32_t endField = 16 * sizeof(uint8_t);
+    uint32_t endField = 6 * sizeof(uint32_t);
+    for (size_t i = startField; i < endField; i += sizeof(uint32_t)) {
+        result += std::to_string((reinterpret_cast<const uint32_t*>(tiling_data->GetData())[i / sizeof(uint32_t)]));
+        result += " ";
+    }
+
+    // 1个u64类型的值: coreNum
+    startField = endField;
+    endField += 1 * sizeof(uint64_t);
+    for (size_t i = startField; i < endField; i += sizeof(uint64_t)) {
+        result += std::to_string((reinterpret_cast<const uint64_t*>(tiling_data->GetData())[i / sizeof(uint64_t)]));
+        result += " ";
+    }
+
+    // 16个u8类型的值
+    startField = endField;
+    endField += 16 * sizeof(uint8_t);
     for (size_t i = startField; i < endField; i += sizeof(uint8_t)) {
         result += std::to_string((reinterpret_cast<const uint8_t*>(tiling_data->GetData())[i / sizeof(uint8_t)]));
         result += " ";
@@ -121,7 +137,7 @@ static string TilingData2Str(const gert::TilingData* tiling_data)
         result += " ";
     }
 
-    // 13个u32类型的值(最后有一个4字节地址对齐不需要打印)
+    // 13个u32类型的值(后面有4字节地址对齐不需要打印)
     startField = endField;
     endField += 13 * sizeof(uint32_t);
     for (size_t i = startField; i < endField; i += sizeof(uint32_t)) {
@@ -140,34 +156,44 @@ static string TilingData2Str(const gert::TilingData* tiling_data)
 
     // 2个bool类型的值
     startField = endField;
-    endField += 2 * sizeof(bool);
-    for (size_t i = startField; i < endField; i += sizeof(bool)) {
-        result += std::to_string((reinterpret_cast<const bool*>(tiling_data->GetData())[i / sizeof(bool)]));
+    endField += 2 * sizeof(uint8_t);
+    for (size_t i = startField; i < endField; i += sizeof(uint8_t)) {
+        result += std::to_string(
+            static_cast<int>((reinterpret_cast<const uint8_t*>(tiling_data->GetData())[i / sizeof(uint8_t)])));
         result += " ";
     }
 
-    // 1个int8类型的值(后面有5字节地址对齐)
+    // 1个int8类型的值(后面有1字节地址对齐)
     startField = endField;
     endField += 1 * sizeof(int8_t);
     for (size_t i = startField; i < endField; i += sizeof(int8_t)) {
         result += std::to_string((reinterpret_cast<const int8_t*>(tiling_data->GetData())[i / sizeof(int8_t)]));
         result += " ";
     }
-    endField += 5 * sizeof(int8_t);
+    endField += 1 * sizeof(uint8_t);
 
-    // 1个u64类型的值
+    // 6个u32类型的值: kSCoutFullLoad, kSUseWorkSpace, khDilation, kwDilation, hoExpand, woExpand
     startField = endField;
-    endField += 1 * sizeof(uint64_t);
+    endField += 6 * sizeof(uint32_t);
+    for (size_t i = startField; i < endField; i += sizeof(uint32_t)) {
+        result += std::to_string((reinterpret_cast<const uint32_t*>(tiling_data->GetData())[i / sizeof(uint32_t)]));
+        result += " ";
+    }
+    endField += 1 * sizeof(uint32_t);
+
+    // 2个u64类型的值: dkHkWk, hkWk
+    startField = endField;
+    endField += 2 * sizeof(uint64_t);
     for (size_t i = startField; i < endField; i += sizeof(uint64_t)) {
         result += std::to_string((reinterpret_cast<const uint64_t*>(tiling_data->GetData())[i / sizeof(uint64_t)]));
         result += " ";
     }
 
-    // 2个u32类型的值
+    // 1个u8类型的值: fixedShiftVal
     startField = endField;
-    endField += 2 * sizeof(uint32_t);
-    for (size_t i = startField; i < endField; i += sizeof(uint32_t)) {
-        result += std::to_string((reinterpret_cast<const uint32_t*>(tiling_data->GetData())[i / sizeof(uint32_t)]));
+    endField += 1 * sizeof(uint8_t);
+    for (size_t i = startField; i < endField; i += sizeof(uint8_t)) {
+        result += std::to_string((reinterpret_cast<const uint8_t*>(tiling_data->GetData())[i / sizeof(uint8_t)]));
         result += " ";
     }
 
@@ -266,7 +292,8 @@ TEST_P(ExtendConvTransposeTilingRunTime, general_cases)
                                   {"output_padding",
                                    Ops::NN::AnyValue::CreateFrom<std::vector<int64_t>>(param.output_padding)},
                                   {"offset_x", Ops::NN::AnyValue::CreateFrom<int64_t>(0)},
-                                  {"fusion_mode", Ops::NN::AnyValue::CreateFrom<int64_t>(param.fusion_mode)}})
+                                  {"fusion_mode", Ops::NN::AnyValue::CreateFrom<int64_t>(param.fusion_mode)},
+                                  {"y_quant_mode", Ops::NN::AnyValue::CreateFrom<int64_t>(0)}})
                       .NodeInputTd(0, DT_INT32, param.input_size_format, param.input_size_format)
                       .NodeInputTd(1, param.x_dtype, param.out_backprop_ori_format, param.out_backprop_format)
                       .NodeInputTd(2, param.filter_dtype, param.filter_ori_format, param.filter_format)
@@ -301,7 +328,7 @@ const string COMPILE_INFO_STR_FUSE = R"({"_pattern": "Extend_conv_transpose", "t
                           "intrinsic_fix_pipe_l0c2out_f322bf16": true,
                           "Intrinsic_data_move_l0c2ub": true, "Intrinsic_data_move_out2l1_nd2nz": true,
                           "Intrinsic_fix_pipe_pre_conv_cast": true,
-                          "Intrinsic_data_move_l12bt": true,
+                          "Intrinsic_data_move_l12bt": true, "socVersion": "Ascend950",
                           "UB_SIZE": 253952, "L2_SIZE": 134217728, "L1_SIZE": 1048576,
                           "L0A_SIZE": 65536, "L0B_SIZE": 65536, "L0C_SIZE": 262144, "CORE_NUM": 8,
                           "cube_core_cnt": 8, "vector_core_cnt": 8, "core_type_list": "CubeCore,VectorCore"}
@@ -345,8 +372,8 @@ ExtendConvTransposeTilingTestParam cases_params_fuse[] = {
      true,
      8,
      150994946,
-     "2 2 1 2 1 1 32 5 5 1 0 0 1 0 0 2 4 256 512 256 512 16 8 16 16 1 20 16 1 40 32 1 2 2 1 1 1 2 2 0 0 0 0 0 0 0 "
-     "1 1 1 1 1 1 1 1 512 256 1 256 128 256 1 1 1 1 256 0 0 0 0 0 0 0 8 2 2 "},
+     "1 1 1 1 1 1 8 2 2 1 2 1 1 32 5 5 1 0 0 1 0 0 2 4 256 512 256 512 16 8 16 16 1 20 16 1 40 32 1 2 2 1 1 1 2 2 0 0 "
+     "0 0 0 0 0 1 1 1 1 1 1 1 1 512 256 1 256 128 256 1 1 1 1 256 0 0 0 0 0 0 0 0 0 2 2 39 31 4 4 13 "},
 
     {"net_ndhwc_int8_2_fp16_stride_2",
      "SOC_L1_1024",
@@ -384,8 +411,8 @@ ExtendConvTransposeTilingTestParam cases_params_fuse[] = {
      true,
      8,
      150994946,
-     "2 2 1 2 1 1 32 5 5 1 0 0 1 0 0 2 1 128 256 128 256 8 8 8 8 1 88 80 1 176 160 1 2 2 1 1 1 2 2 0 0 0 0 0 0 0 "
-     "1 1 1 1 1 1 1 1 256 128 1 512 64 128 1 1 1 1 512 0 0 0 0 0 0 0 8 2 2 "},
+     "1 1 1 1 1 1 8 2 2 1 2 1 1 32 5 5 1 0 0 1 0 0 2 1 128 256 128 256 8 8 8 8 1 88 80 1 176 160 1 2 2 1 1 1 2 2 0 0 0 "
+     "0 0 0 0 1 1 1 1 1 1 1 1 256 128 1 512 64 128 1 1 1 1 512 0 0 0 0 0 0 0 0 0 2 2 175 159 4 4 13 "},
 
     {"net_ndhwc_fp16_2_fp16_stride_2",
      "SOC_L1_1024",
@@ -423,8 +450,8 @@ ExtendConvTransposeTilingTestParam cases_params_fuse[] = {
      true,
      8,
      16777474,
-     "1 1 2 2 2 1 16 4 4 1 0 0 1 0 0 2 1 64 64 64 64 4 4 4 4 1 176 160 1 352 320 1 2 2 1 1 1 2 2 0 0 0 0 0 0 0 1 1 1 1 "
-     "1 1 1 1 64 64 1 480 64 64 1 1 1 1 480 0 0 0 0 0 0 0 8 2 2 "},
+     "1 1 1 1 1 1 8 1 1 2 2 2 1 16 4 4 1 0 0 1 0 0 2 1 64 64 64 64 4 4 4 4 1 176 160 1 352 320 1 2 2 1 1 1 2 2 0 0 0 0 "
+     "0 0 0 1 1 1 1 1 1 1 1 64 64 1 480 64 64 1 1 1 1 480 0 0 0 0 0 0 0 0 0 2 2 351 319 4 4 42 "},
 
     {"net_ndhwc_fp16_2_fp16_stride_2_pad_1",
      "SOC_L1_1024",
@@ -462,8 +489,8 @@ ExtendConvTransposeTilingTestParam cases_params_fuse[] = {
      true,
      6,
      16777218,
-     "1 1 2 2 2 1 16 4 4 1 0 0 1 0 0 2 1 192 256 192 256 16 12 16 12 1 18 7 1 36 14 1 4 4 1 1 1 2 2 0 0 1 1 1 1 0 2 2 "
-     "2 2 1 1 1 1 256 64 1 256 128 64 16 16 1 1 252 0 0 0 0 0 0 0 6 4 4 "},
+     "1 1 1 1 1 1 6 1 1 2 2 2 1 16 4 4 1 0 0 1 0 0 2 1 192 256 192 256 16 12 16 12 1 18 7 1 36 14 1 4 4 1 1 1 2 2 0 0 "
+     "1 1 1 1 0 2 2 2 2 1 1 1 1 256 64 1 256 128 64 16 16 1 1 252 0 0 0 0 0 0 0 0 0 4 4 35 13 16 16 42 "},
 
     {"net_ndhwc_fp16_2_fp16_stride_2_no_scale",
      "SOC_L1_1024",
@@ -501,8 +528,8 @@ ExtendConvTransposeTilingTestParam cases_params_fuse[] = {
      true,
      8,
      150994946,
-     "2 2 1 2 1 1 16 4 4 1 0 0 1 0 0 2 1 1 256 1 256 16 1 16 1 1 36 64 1 72 128 1 2 2 1 1 1 2 2 0 0 0 0 0 0 0 "
-     "1 1 1 1 1 1 1 1 256 16 1 576 16 16 1 1 1 1 576 0 0 0 0 0 0 0 8 2 2 "},
+     "1 1 1 1 1 1 8 2 2 1 2 1 1 16 4 4 1 0 0 1 0 0 2 1 1 256 1 256 16 1 16 1 1 36 64 1 72 128 1 2 2 1 1 1 2 2 0 0 0 0 "
+     "0 0 0 1 1 1 1 1 1 1 1 256 16 1 576 16 16 1 1 1 1 576 0 0 0 0 0 0 0 0 0 2 2 71 127 4 4 42 "},
 
     {"net_ndhwc_int8_2_fp16_stride_4",
      "SOC_L1_1024",
@@ -540,8 +567,8 @@ ExtendConvTransposeTilingTestParam cases_params_fuse[] = {
      true,
      8,
      150994946,
-     "2 2 1 2 1 1 32 5 5 1 0 0 1 0 0 2 12 64 512 64 512 16 4 16 4 1 4 8 1 16 32 1 4 4 1 1 1 4 4 0 0 0 0 0 0 0 3 3 3 3 "
-     "1 1 1 1 512 64 1 256 128 64 1 1 1 1 256 0 0 0 0 0 0 0 8 4 4 "},
+     "1 1 1 1 1 1 8 2 2 1 2 1 1 32 5 5 1 0 0 1 0 0 2 12 64 512 64 512 16 4 16 4 1 4 8 1 16 32 1 4 4 1 1 1 4 4 0 0 0 0 "
+     "0 0 0 3 3 3 3 1 1 1 1 512 64 1 256 128 64 1 1 1 1 256 0 0 0 0 0 0 0 0 0 4 4 13 29 16 16 13 "},
 
     {"net_ndhwc_fp16_2_fp16_group_4",
      "SOC_L1_1024",
@@ -579,8 +606,8 @@ ExtendConvTransposeTilingTestParam cases_params_fuse[] = {
      true,
      8,
      16777218,
-     "1 1 2 2 2 1 16 4 4 1 0 0 1 0 0 2 1 128 64 32 16 4 8 1 2 1 32 60 1 64 120 1 2 2 4 4 1 2 2 0 0 0 0 0 0 0 1 1 1 1 1 "
-     "1 1 1 16 32 1 960 32 32 2 2 1 1 960 0 0 0 0 0 0 0 8 2 2 "},
+     "1 1 1 1 1 1 8 1 1 2 2 1 1 16 4 4 1 0 0 1 0 1 2 1 128 64 32 16 4 8 1 2 1 32 60 1 64 120 1 2 2 4 4 1 2 2 0 0 0 0 0 "
+     "0 0 1 1 1 1 1 1 1 1 16 32 1 960 32 32 2 2 1 1 960 0 0 0 0 0 0 0 0 0 2 2 63 119 4 4 42 "},
 
     {"net_ndhwc_a16w8_2_fp16_stride_2",
      "SOC_L1_1024",
@@ -617,9 +644,9 @@ ExtendConvTransposeTilingTestParam cases_params_fuse[] = {
      true,
      true,
      8,
-     150994946,
-     "2 2 1 2 1 1 32 4 5 1 0 0 1 0 0 2 1 64 64 64 64 2 4 2 4 1 176 160 1 352 320 1 2 2 1 1 1 2 2 0 0 0 0 0 0 0 "
-     "1 1 1 1 1 1 1 1 64 64 1 1024 32 64 1 1 1 1 1024 0 0 0 0 0 0 0 8 2 2 "},
+     16777218,
+     "1 1 1 1 1 1 8 1 1 1 2 1 1 32 4 5 1 0 0 1 0 1 2 1 64 64 64 64 2 4 2 4 1 176 160 1 352 320 1 2 2 1 1 1 2 2 0 0 0 0 "
+     "0 0 0 1 1 1 1 1 1 1 1 64 64 1 1024 32 64 8 8 1 1 14080 0 0 0 0 0 0 0 0 0 2 2 351 319 4 4 13 "},
 
     {"net_ndhwc_a16w8_2_fp16_stride_2_no_scale",
      "SOC_L1_1024",
@@ -657,8 +684,8 @@ ExtendConvTransposeTilingTestParam cases_params_fuse[] = {
      true,
      8,
      150994946,
-     "2 2 1 2 1 1 32 4 5 1 0 0 1 0 0 2 1 1 256 1 256 8 1 8 1 1 36 64 1 72 128 1 2 2 1 1 1 2 2 0 0 0 0 0 0 0 "
-     "1 1 1 1 1 1 1 1 256 16 1 576 32 16 1 1 1 1 576 0 0 0 0 0 0 0 8 2 2 "},
+     "1 1 1 1 1 1 8 2 2 1 2 1 1 32 4 5 1 0 0 1 0 0 2 1 1 256 1 256 8 1 8 1 1 36 64 1 72 128 1 2 2 1 1 1 2 2 0 0 0 0 0 "
+     "0 0 1 1 1 1 1 1 1 1 256 16 1 512 32 16 1 1 1 1 512 0 0 0 0 0 0 0 0 0 2 2 71 127 4 4 13 "},
 
     {"net_ndhwc_a16w8_2_fp16_pertensor_quant_mode",
      "SOC_L1_1024",
@@ -695,9 +722,9 @@ ExtendConvTransposeTilingTestParam cases_params_fuse[] = {
      true,
      true,
      8,
-     150994946,
-     "2 2 1 2 1 1 32 4 5 1 0 0 1 0 0 1 1 64 64 64 64 2 4 2 4 1 176 160 1 352 320 1 2 2 1 1 1 2 2 0 0 0 0 0 0 0 "
-     "1 1 1 1 1 1 1 1 64 64 1 1024 32 64 1 1 1 1 1024 0 0 0 0 0 0 0 8 2 2 "},
+     16777218,
+     "1 1 1 1 1 1 8 1 1 1 2 1 1 32 4 5 1 0 0 1 0 1 1 1 64 64 64 64 2 4 2 4 1 176 160 1 352 320 1 2 2 1 1 1 2 2 0 0 0 0 "
+     "0 0 0 1 1 1 1 1 1 1 1 64 64 1 1024 32 64 8 8 1 1 14080 0 0 0 0 0 0 0 0 0 2 2 351 319 4 4 13 "},
 
     {"net_ndhwc_a16w8_2_fp16_enable_relu",
      "SOC_L1_1024",
@@ -734,9 +761,9 @@ ExtendConvTransposeTilingTestParam cases_params_fuse[] = {
      true,
      true,
      8,
-     150994946,
-     "2 2 1 2 1 1 32 4 5 1 0 0 1 0 0 1 1 64 64 64 64 2 4 2 4 1 176 160 1 352 320 1 2 2 1 1 1 2 2 0 0 0 0 0 0 0 "
-     "1 1 1 1 1 1 1 1 64 64 1 1024 32 64 1 1 1 1 1024 1 0 0 0 0 0 0 8 2 2 "},
+     16777218,
+     "1 1 1 1 1 1 8 1 1 1 2 1 1 32 4 5 1 0 0 1 0 1 1 1 64 64 64 64 2 4 2 4 1 176 160 1 352 320 1 2 2 1 1 1 2 2 0 0 0 0 "
+     "0 0 0 1 1 1 1 1 1 1 1 64 64 1 1024 32 64 8 8 1 1 14080 1 0 0 0 0 0 0 0 0 2 2 351 319 4 4 13 "},
 
     {"net_ndhwc_a16w16_large_input",
      "SOC_L1_1024",
@@ -774,8 +801,8 @@ ExtendConvTransposeTilingTestParam cases_params_fuse[] = {
      true,
      8,
      16777474,
-     "1 1 2 2 2 1 16 4 4 1 0 0 1 0 0 2 1 64 128 64 128 8 4 8 4 1 288 112 1 576 224 1 2 2 1 1 1 2 2 0 0 0 0 0 0 0 1 1 1 "
-     "1 1 1 1 1 128 64 1 448 64 64 1 1 1 1 448 0 0 0 0 0 0 0 8 2 2 "},
+     "1 1 1 1 1 1 8 1 1 2 2 2 1 16 4 4 1 0 0 1 0 0 2 1 64 128 64 128 8 4 8 4 1 288 112 1 576 224 1 2 2 1 1 1 2 2 0 0 0 "
+     "0 0 0 0 1 1 1 1 1 1 1 1 128 64 1 448 64 64 1 1 1 1 448 0 0 0 0 0 0 0 0 0 2 2 575 223 4 4 42 "},
 
     {"net_ndhwc_a16w8_large_input",
      "SOC_L1_1024",
@@ -812,9 +839,9 @@ ExtendConvTransposeTilingTestParam cases_params_fuse[] = {
      true,
      true,
      8,
-     150994946,
-     "2 2 1 2 1 1 32 4 5 1 0 0 1 0 0 2 1 64 128 64 128 4 4 4 4 1 288 112 1 576 224 1 2 2 1 1 1 2 2 0 0 0 0 0 0 0 "
-     "1 1 1 1 1 1 1 1 128 64 1 1024 32 64 1 1 1 1 1024 0 0 0 0 0 0 0 8 2 2 "},
+     16777218,
+     "1 1 1 1 1 1 8 1 1 1 2 1 1 32 4 5 1 0 0 1 0 1 2 1 64 128 64 128 4 4 4 4 1 288 112 1 576 224 1 2 2 1 1 1 2 2 0 0 0 "
+     "0 0 0 0 1 1 1 1 1 1 1 1 128 64 1 1024 32 64 16 16 1 1 16128 0 0 0 0 0 0 0 0 0 2 2 575 223 4 4 13 "},
 
     {"net_ndhwc_a16w16_large_input_stride_4",
      "SOC_L1_1024",
@@ -852,8 +879,8 @@ ExtendConvTransposeTilingTestParam cases_params_fuse[] = {
      true,
      8,
      16777730,
-     "1 1 1 2 2 1 16 4 4 1 0 0 1 0 0 2 1 64 128 64 128 8 4 8 4 1 112 56 1 448 224 1 4 4 1 1 1 4 4 0 0 0 0 0 0 0 3 3 3 "
-     "3 1 1 1 1 128 64 1 512 64 64 4 4 1 1 512 0 0 0 0 0 0 0 8 4 4 "},
+     "1 1 1 1 1 1 8 1 1 1 2 2 1 16 4 4 1 0 0 1 0 0 2 1 64 128 64 128 8 4 8 4 1 112 56 1 448 224 1 4 4 1 1 1 4 4 0 0 0 "
+     "0 0 0 0 3 3 3 3 1 1 1 1 128 64 1 512 64 64 4 4 1 1 512 0 0 0 0 0 0 0 0 0 4 4 445 221 16 16 42 "},
 
     {"net_ndhwc_a16w8_large_input_stride_4",
      "SOC_L1_1024",
@@ -890,9 +917,9 @@ ExtendConvTransposeTilingTestParam cases_params_fuse[] = {
      true,
      true,
      8,
-     150994946,
-     "2 2 1 2 1 1 32 4 5 1 0 0 1 0 0 2 1 64 128 64 128 4 4 4 4 1 112 56 1 448 224 1 4 4 1 1 1 4 4 0 0 0 0 0 0 0 3 3 3 "
-     "3 1 1 1 1 128 64 1 896 32 64 1 1 1 1 896 0 0 0 0 0 0 0 8 4 4 "},
+     16777218,
+     "1 1 1 1 1 1 8 1 1 1 2 1 1 32 4 5 1 0 0 1 0 1 2 1 64 128 64 128 4 4 4 4 1 112 56 1 448 224 1 4 4 1 1 1 4 4 0 0 0 "
+     "0 0 0 0 3 3 3 3 1 1 1 1 128 64 1 1024 32 64 32 64 1 1 12544 0 0 0 0 0 0 0 0 0 4 4 445 221 16 16 13 "},
 
     {"net_ndhwc_a16w16_multi_batch",
      "SOC_L1_1024",
@@ -930,8 +957,8 @@ ExtendConvTransposeTilingTestParam cases_params_fuse[] = {
      true,
      8,
      150994946,
-     "2 2 1 2 1 1 16 4 4 1 0 0 1 0 0 2 4 64 256 64 256 16 4 16 4 1 40 32 1 80 64 1 2 2 1 1 1 2 2 0 0 0 0 0 0 0 "
-     "1 1 1 1 1 1 1 1 256 64 1 768 16 64 1 1 1 1 768 0 0 0 0 0 0 0 8 2 2 "},
+     "1 1 1 1 1 1 8 2 2 1 2 1 1 16 4 4 1 0 0 1 0 0 2 4 64 256 64 256 16 4 16 4 1 40 32 1 80 64 1 2 2 1 1 1 2 2 0 0 0 0 "
+     "0 0 0 1 1 1 1 1 1 1 1 256 64 1 768 16 64 1 1 1 1 768 0 0 0 0 0 0 0 0 0 2 2 79 63 4 4 42 "},
 
     {"net_ndhwc_a16w8_multi_batch",
      "SOC_L1_1024",
@@ -969,8 +996,8 @@ ExtendConvTransposeTilingTestParam cases_params_fuse[] = {
      true,
      8,
      150994946,
-     "2 2 1 2 1 1 32 4 5 1 0 0 1 0 0 2 4 64 256 64 256 8 4 8 4 1 40 32 1 80 64 1 2 2 1 1 1 2 2 0 0 0 0 0 0 0 "
-     "1 1 1 1 1 1 1 1 256 64 1 832 32 64 1 1 1 1 832 0 0 0 0 0 0 0 8 2 2 "},
+     "1 1 1 1 1 1 8 2 2 1 2 1 1 32 4 5 1 0 0 1 0 0 2 4 64 256 64 256 8 4 8 4 1 40 32 1 80 64 1 2 2 1 1 1 2 2 0 0 0 0 0 "
+     "0 0 1 1 1 1 1 1 1 1 256 64 1 512 32 64 1 1 1 1 512 0 0 0 0 0 0 0 0 0 2 2 79 63 4 4 13 "},
 };
 
 INSTANTIATE_TEST_CASE_P(Conv3DDX_cases_params_fuse, ExtendConvTransposeTilingRunTime,

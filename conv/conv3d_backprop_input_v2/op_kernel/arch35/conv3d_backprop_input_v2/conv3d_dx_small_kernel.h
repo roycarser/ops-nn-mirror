@@ -33,6 +33,9 @@ constexpr uint8_t PAD_LIST_IDX_RIGHT = 1;
 constexpr uint8_t PAD_LIST_IDX_UP = 2;
 constexpr uint8_t PAD_LIST_IDX_DOWN = 3;
 constexpr uint8_t LOAD3D_PAD_DOWN_VALUE = 255;
+// bias 在 L1 中需按 64B 对齐存放：紧随其后的 scale 数据起始地址要求 64B 对齐，否则触发 AIC error。
+// 32B（ONE_BLK_SIZE）对齐无法满足该约束，故 bias 区长度按 64B 向上取整。
+constexpr uint32_t SMALL_KERNEL_BIAS_L1_ALIGN_BYTES = 64;
 
 template <typename filterType, int filterFormat, typename dedyType, int dedyFormat, typename yType, int yFormat,
           typename biasType, int biasFormat, uint8_t b2Condition, uint8_t kernelSplitMode, uint8_t groupMode,
@@ -45,12 +48,12 @@ public:
     __aicore__ inline Conv3dDxSmallKernel() {}
 
     __aicore__ inline void Init(GM_ADDR filter, GM_ADDR dedy, GM_ADDR y, GM_ADDR workSpace,
-                                const conv_bp_v2_kernel::Conv3DBackpropInputV2TilingData* tilingData,
-                                GM_ADDR bias = nullptr, GM_ADDR scale = nullptr)
+                                const Conv3DBackpropInputArch35TilingData& tilingData, GM_ADDR bias = nullptr,
+                                GM_ADDR scale = nullptr)
     {
         (void)workSpace;
         hasBias_ = bias != nullptr;
-        tiling_ = &tilingData->conv3DDxTiling;
+        tiling_ = &tilingData;
         filterGm_.SetGlobalBuffer((__gm__ filterType*)filter);
         dedyGm_.SetGlobalBuffer((__gm__ dedyType*)dedy);
         yGm_.SetGlobalBuffer((__gm__ yType*)y);
@@ -79,7 +82,7 @@ public:
 private:
 #include "../convolution_3d_backprop/conv3d_bp_small_kernel_func.h"
 
-    const conv_bp_v2_kernel::TConv3DInputV2Tiling* tiling_ = nullptr;
+    const Conv3DBackpropInputArch35TilingData* tiling_ = nullptr;
     GlobalTensor<filterType> filterGm_;
     GlobalTensor<dedyType> dedyGm_;
     GlobalTensor<yType> yGm_;
@@ -160,10 +163,19 @@ private:
         return (afterB1 + ONE_BLK_SIZE - 1) / ONE_BLK_SIZE * ONE_BLK_SIZE;
     }
 
+    __aicore__ inline uint32_t GetBiasL1SizeBytes() const
+    {
+        // bias 区按 64B 对齐，保证后续 scale 起始地址 64B 对齐，避免 AIC error。
+        return DivCeil(tiling_->singleCoreCin * sizeof(biasType), SMALL_KERNEL_BIAS_L1_ALIGN_BYTES) *
+               SMALL_KERNEL_BIAS_L1_ALIGN_BYTES;
+    }
+
+    __aicore__ inline uint32_t GetBiasL1ElemCount() const { return GetBiasL1SizeBytes() / sizeof(biasType); }
+
     __aicore__ inline uint32_t GetScaleL1OffBytes() const
     {
         uint32_t biasL1OffBytes = GetBiasL1OffBytes();
-        uint32_t afterBias = hasBias_ ? biasL1OffBytes + tiling_->singleCoreCin * sizeof(biasType) : biasL1OffBytes;
+        uint32_t afterBias = hasBias_ ? biasL1OffBytes + GetBiasL1SizeBytes() : biasL1OffBytes;
         return (afterBias + ONE_BLK_SIZE - 1) / ONE_BLK_SIZE * ONE_BLK_SIZE;
     }
 

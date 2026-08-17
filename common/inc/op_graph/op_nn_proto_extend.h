@@ -107,42 +107,44 @@ REG_OP(AdaptiveMaxPool2d)
     .ATTR(use_locking, Bool, false)
     .OP_END_FACTORY_REG(ApplyAdamWithAmsgradV2)
 
-    /**
-    *@brief Updates "var" according to the AddSign update . \n
+/**
+*@brief Updates "var" according to the AddSign update . \n
 
-    *@par Inputs:
-    *Seven inputs, including:
-    * @li var: A ND Tensor of type TensorType::NumberType().
-    * @li m: A ND Tensor of the same type as "var".
-    * @li lr: A Tensor of the same type as "var", for the scaling factor. Must be a scalar.
-    *     Support Dimension: 1D.
-    *     Support format: ND.
-    * @li alpha: A Tensor of the same type as "var". Must be a scalar.
-    *     Support Dimension: 1D.
-    *     Support format: ND.
-    * @li sign_decay: A Tensor of the same type as "var". Must be a scalar.
-    *     Support Dimension: 1D.
-    *     Support format: ND.
-    * @li beta: A Tensor of the same type as "var". Must be a scalar.
-    *     Support Dimension: 1D.
-    *     Support format: ND.
-    * @li grad: A Tensor of the same type as "var", for the gradient.
-    *     Support format: ND.
-    *     Support Dimension: 2D.
+*@par Inputs:
+*Seven inputs, including:
+* @li var: A ND Tensor of type TensorType::NumberType().
+* @li m: A ND Tensor of the same type as "var".
+* @li lr: A Tensor of the same type as "var", for the scaling factor. Must be a scalar.
+*     Support Dimension: 1D.
+*     Support format: ND.
+* @li alpha: A Tensor of the same type as "var". Must be a scalar.
+*     Support Dimension: 1D.
+*     Support format: ND.
+* @li sign_decay: A Tensor of the same type as "var". Must be a scalar.
+*     Support Dimension: 1D.
+*     Support format: ND.
+* @li beta: A Tensor of the same type as "var". Must be a scalar.
+*     Support Dimension: 1D.
+*     Support format: ND.
+* @li grad: A Tensor of the same type as "var", for the gradient.
+*     Support format: ND.
+*     Support Dimension: 2D.
 
-    *@par Attributes:
-    *use_locking: An optional bool. Defaults to "False".
-    *     If "True", updating of the "var" and "m" tensors will be
-    *     protected by a lock; otherwise the behavior is undefined,
-    *     but may exhibit less contention . \n
+*@par Attributes:
+*use_locking: An optional bool. Defaults to "False".
+*     If "True", updating of the "var" and "m" tensors will be
+*     protected by a lock; otherwise the behavior is undefined,
+*     but may exhibit less contention . \n
 
-    *@par Outputs:
-    *var: A ND Tensor. Has the same type and shape with "var" . \n
+*@par Outputs:
+*var: A ND Tensor. Has the same type and shape with "var" . \n
 
-    *@par Third-party framework compatibility
-    * Compatible with the TensorFlow operator ApplyAddSign.
-    */
-    REG_OP(ApplyAddSign)
+*@par Third-party framework compatibility
+* Compatible with the TensorFlow operator ApplyAddSign.
+*/
+#ifndef OPS_PROTO_DEF_APPLYADDSIGN
+#define OPS_PROTO_DEF_APPLYADDSIGN
+        REG_OP(ApplyAddSign)
     .INPUT(var, TensorType::NumberType())
     .INPUT(m, TensorType::NumberType())
     .INPUT(lr, TensorType::NumberType())
@@ -153,6 +155,7 @@ REG_OP(AdaptiveMaxPool2d)
     .OUTPUT(var, TensorType::NumberType())
     .ATTR(use_locking, Bool, false)
     .OP_END_FACTORY_REG(ApplyAddSign)
+#endif
 
     /**
      * @brief Anti quantizes the input . \n
@@ -996,25 +999,6 @@ REG_OP(AdaptiveMaxPool2d)
     .OUTPUT(y, TensorType::BasicType())
     .REQUIRED_ATTR(ksize, Int)
     .OP_END_FACTORY_REG(MovingSumWithSigmoid)
-
-    /**
-     *@brief Generate the responsible flags of anchor in a single feature map.
-     *@par Inputs:
-     * gt_bboxes: Ground truth box, 2-D Tensor of type float32 with shape `[batch, 4]`.
-     *@par Attributes:
-     *@li featmap_size: The size of feature maps. It is a listint and size is 2.
-     *@li strides: Stride of current level, listint.
-     *@li num_base_anchors: The number of base anchors.
-     *@par Outputs:
-     * flags: The valid flags of each anchor in a single level, 1-D Tensor of type uint8.
-     */
-    REG_OP(AnchorResponseFlags)
-    .INPUT(gt_bboxes, TensorType({DT_FLOAT}))
-    .OUTPUT(flags, TensorType({DT_UINT8}))
-    .REQUIRED_ATTR(featmap_size, ListInt)
-    .REQUIRED_ATTR(strides, ListInt)
-    .REQUIRED_ATTR(num_base_anchors, Int)
-    .OP_END_FACTORY_REG(AnchorResponseFlags)
 
     /**
     * @brief Anti quantizes the input .
@@ -2921,54 +2905,6 @@ REG_OP(AdaptiveMaxPool2d)
     .OP_END_FACTORY_REG(CosineEmbeddingLoss)
 
     /**
-    *@brief Count adam result. \n
-
-    *@par Inputs:
-    *Eleven inputs, including:
-    * @li var: A ND Tensor of weight. Support float16/float32.\n
-    * @li m: A ND Tensor of the 1st moment estimates. Datatype and shape are same as var.\n
-    * @li v: A ND Tensor of the 2nd moment estimates. Datatype and shape are same as var.\n
-    * @li lr: A ND Tensor of learning rate. Datatype is same as var. Shape (1, ).\n
-    * @li beta1: A ND Tensor of the exponential decay rate for the 1st moment estimates. Datatype is same as var. Shape
-    (1, ).\n
-    * @li beta2: A ND Tensor of the exponential decay rate for the 2nd moment estimates. Datatype is same as var. Shape
-    (1, ).\n
-    * @li epsilon: A ND Tensor for numerical stability. Datatype is same as var. Shape (1, ).\n
-    * @li grad: A ND Tensor. Datatype and shape are same as var.\n
-    * @li max_grad_norm: An Optional Tensor. Datatype is same as var. Shape (1, ).\n
-    * @li global_grad_norm: A ND Tensor. Datatype is same as var. Shape (1, ).\n
-    * @li weight_decay: A ND Tensor. Datatype is same as var. Shape (1, ).\n
-    * @li step_size: An Optional Tensor. Datatype is same as var. Shape (1, ).\n
-
-    * @par Attributes:
-    * @li adam_mode: An optional bool. Defaults to "adam". \n
-
-    *@par Outputs:
-    *Three inputs, including:
-    * @li var: A ND Tensor of weight. Datatype and shape are same as var.\n
-    * @li m: A ND Tensor of the 1st moment estimates. Datatype and shape are same as var.\n
-    * @li v: A ND Tensor of the 2nd moment estimates. Datatype and shape are same as var.\n
-    */
-    REG_OP(ApplyAdamV2)
-    .INPUT(var, TensorType({DT_FLOAT, DT_FLOAT16}))
-    .INPUT(m, TensorType({DT_FLOAT, DT_FLOAT16}))
-    .INPUT(v, TensorType({DT_FLOAT, DT_FLOAT16}))
-    .INPUT(lr, TensorType({DT_FLOAT, DT_FLOAT16}))
-    .INPUT(beta1, TensorType({DT_FLOAT, DT_FLOAT16}))
-    .INPUT(beta2, TensorType({DT_FLOAT, DT_FLOAT16}))
-    .INPUT(epsilon, TensorType({DT_FLOAT, DT_FLOAT16}))
-    .INPUT(grad, TensorType({DT_FLOAT, DT_FLOAT16}))
-    .OPTIONAL_INPUT(max_grad_norm, TensorType({DT_FLOAT, DT_FLOAT16}))
-    .INPUT(global_grad_norm, TensorType({DT_FLOAT, DT_FLOAT16}))
-    .INPUT(weight_decay, TensorType({DT_FLOAT, DT_FLOAT16}))
-    .OPTIONAL_INPUT(step_size, TensorType({DT_FLOAT, DT_FLOAT16}))
-    .OUTPUT(var, TensorType({DT_FLOAT, DT_FLOAT16}))
-    .OUTPUT(m, TensorType({DT_FLOAT, DT_FLOAT16}))
-    .OUTPUT(v, TensorType({DT_FLOAT, DT_FLOAT16}))
-    .ATTR(adam_mode, String, "adam")
-    .OP_END_FACTORY_REG(ApplyAdamV2)
-
-    /**
      *@brief Forwards the value of an available tensor from input "x" to output "y".
      *       Merge waits for at least one of the input tensors to become available.
      *       It is usually combined with Switch to implement branching.
@@ -3602,57 +3538,6 @@ REG_OP(AdaptiveMaxPool2d)
     .ATTR(dilation, ListInt, {1, 1, 1, 1})
     .ATTR(ceil_mode, Bool, false)
     .OP_END_FACTORY_REG(MaxPoolGradWithArgmaxV2)
-
-    /**
-    * @brief Computes gradients of the maxpooling function .
-
-    * @par Inputs:
-    * @li orig_input: Original forward input tensor. Support type: float16, float32, Support format:[NCHW, NHWC].
-    * @li orig_output: Has the same shape and type as "x1", Support format:[NCHW, NHWC].
-    * @li grad: Has the same shape and type as "x1", Support format:[NCHW, NHWC]. \n
-
-    * @par Attributes:
-    * @li ksize: A required list of int8, int16, int32, or int64 values,
-    * specifying the size of the window for each dimension of the input tensor.
-    * No default value.
-    * @li strides: A required list of int8, int16, int32, or int64 values,
-    * specifying the stride of the sliding window for each dimension of
-    * the input tensor. No default value.
-    * @li padding_mode: A required string. Defaults to "CALCULATED".
-    * @li pads:A required list of int8, int16, int32, or int64 values,
-    * a data to caculate when padding_mode is "CALCULATED".
-    * @li data_format: An optional string. Defaults to "NHWC" .
-    * @li global_pooling: An optional bool. Whether to use the global pooling.
-    * If global_pooling = true, kernel size and paddings will be ignored.
-    * Default False. When the input parameters are set to float16, global_pooling does not support being set to true.
-    * @li ceil_mode: An optional bool. Whether to use the ceil function to calculate output
-    * height and width. If it is set to False, the floor function will be used. Default False \n
-
-    * @par Outputs:
-    * out_grad: A mutable tensor. Has the same shape, type and format as "x1" . \n
-
-    * @attention Constraints:
-    * @li Computing gradients of global pooling is not supported, which means
-    * "ksize < x1".
-    * @li "ksize" is in the range [1, 255]. "strides" is in the range [1, 63]
-    * @li in static situation, orig_input, orig_output, grad and y cannot support float32.
-
-    * @par Third-party framework compatibility
-    * Compatible with the TensorFlow operator MaxPoolGrad.
-    */
-    REG_OP(MaxPoolV3Grad)
-    .INPUT(orig_input, TensorType::RealNumberType())
-    .INPUT(orig_output, TensorType::RealNumberType())
-    .INPUT(grad, TensorType::RealNumberType())
-    .OUTPUT(out_grad, TensorType::RealNumberType())
-    .REQUIRED_ATTR(ksize, ListInt)
-    .REQUIRED_ATTR(strides, ListInt)
-    .ATTR(padding_mode, String, "CALCULATED")
-    .ATTR(pads, ListInt, {0, 0, 0, 0})
-    .ATTR(data_format, String, "NCHW")
-    .ATTR(global_pooling, Bool, false)
-    .ATTR(ceil_mode, Bool, false)
-    .OP_END_FACTORY_REG(MaxPoolV3Grad)
 
     /**
      *@brief Updates '*var' according to the Adam algorithm..

@@ -2,14 +2,24 @@
 
 ## 产品支持情况
 
-| 产品                                                        | 是否支持 |
-| :---------------------------------------------------------- |:-------:|
-| <term>Ascend 950PR/Ascend 950DT</term>                      |    √    |
-| <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>      |    ×    |
-| <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>      |    ×    |
-| <term>Atlas 200I/500 A2 推理产品</term>                      |    ×    |
-| <term>Atlas 推理系列产品</term>                             |    ×    |
-| <term>Atlas 训练系列产品</term>                              |    ×    |
+<!-- npu="950" id1 -->
+- <term>Ascend 950PR/Ascend 950DT</term>：支持
+<!-- end id1 -->
+<!-- npu="A3" id2 -->
+- <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>：不支持
+<!-- end id2 -->
+<!-- npu="910b" id3 -->
+- <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>：不支持
+<!-- end id3 -->
+<!-- npu="310b" id4 -->
+- <term>Atlas 200I/500 A2 推理产品</term>：不支持
+<!-- end id4 -->
+<!-- npu="310p" id5 -->
+- <term>Atlas 推理系列产品</term>：不支持
+<!-- end id5 -->
+<!-- npu="910" id6 -->
+- <term>Atlas 训练系列产品</term>：不支持
+<!-- end id6 -->
 
 ## 功能说明
 
@@ -156,7 +166,7 @@ aclnnStatus aclnnWeightQuantBatchMatmulNz(
         <td>可选输入</td>
         <td>偏置输入，公式中的<code>bias</code>。</td>
         <td>当不需要时传入空指针。</td>
-        <td>FLOAT16、BFLOAT16、、FLOAT</td>
+        <td>FLOAT16、BFLOAT16、FLOAT</td>
         <td>ND</td>
         <td>1、2</td>
         <td>×</td>
@@ -170,7 +180,7 @@ aclnnStatus aclnnWeightQuantBatchMatmulNz(
         MX<a href="../../../docs/zh/context/quant_mode_introduction.md" target="_blank">量化模式</a>下，值固定要求传32；<br>
         perchannel<a href="../../../docs/zh/context/quant_mode_introduction.md" target="_blank">量化模式</a>下，值传0。<br>
         </td>
-        <td>UINT64</td>
+        <td>INT</td>
         <td>-</td>
         <td>-</td>
         <td>-</td>
@@ -295,6 +305,8 @@ aclnnStatus aclnnWeightQuantBatchMatmulNz(
   - 确定性说明：aclnnWeightQuantBatchMatmulNz默认确定性实现。
   - 支持的量化模式：perchannel[量化模式](../../../docs/zh/context/quant_mode_introduction.md)、pergroup[量化模式](../../../docs/zh/context/quant_mode_introduction.md)和MX[量化模式](../../../docs/zh/context/quant_mode_introduction.md)。
   - 输入和输出支持以下数据类型和shape组合：
+
+    <!-- npu="950" id7 -->
     - <term>Ascend 950PR/Ascend 950DT</term>：
 
       |[量化模式](../../../docs/zh/context/quant_mode_introduction.md)| x | weight | antiquantScale | antiquantOffsetOptional | biasOptional | y | antiquantScale shape | antiquantOffsetOptional shape     |
@@ -326,6 +338,8 @@ aclnnStatus aclnnWeightQuantBatchMatmulNz(
         - k大小在[1, 65535]范围内，n大小在[2, 65535]范围内；
         - weight支持转置和非转置，原始ND矩阵的shape为(n, k)或(k, n)。
       - m大小在[1, 2^31-1]范围内。
+
+    <!-- end id7 -->
 
 ## 调用示例
 
@@ -422,6 +436,7 @@ aclnnStatus aclnnWeightQuantBatchMatmulNz(
       *tensor = aclCreateTensor(
           shape.data(), shape.size(), dataType, strides.data(), 0, aclFormat::ACL_FORMAT_ND, shape.data(), shape.size(),
           *deviceAddr);
+      CHECK_RET(*tensor != nullptr, LOG_PRINT("aclCreateTensor failed.\n"); return ACL_ERROR_INVALID_PARAM);
       return 0;
   }
 
@@ -470,6 +485,7 @@ aclnnStatus aclnnWeightQuantBatchMatmulNz(
               nzShape.size(), *deviceAddr);
       }
 
+      CHECK_RET(*tensor != nullptr, LOG_PRINT("aclCreateTensor failed.\n"); return ACL_ERROR_INVALID_PARAM);
       return 0;
   }
 
@@ -743,6 +759,7 @@ aclnnStatus aclnnWeightQuantBatchMatmulNz(
       *tensor = aclCreateTensor(
           shape.data(), shape.size(), dataType, strides.data(), 0, aclFormat::ACL_FORMAT_ND, shape.data(), shape.size(),
           *deviceAddr);
+      CHECK_RET(*tensor != nullptr, LOG_PRINT("aclCreateTensor failed.\n"); return ACL_ERROR_INVALID_PARAM);
       return 0;
   }
 
@@ -754,7 +771,8 @@ aclnnStatus aclnnWeightQuantBatchMatmulNz(
       auto size =static_cast<uint64_t>(GetShapeSize(shape) * sizeof(T));
       const aclIntArray* mat2Size = aclCreateIntArray(shape.data(), shape.size());
       auto ret = aclnnCalculateMatmulWeightSizeV2(mat2Size, dataType, &size);
-      CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("aclnnCalculateMamtulWeightSizeV2 failed. ERROR: %d\n", ret); return ret);
+      aclDestroyIntArray(mat2Size);
+      CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("aclnnCalculateMatmulWeightSizeV2 failed. ERROR: %d\n", ret); return ret);
 
       // 调用aclrtMalloc申请device侧内存
       ret = aclrtMalloc(deviceAddr, size, ACL_MEM_MALLOC_HUGE_FIRST);
@@ -773,6 +791,7 @@ aclnnStatus aclnnWeightQuantBatchMatmulNz(
       *tensor = aclCreateTensor(
           shape.data(), shape.size(), dataType, strides.data(), 0, aclFormat::ACL_FORMAT_ND, shape.data(), shape.size(),
           *deviceAddr);
+      CHECK_RET(*tensor != nullptr, LOG_PRINT("aclCreateTensor failed.\n"); return ACL_ERROR_INVALID_PARAM);
       return 0;
   }
 
@@ -920,7 +939,7 @@ aclnnStatus aclnnWeightQuantBatchMatmulNz(
       int32_t deviceId = 0;
       aclrtStream stream;
       auto ret = AclnnWeightQuantBatchMatmulNzA16W8Test(deviceId, stream);
-      CHECK_FREE_RET(ret == ACL_SUCCESS, LOG_PRINT("AclnnWeightQuantBatchMatmulV2Test failed. ERROR: %d\n", ret);
+      CHECK_FREE_RET(ret == ACL_SUCCESS, LOG_PRINT("AclnnWeightQuantBatchMatmulNzA16W8Test failed. ERROR: %d\n", ret);
                      return ret);
 
       Finalize(deviceId, stream);

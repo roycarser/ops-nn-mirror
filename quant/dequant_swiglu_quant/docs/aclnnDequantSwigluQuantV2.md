@@ -107,6 +107,42 @@
 
   与swigluMode为1的区别在于x\_glu与x\_linear的切分方式：swigluMode为2时，x\_glu表示dequantOut<sub>i</sub>的前半部分，x\_linear表示dequantOut<sub>i</sub>的后半部分（与swigluMode为0的切分方式一致）；swigluMode为1时为奇偶索引交错切分。
 
+- swigluMode为3时的计算公式（Step3.5模型变体SwiGLU，使用clampLimit）：
+
+  $$
+  dequantOut_i = Dequant(x_i)
+  $$
+
+  $$
+  gate = dequantOut_i[:, :H/2]
+  $$
+
+  $$
+  up = dequantOut_i[:, H/2:]
+  $$
+
+  $$
+  gate = SiLU(gate) = gate * sigmoid(gate)
+  $$
+
+  $$
+  gate = gate.clamp(max=clampLimit)
+  $$
+
+  $$
+  up = up.clamp(min=-clampLimit, max=clampLimit)
+  $$
+
+  $$
+  swigluOut_i = gate * up
+  $$
+
+  $$
+  out_i = Quant(swigluOut_i)
+  $$
+
+  其中，gate表示dequantOut<sub>i</sub>的前半部分，up表示dequantOut<sub>i</sub>的后半部分（与swigluMode为0的切分方式一致）。swigluMode为3结合了swigluMode为0的SiLU激活方式和swigluMode为2的前后切分及clamp限幅机制，但不使用gluAlpha和gluBias参数。
+
 ## 函数原型
 
 每个算子分为[两段式接口](../../../docs/zh/context/two_phase_api.md)，必须先调用“aclnnDequantSwigluQuantV2GetWorkspaceSize”接口获取计算所需workspace大小以及包含了算子计算流程的执行器，再调用“aclnnDequantSwigluQuantV2”接口执行计算。
@@ -173,7 +209,7 @@ aclnnStatus aclnnDequantSwigluQuantV2(
       <td>x（aclTensor*）</td>
       <td>输入</td>
       <td>输入待处理的数据，公式中的x。</td>
-      <td><ul><li>shape为[X1,X2,...Xn,2H]，shape不超过8维，不小于2维。</li><li>输入x对应activateDim的维度需要是2的倍数。</li><li>不支持空Tensor，输入不支持包含±inf或nan。</li></ul></td>
+      <td><ul><li>shape为[X1,X2,...Xn,2H]，shape不超过8维，不小于2维。</li><li>输入x对应activateDim的维度需要是2的倍数。</li></ul></td>
       <td>FLOAT16、BFLOAT16、INT32</td>
       <td>ND</td>
       <td>2-8</td>
@@ -183,7 +219,7 @@ aclnnStatus aclnnDequantSwigluQuantV2(
       <td>weightScaleOptional（aclTensor*）</td>
       <td>输入</td>
       <td>weight的反量化scale。</td>
-      <td><ul><li>shape支持1维或2维，shape表示为[2H]或[groupNum, 2H]，且取值2H和x最后一维保持一致。</li><li>可选参数，支持传空指针。当groupIndexOptional为空指针时，shape为[2H]，[1, 2H]；当groupIndexOptional不为空指针时，shape为[groupNum, 2H]。</li><li>不支持空Tensor，输入不支持包含±inf或nan。</li></ul></td>
+      <td><ul><li>shape支持1维或2维，shape表示为[2H]或[groupNum, 2H]，且取值2H和x最后一维保持一致。</li><li>可选参数，支持传空指针。当groupIndexOptional为空指针时，shape为[2H]，[1, 2H]；当groupIndexOptional不为空指针时，shape为[groupNum, 2H]。</li></ul></td>
       <td>FLOAT</td>
       <td>ND</td>
       <td>1或2</td>
@@ -193,7 +229,7 @@ aclnnStatus aclnnDequantSwigluQuantV2(
       <td>activationScaleOptional（aclTensor*）</td>
       <td>输入</td>
       <td>激活函数的反量化scale。</td>
-      <td><ul><li>激活函数的反量化scale。</li><li>shape为[X1,X2,...Xn]，shape不超过7维不小于1维，维度比x的维度少一维，且shape与对应维度的x的shape一致。</li><li>可选参数，支持传空指针。</li><li>不支持空Tensor，输入不支持包含±inf或nan。</li></ul></td>
+      <td><ul><li>激活函数的反量化scale。</li><li>shape为[X1,X2,...Xn]，shape不超过7维不小于1维，维度比x的维度少一维，且shape与对应维度的x的shape一致。</li><li>可选参数，支持传空指针。</li></ul></td>
       <td>FLOAT</td>
       <td>ND</td>
       <td>1-7</td>
@@ -203,7 +239,7 @@ aclnnStatus aclnnDequantSwigluQuantV2(
       <td>biasOptional（aclTensor*）</td>
       <td>输入</td>
       <td>Matmul的bias，公式中的biasOptional。</td>
-      <td><ul><li>shape支持1维或2维，shape表示为[2H]或[groupNum, 2H]，且取值2H和x最后一维保持一致。当groupIndexOptional为空指针时，shape为[2H]；当groupIndexOptional不为空指针时，shape为[groupNum, 2H]。</li><li>可选参数，支持传空指针。</li><li>不支持空Tensor，输入不支持包含±inf或nan。</li></ul></td>
+      <td><ul><li>shape支持1维或2维，shape表示为[2H]或[groupNum, 2H]，且取值2H和x最后一维保持一致。当groupIndexOptional为空指针时，shape为[2H]；当groupIndexOptional不为空指针时，shape为[groupNum, 2H]。</li><li>可选参数，支持传空指针。</li></ul></td>
       <td>FLOAT、FLOAT16、BFLOAT16、INT32</td>
       <td>ND</td>
       <td>1或2</td>
@@ -213,7 +249,7 @@ aclnnStatus aclnnDequantSwigluQuantV2(
       <td>quantScaleOptional（aclTensor*）</td>
       <td>输入</td>
       <td>量化的scale，公式中的quantScaleOptional。</td>
-      <td><ul><li>当quantModeOptional为static时，shape为1维，值为1，shape表示为shape[1]。</li><li>当quantModeOptional为dynamic时，shape为1维或2维，shape表示为[H], [2H]或[groupNum, H]。</li><li>当groupIndexOptional为空指针且activateDim为尾轴时，shape为[H]。</li><li>当groupIndexOptional不为空指针且activateDim为尾轴时，shape为[groupNum, H]。</li><li>不支持空Tensor，输入不支持包含±inf或nan。</li></ul></td>
+      <td><ul><li>当quantModeOptional为static时，shape为1维，值为1，shape表示为shape[1]。</li><li>当quantModeOptional为dynamic时，shape为1维或2维，shape表示为[H], [2H]或[groupNum, H]。</li><li>当groupIndexOptional为空指针且activateDim为尾轴时，shape为[H]。</li><li>当groupIndexOptional不为空指针且activateDim为尾轴时，shape为[groupNum, H]。</li></ul></td>
       <td>FLOAT</td>
       <td>ND</td>
       <td>-</td>
@@ -223,7 +259,7 @@ aclnnStatus aclnnDequantSwigluQuantV2(
       <td>quantOffsetOptional（aclTensor*）</td>
       <td>输入</td>
       <td>量化的offset。</td>
-      <td><ul><li>quant_mode为动态时不需要quantOffset输入，静态量化中quantOffset必须输入，且数据类型与shape同quantScale。</li><li>不支持空Tensor，输入不支持包含±inf或nan。</li></ul></td>
+      <td><ul><li>quant_mode为动态时不需要quantOffset输入，静态量化中quantOffset必须输入，且数据类型与shape同quantScale。</li></ul></td>
       <td>FLOAT</td>
       <td>ND</td>
       <td>-</td>
@@ -233,7 +269,7 @@ aclnnStatus aclnnDequantSwigluQuantV2(
       <td>groupIndexOptional（aclTensor*）</td>
       <td>输入</td>
       <td>MoE分组需要的group_index。</td>
-      <td><ul><li>shape支持1维或2维的Tensor，shape为[groupNum]或[groupNum, 2]，groupNum大于等于1。</li><li>可选参数，支持传空指针。</li><li>不支持空Tensor，输入不支持包含±inf或nan。</li></ul></td>
+      <td><ul><li>shape支持1维或2维的Tensor，shape为[groupNum]或[groupNum, 2]，groupNum大于等于1。</li><li>可选参数，支持传空指针。</li></ul></td>
       <td>INT64</td>
       <td>ND</td>
       <td>1或2</td>
@@ -333,7 +369,7 @@ aclnnStatus aclnnDequantSwigluQuantV2(
       <td>yOut（aclTensor*）</td>
       <td>输出</td>
       <td>-</td>
-      <td><ul><li>当activateDim对应的x的尾轴时，shape为[X1,X2,...Xn,H]。</li><li>当activateDim对应的不是x的尾轴时，shape为[X1,X2,...,XactivateDim / 2,...,2H]。</li><li>当yOut的数据类型为FLOAT4_E2M1、FLOAT4_E1M2时，yOut的最后一维需要是2的倍数。</li><li>当activateDim对应的不是x的尾轴时，yOut的尾轴需要小于5120。</li><li>不支持空Tensor。</li></ul></td>
+      <td><ul><li>当activateDim对应的x的尾轴时，shape为[X1,X2,...Xn,H]。</li><li>当activateDim对应的不是x的尾轴时，shape为[X1,X2,...,XactivateDim / 2,...,2H]。</li><li>当yOut的数据类型为FLOAT4_E2M1、FLOAT4_E1M2时，yOut的最后一维需要是2的倍数。</li><li>当activateDim对应的不是x的尾轴时，yOut的尾轴需要小于5120。</li></ul></td>
       <td>INT8、HIFLOAT8、FLOAT8_E5M2、FLOAT8_E4M3FN、FLOAT4_E2M1、FLOAT4_E1M2</td>
       <td>ND</td>
       <td>2-8</td>
@@ -343,7 +379,7 @@ aclnnStatus aclnnDequantSwigluQuantV2(
       <td>scaleOut（aclTensor*）</td>
       <td>输出</td>
       <td>-</td>
-      <td><ul><li>当activateDim对应的x的尾轴时，shape为[X1,X2,...,Xn]。</li><li>当activateDim对应的不是x的尾轴时，shape为[X1,X2,...,XactivateDim / 2,...,Xn]。</li><li>当quantModeOptional为static时，不计算scaleOut。</li><li>不支持空Tensor。</li></ul></td>
+      <td><ul><li>当activateDim对应的x的尾轴时，shape为[X1,X2,...,Xn]。</li><li>当activateDim对应的不是x的尾轴时，shape为[X1,X2,...,XactivateDim / 2,...,Xn]。</li><li>当quantModeOptional为static时，不计算scaleOut。</li></ul></td>
       <td>FLOAT</td>
       <td>ND</td>
       <td>1-7</td>

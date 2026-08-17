@@ -13,6 +13,7 @@
  * \brief
  */
 #include "batch_matmul_v3_basic_streamk_tiling.h"
+#include "batch_matmul_v3_common_advanced.h"
 #include "batch_matmul_v3_tiling_strategy.h"
 #include "matmul/mat_mul_v3/op_host/op_tiling/arch35/matmul_tiling_registry.h"
 #include "matmul/common/op_host/math_util.h"
@@ -85,8 +86,8 @@ bool BatchMatMulV3BasicStreamKTiling::IsCapable()
     if (batchInfo_->batchBias > 1UL) {
         return false;
     }
-    if (MatMulV3TilingHelper::IsSelfNonContiguous(context_)) {
-        OP_LOGD(args_.opName, "NonContiguous self does not support StreamK");
+    if (IsInputNonContiguousTranspose(context_, 0UL) || IsInputNonContiguousTranspose(context_, 1UL)) {
+        OP_LOGD(args_.opName, "Non-contiguous transpose does not support StreamK.");
         return false;
     }
     if (compileInfo_.aivNum != (compileInfo_.aicNum * NUM_TWO)) {
@@ -128,6 +129,11 @@ ge::graphStatus BatchMatMulV3BasicStreamKTiling::DoOpTiling()
         runInfo_.stepKb = runInfo_.depthB1 / DB_SIZE;
         runInfo_.stepKa = runInfo_.depthA1 / DB_SIZE;
     }
+    // DAV_RESV及CV自动融合当前只支持基础API
+    bool isBatchMatmul = strcmp(context_->GetNodeType(), "BatchMatMulV3") == 0;
+    apiLevel_ = (args_.isAvoidTensorApi || compileInfo_.npuArch == NpuArch::DAV_RESV || !isBatchMatmul) ?
+                    MatMulV3ApiLevel::BASIC_LEVEL :
+                    MatMulV3ApiLevel::TENSOR_LEVEL;
     return ge::GRAPH_SUCCESS;
 }
 
@@ -144,7 +150,7 @@ uint64_t BatchMatMulV3BasicStreamKTiling::GetTilingKey() const
     return BatchMatMulV3TilingKey()
         .SetTrans(args_.isATrans, args_.isBTrans)
         .SetBatchModel(MatMulV3BatchModel::BATCH_MODEL)
-        .SetApiLevel(MatMulV3ApiLevel::BASIC_LEVEL)
+        .SetApiLevel(apiLevel_)
         .SetModel(MatMulV3Model::STREAM_K)
         .SetFullLoad(MatMulV3FullLoad::NONE_FULL_LOAD)
         .SetL0C2Out(l0C2Out_)

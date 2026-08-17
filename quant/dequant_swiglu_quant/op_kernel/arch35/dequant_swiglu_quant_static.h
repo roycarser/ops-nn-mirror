@@ -93,17 +93,17 @@ protected:
 
     // bias
     LocalTensor<TBias> biasLocal;
-    __local_mem__ TBias* bias1Ptr;
-    __local_mem__ TBias* bias2Ptr;
+    __ubuf__ TBias* bias1Ptr;
+    __ubuf__ TBias* bias2Ptr;
 
     // weight_scale
-    __local_mem__ float* wScale1Ptr;
-    __local_mem__ float* wScale2Ptr;
-    __local_mem__ float* wScale1Addr;
-    __local_mem__ float* wScale2Addr;
+    __ubuf__ float* wScale1Ptr;
+    __ubuf__ float* wScale2Ptr;
+    __ubuf__ float* wScale1Addr;
+    __ubuf__ float* wScale2Addr;
 
     // quant_offset
-    __local_mem__ float* qOffsetPtr;
+    __ubuf__ float* qOffsetPtr;
 
     /* ascendc variable */
     TPipe* pipe_ = nullptr;
@@ -127,7 +127,7 @@ protected:
     uint32_t aScaleUbAlignB32_ = 0;
     uint32_t biasUbAlign_ = 0;   // bias的32B对齐标记
     int64_t roundMode_ = 0;      // 溢出模式的标识
-    float scalarMaxNum_ = 127.0; //根据不同的输出类型，对应的最大值不同，默认127
+    float scalarMaxNum_ = 127.0; // 根据不同的输出类型，对应的最大值不同，默认127
     bool hasQuantOffset_ = false;
     bool quantIsOne_ = false;
 
@@ -169,7 +169,7 @@ __aicore__ inline void DequantSwigluQuantBaseStatic<TActScale, TQuantScale, TGro
 
     // 获取指定输出类型和溢出模式
     roundMode_ = tl_->roundMode;
-    //获取指定输出类型对应的最大值
+    // 获取指定输出类型对应的最大值
     if constexpr (ifYFloat8e4m3Index_) {
         scalarMaxNum_ = 448.0;
     }
@@ -317,13 +317,11 @@ __aicore__ inline void DequantSwigluQuantBaseStatic<TActScale, TQuantScale, TGro
                 }
             }
 
-            if (realDimx_ <= 0) {
-                continue;
-            }
-
             // inDimx x的元素总数 / x的-1维shape，也即按照-1维的循环次数，也即总行数（按照二维理解）
             if (groupIndex == cuGroupIdx) {
-                ProcessSingleGroupPerCore(realGroupIndex, realDimx_, groupOffset_);
+                if (realDimx_ > 0) {
+                    ProcessSingleGroupPerCore(realGroupIndex, realDimx_, groupOffset_);
+                }
                 cuGroupIdx += tl_->maxCoreNum;
             }
             groupOffset_ += realDimx_;
@@ -475,24 +473,23 @@ __aicore__ inline void DequantSwigluQuantBaseStatic<TActScale, TQuantScale, TGro
 
         LocalTensor<float> tmpXLocal = tmpBuffer.Get<float>();
 
-        __local_mem__ float* tmpXPtr = (__local_mem__ float*)tmpXLocal.GetPhyAddr();
-        __local_mem__ TYtype* yPtr = (__local_mem__ TYtype*)yLocal.GetPhyAddr();
-        __local_mem__ uint8_t* yFp4Ptr = (__local_mem__ uint8_t*)yFp4Local.GetPhyAddr();
+        __ubuf__ float* tmpXPtr = (__ubuf__ float*)tmpXLocal.GetPhyAddr();
+        __ubuf__ TYtype* yPtr = (__ubuf__ TYtype*)yLocal.GetPhyAddr();
+        __ubuf__ uint8_t* yFp4Ptr = (__ubuf__ uint8_t*)yFp4Local.GetPhyAddr();
 
-        __local_mem__ TXtype* x1Ptr = (__local_mem__ TXtype*)xActLocal.GetPhyAddr(0);
-        __local_mem__ TXtype* x2Ptr = (__local_mem__ TXtype*)xActLocal.GetPhyAddr(xTypeUbAlignB32_ * xDimPerLoop);
-        __local_mem__ float* aScalePtr = (__local_mem__ float*)xActLocalFp32.GetPhyAddr(xTypeUbAlignB32_ * xDimPerLoop *
-                                                                                        2);
+        __ubuf__ TXtype* x1Ptr = (__ubuf__ TXtype*)xActLocal.GetPhyAddr(0);
+        __ubuf__ TXtype* x2Ptr = (__ubuf__ TXtype*)xActLocal.GetPhyAddr(xTypeUbAlignB32_ * xDimPerLoop);
+        __ubuf__ float* aScalePtr = (__ubuf__ float*)xActLocalFp32.GetPhyAddr(xTypeUbAlignB32_ * xDimPerLoop * 2);
         // 当x=int32时，才去获取weight_scale的地址
         if constexpr (ifXIntIndex_) {
-            wScale1Ptr = (__local_mem__ float*)inScaleLocal.GetPhyAddr(0);
-            wScale2Ptr = (__local_mem__ float*)inScaleLocal.GetPhyAddr(xUbAlignB32_);
+            wScale1Ptr = (__ubuf__ float*)inScaleLocal.GetPhyAddr(0);
+            wScale2Ptr = (__ubuf__ float*)inScaleLocal.GetPhyAddr(xUbAlignB32_);
         }
 
         // 增加bias的地址，使用时需要判断biasPtr是否为空指针
         if constexpr (hasBiasIndex_) {
-            bias1Ptr = (__local_mem__ TBias*)biasLocal.GetPhyAddr(0);
-            bias2Ptr = (__local_mem__ TBias*)biasLocal.GetPhyAddr(biasUbAlign_);
+            bias1Ptr = (__ubuf__ TBias*)biasLocal.GetPhyAddr(0);
+            bias2Ptr = (__ubuf__ TBias*)biasLocal.GetPhyAddr(biasUbAlign_);
         }
 
         // int32： 256B / 4B = 64次 ，bf16 or float16：256B / 2B = 128次
@@ -501,7 +498,7 @@ __aicore__ inline void DequantSwigluQuantBaseStatic<TActScale, TQuantScale, TGro
         uint32_t widthFullRow = tl_->UbFactorDimy * 2; // 输出x的-1轴对应的shape大小，也即2H
         uint16_t repeatTimes = CeilDivision(tl_->UbFactorDimy, sizePerRepeat);   // 向上取整
         uint16_t repeatTimesFullRow = CeilDivision(widthFullRow, sizePerRepeat); // 向上取整
-        __local_mem__ float* tmpX2Ptr = (__local_mem__ float*)tmpXLocal.GetPhyAddr(xUbAlignB32_ * xDimPerLoop);
+        __ubuf__ float* tmpX2Ptr = (__ubuf__ float*)tmpXLocal.GetPhyAddr(xUbAlignB32_ * xDimPerLoop);
 
         // dequant
         if (tl_->swiGluMode == 1) {
@@ -519,11 +516,11 @@ __aicore__ inline void DequantSwigluQuantBaseStatic<TActScale, TQuantScale, TGro
                 repeatTimes, sizePerRepeat, xTypeUbAlignB32_, xTypeUbAlignB32_, xTypeUbAlignB32_, aScaleUbAlignB32_, 0);
         }
 
-        __local_mem__ float* qScalePtr = (__local_mem__ float*)inScaleLocal.GetPhyAddr(xUbAlignB32_ * 2);
+        __ubuf__ float* qScalePtr = (__ubuf__ float*)inScaleLocal.GetPhyAddr(xUbAlignB32_ * 2);
 
         // quantOffset存在的时候，则获取对应的ub地址
         if (hasQuantOffset_) {
-            qOffsetPtr = (__local_mem__ float*)inScaleLocal.GetPhyAddr(xUbAlignB32_ * 3);
+            qOffsetPtr = (__ubuf__ float*)inScaleLocal.GetPhyAddr(xUbAlignB32_ * 3);
         }
 
         // biasLocal是否为空的判断

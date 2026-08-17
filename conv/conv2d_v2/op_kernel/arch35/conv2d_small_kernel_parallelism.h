@@ -587,24 +587,57 @@ Conv2dSmallKernelParallelism<FmapType, weightType, biasType, out0Type, out1Type,
     SetFlag<HardEvent::MTE1_MTE2>(EVT_FMAP_BUF0);
     SetFlag<HardEvent::MTE1_MTE2>(EVT_FMAP_BUF1);
 
+    uint32_t cinOff;
+    uint32_t curCin;
+    uint32_t curCinOri;
+    uint32_t kOff;
+    uint32_t curKL1;
+    uint32_t kl1Buf;
+    event_t kl1Ev;
+
+    // === Pre-loop: load first cin block (PING) into its L1 buffer ===
+    //                 Hoisted out of the loop so the kl1==0 branch is not
+    //                 re-evaluated on every iteration.
+    PrepareCinBlock(0, kernelHxW, cinOff, curCin, curCinOri, kOff, curKL1, kl1Buf, kl1Ev);
+
+    WaitFlag<HardEvent::MTE1_MTE2>(kl1Ev);
+
+    LoadFmapL1Chunk(kl1Buf, curHi, hiLoadOff, padTop, padBottom, curWi, wiLoadOff, cinOff, curCinOri);
+    if (loadWeight) {
+        LoadWeightL1Block(kOff, curKL1);
+    }
+
+    SetFlag<HardEvent::MTE2_MTE1>(kl1Ev);
+
     for (uint32_t kl1 = 0; kl1 < cinL1Blocks_; kl1++) {
-        uint32_t cinOff;
-        uint32_t curCin;
-        uint32_t curCinOri;
-        uint32_t kOff;
-        uint32_t curKL1;
-        uint32_t kl1Buf;
-        event_t kl1Ev;
         PrepareCinBlock(kl1, kernelHxW, cinOff, curCin, curCinOri, kOff, curKL1, kl1Buf, kl1Ev);
 
-        WaitFlag<HardEvent::MTE1_MTE2>(kl1Ev);
+        // === Segment 2: Preload next cin block (PONG) to the alternate L1 buffer ===
+        //                 All iterations except the last; condition kl1+1 < cinL1Blocks_
+        //                 prevents out-of-bounds preload on the final iteration.
+        if (kl1 + 1 < cinL1Blocks_) {
+            uint32_t nextCinOff;
+            uint32_t nextCurCin;
+            uint32_t nextCurCinOri;
+            uint32_t nextKOff;
+            uint32_t nextCurKL1;
+            uint32_t nextKl1Buf;
+            event_t nextKl1Ev;
+            PrepareCinBlock(kl1 + 1, kernelHxW, nextCinOff, nextCurCin, nextCurCinOri, nextKOff, nextCurKL1, nextKl1Buf,
+                            nextKl1Ev);
 
-        LoadFmapL1Chunk(kl1Buf, curHi, hiLoadOff, padTop, padBottom, curWi, wiLoadOff, cinOff, curCinOri);
-        if (loadWeight) {
-            LoadWeightL1Block(kOff, curKL1);
+            WaitFlag<HardEvent::MTE1_MTE2>(nextKl1Ev);
+
+            LoadFmapL1Chunk(nextKl1Buf, curHi, hiLoadOff, padTop, padBottom, curWi, wiLoadOff, nextCinOff,
+                            nextCurCinOri);
+            if (loadWeight) {
+                LoadWeightL1Block(nextKOff, nextCurKL1);
+            }
+
+            SetFlag<HardEvent::MTE2_MTE1>(nextKl1Ev);
         }
 
-        SetFlag<HardEvent::MTE2_MTE1>(kl1Ev);
+        // === Segment 3: Consume current L1 buffer — all iterations ===
         WaitFlag<HardEvent::MTE2_MTE1>(kl1Ev);
 
         SetupLoad3DForChunk(curHi, setupMOff, curM, padTop, padBottom, setupWoOff, padLeft, padRight, curWi);
@@ -683,7 +716,7 @@ Conv2dSmallKernelParallelism<FmapType, weightType, biasType, out0Type, out1Type,
 
             LocalTensor<L0cT> cl0(TPosition::CO1, 0, this->L0C_ELEMS);
             MmadParams mp;
-#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 5102)
+#if defined(__DAV_35_FAMILY__)
             if constexpr (AscendC::IsSameType<FmapType, half>::value) {
                 mp.fixShiftVal = this->tiling_->fixedShiftValue;
             }
@@ -777,7 +810,7 @@ __aicore__ inline void Conv2dSmallKernelParallelism<FmapType, weightType, biasTy
             LocalTensor<L0cT> cl0(TPosition::CO1, 0, this->L0C_ELEMS);
 
             MmadParams mp;
-#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 5102)
+#if defined(__DAV_35_FAMILY__)
             if constexpr (AscendC::IsSameType<FmapType, half>::value) {
                 mp.fixShiftVal = this->tiling_->fixedShiftValue;
             }

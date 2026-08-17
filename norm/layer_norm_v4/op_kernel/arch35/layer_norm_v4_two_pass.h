@@ -16,7 +16,7 @@
 #ifndef LAYER_NORM_V4_TWO_PASS_H
 #define LAYER_NORM_V4_TWO_PASS_H
 
-#include "layer_norm_v4_common.h"
+#include "layer_norm_v4_regbase_common.h"
 
 namespace LayerNormV4 {
 using namespace AscendC;
@@ -250,10 +250,9 @@ private:
     {
         if constexpr (!IsSameType<M, float>::value) {
             // float to bfloat16 or float16, input continue and output each repeat have only half value
-            CastBatchMeanRstdToDtype<M>((__local_mem__ float*)batchMeanOutUb.GetPhyAddr(),
-                                        (__local_mem__ float*)batchRstdOutUb.GetPhyAddr(),
-                                        (__local_mem__ M*)batchMeanOutUb.GetPhyAddr(),
-                                        (__local_mem__ M*)batchRstdOutUb.GetPhyAddr(), currentANum);
+            CastBatchMeanRstdToDtype<M>(
+                (__ubuf__ float*)batchMeanOutUb.GetPhyAddr(), (__ubuf__ float*)batchRstdOutUb.GetPhyAddr(),
+                (__ubuf__ M*)batchMeanOutUb.GetPhyAddr(), (__ubuf__ M*)batchRstdOutUb.GetPhyAddr(), currentANum);
             batchMeanQueue.EnQue(batchMeanOutUb);
             batchRstdQueue.EnQue(batchRstdOutUb);
             LocalTensor<M> batchMeanInUb = batchMeanQueue.template DeQue<M>();

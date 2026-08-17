@@ -190,8 +190,8 @@ aclnnStatus aclnnLinalgVectorNorm(
       <td>传入的self、ord、dims或out参数是空指针。</td>
     </tr>
     <tr>
-      <td rowspan="8">ACLNN_ERR_PARAM_INVALID</td>
-      <td rowspan="8">161002</td>
+      <td rowspan="7">ACLNN_ERR_PARAM_INVALID</td>
+      <td rowspan="7">161002</td>
     </tr>
     <tr>
       <td>dims超过[-N, N-1] (N表示self的维度)。</td>
@@ -204,9 +204,6 @@ aclnnStatus aclnnLinalgVectorNorm(
     </tr>
     <tr>
       <td>dims中数值重复。</td>
-    </tr>
-    <tr>
-      <td>ord的值不在支持范围内。</td>
     </tr>
     <tr>
       <td>self或out的shape超过8维。</td>
@@ -269,6 +266,11 @@ aclnnStatus aclnnLinalgVectorNorm(
   <!-- npu="950" id8 -->
   - <term>Ascend 950PR/Ascend 950DT</term>：aclnnLinalgVectorNorm默认确定性实现。
   <!-- end id8 -->
+
+<!-- npu="950" id9 -->
+- Batch一致性说明：
+  - <term>Ascend 950PR/Ascend 950DT</term>：默认非Batch一致性实现，支持通过aclrtSetSysParamOpt(ACL_OPT_DETERMINISTIC, 3)开启Batch一致性。开启后，非归约轴的计算结果与所在批次大小、位置无关；归约轴不支持Batch一致性。开启Batch一致性后，性能可能存在劣化。
+<!-- end id9 -->
 
 - 参数`self`、`dtype`、`out`支持的数据类型组合：
 

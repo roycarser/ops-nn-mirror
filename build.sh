@@ -28,6 +28,7 @@ SUPPORTED_LONG_OPTS=(
    "jit" "pkg" "asan" "make_clean_all" "make_clean" "no_force"
   "ophost" "opgraph" "opapi" "run_example" "example_name=" "genop=" "genop_aicpu=" "experimental" "cann_3rd_lib_path=" "oom" "onnxplugin" "tfplugin" "dump_cce"
   "simulator" "bisheng_flags=" "kernel_template_input=" "module_extension=" "noaclnn" "mssanitizer" "rule_launch=" "ccache=" "torch_extension" "pkg-type="
+  "ut_mode=" "ut_timeout="
 )
 
 source "./install_deps.sh"
@@ -202,7 +203,7 @@ usage() {
         echo "    --dump_cce             Dump kernel precompiled files (.i) for debugging"
         echo "    --bisheng_flags=ccec_g,oom"
         echo "                           Specify bisheng compiler flags (comma-separated for multiple)"
-        echo "    --no_force             Don't force dependency installation"
+        echo "    --no_force             Do not force building the kernels of dependent operators; only the specified operators are compiled."
         echo "    --kernel_template_input="args0=args0;args1=args1;args2=args2;args3=args3""
         echo "                           Specify kernel template input arguments (semicolon-separated for multiple)"
         echo $dotted_line
@@ -241,10 +242,17 @@ usage() {
         echo "    --opgraph -u           Same as opgraph test"
         echo "    --opapi -u             Same as opapi test"
         echo "    --opkernel -u          Same as opkernel test"
+        echo "    --ut_mode=<MODE>       UT mode for all UT types (MODE: debug/fast)"
+        echo "                           debug: enable addr2line symbolization, -g, -O0 (for development)"
+        echo "                           fast:  disable symbolization, -g0, -O2 (for quick validation, anti-hang)"
+        echo "                           Affects: op_kernel, op_host(tiling/infershape), op_api, op_graph, op_kernel_aicpu"
+        echo "                           Default: debug"
+        echo "    --ut_timeout=<N>       Per-case timeout in seconds for kernel UT, Default: 120"
         echo $dotted_line
         echo "Examples:"
         echo "    bash build.sh -u"
         echo "    bash build.sh -u --ophost"
+        echo "    bash build.sh -u --opkernel --ut_mode=fast --ut_timeout=60"
         return
         ;;
       clean)
@@ -388,7 +396,7 @@ usage() {
   echo "                     Example: --ccache=off to disable ccache"
   echo "    --ops Compile specified operator, use snake name, like: --ops=add,add_lora, use ',' to separate different operator"
   echo "    --soc Compile binary with specified Ascend SoC, like: --soc=ascend910b"
- 	echo "    --soc supported parameters must only in [ascend910b ascend910_93 ascend950 ascend310p kirinx90 kirin9030 mc62], A3(--soc=ascedn910_93)"
+	echo "    --soc supported prefixes: [ascend910b ascend910_93 ascend950 ascend350 ascend310p kirinx90 kirin9030 mc62], case-insensitive"
   echo "    --vendor_name Specify the custom operator pkg vendor name, like: --vendor_name=customize, default to customize-nn"
   echo "    --tfplugin build optf_plugin_nn.so"
   echo "    --onnxplugin build oponnx_plugin_nn.so"
@@ -411,6 +419,12 @@ usage() {
   echo "    --bisheng_flags Specify bisheng compiler config, like: --bisheng_flags=ccec_g,oom, use ',' to separate different compiler flags"
   echo "    --kernel_template_input Specify kernel template input arguments, like: --kernel_template_input="args0=args0;args1=args1;args2=args2;args3=args3""
   echo "                                                                                                  Use ';' to separate different kernel template args, can only specify a single kernel template input"
+  echo "    --ut_mode=<MODE>       UT mode for all UT types (MODE: debug/fast)"
+  echo "                           debug: enable addr2line symbolization, -g, -O0 (for development)"
+  echo "                           fast:  disable symbolization, -g0, -O2 (for quick validation, anti-hang)"
+  echo "                           Affects: op_kernel, op_host(tiling/infershape), op_api, op_graph, op_kernel_aicpu"
+  echo "                           Default: debug"
+  echo "    --ut_timeout=<N>       Per-case timeout in seconds for kernel UT, Default: 120"
   echo "to be continued ..."
 }
 
@@ -739,6 +753,11 @@ checkopts() {
   NO_ACLNN=FALSE
   ENABLE_CCACHE=TRUE
 
+  ENABLE_UT_SYMBOLIZE=TRUE
+  UT_CASE_TIMEOUT=120
+  UT_MODE=debug
+  UT_DEBUG_FLAG=-g
+
   if [ $# -eq 0 ]; then
     usage "$SHOW_HELP"
     exit 0
@@ -932,6 +951,29 @@ checkopts() {
           check_pkg_type "${PACKAGE_TYPE}"
           PACKAGE_TYPE_SET=TRUE
           ;;
+        ut_mode=*)
+          UT_MODE=${OPTARG#*=}
+          if [[ "$UT_MODE" == "fast" ]]; then
+            ENABLE_UT_SYMBOLIZE=FALSE
+            UT_DEBUG_FLAG=-g0
+            if [[ -z "$BUILD_MODE" ]]; then
+              BUILD_MODE="-O2"
+            fi
+          elif [[ "$UT_MODE" == "debug" ]]; then
+            ENABLE_UT_SYMBOLIZE=TRUE
+            UT_DEBUG_FLAG=-g
+          else
+            print_error "--ut_mode only support debug/fast"
+            exit 1
+          fi
+          ;;
+        ut_timeout=*)
+          UT_CASE_TIMEOUT=${OPTARG#*=}
+          if ! [[ "$UT_CASE_TIMEOUT" =~ ^[0-9]+$ ]] || [[ "$UT_CASE_TIMEOUT" -eq 0 ]]; then
+            print_error "--ut_timeout must be a positive integer"
+            exit 1
+          fi
+          ;;
         *)
           ## 如果不在RELEASE_TARGETS，不做处理
           if ! in_array "$OPTARG" "${RELEASE_TARGETS[@]}"; then
@@ -1068,6 +1110,9 @@ assemble_cmake_args() {
   CMAKE_ARGS="$CMAKE_ARGS -DOP_KERNEL_UT=${OP_KERNEL_UT}"
   CMAKE_ARGS="$CMAKE_ARGS -DOP_KERNEL_AICPU_UT=${OP_KERNEL_AICPU_UT}"
   CMAKE_ARGS="$CMAKE_ARGS -DUT_TEST_ALL=${UT_TEST_ALL}"
+  CMAKE_ARGS="$CMAKE_ARGS -DENABLE_UT_SYMBOLIZE=${ENABLE_UT_SYMBOLIZE}"
+  CMAKE_ARGS="$CMAKE_ARGS -DUT_CASE_TIMEOUT=${UT_CASE_TIMEOUT}"
+  CMAKE_ARGS="$CMAKE_ARGS -DUT_DEBUG_FLAG=${UT_DEBUG_FLAG}"
   if [[ "x$BISHENG_FLAGS" != "x" ]]; then
     CMAKE_ARGS="$CMAKE_ARGS -DBISHENG_FLAGS=${BISHENG_FLAGS}"
   fi
@@ -1078,7 +1123,9 @@ assemble_cmake_args() {
       for support_unit in "${SUPPORT_COMPUTE_UNIT_SHORT[@]}"; do
         lowercase_word=$(echo "$unit" | tr '[:upper:]' '[:lower:]')
         if [[ "$lowercase_word" == *"$support_unit"* ]]; then
-          COMPUTE_UNIT_SHORT="$COMPUTE_UNIT_SHORT$support_unit;"
+          if [[ ";${COMPUTE_UNIT_SHORT};" != *";${support_unit};"* ]]; then
+            COMPUTE_UNIT_SHORT="$COMPUTE_UNIT_SHORT$support_unit;"
+          fi
           break
         fi
       done
@@ -1424,7 +1471,7 @@ build_ut() {
 	        else
 	          cmake ${CMAKE_ARGS} -DASCEND_OP_NAME=${ut_args[1]} -DASCEND_COMPILE_OPS=${ut_args[2]} -DASCEND_COMPUTE_UNIT=${ut_args[3]} ..
 	        fi
-        cmake --build . --target ${REPOSITORY_NAME}_${ut_args[0]} -- ${VERBOSE} -j $THREAD_NUM || ut_build_failed=1
+        cmake --build . --target ${REPOSITORY_NAME}_${ut_args[0]} -- ${VERBOSE} -k -j $THREAD_NUM || ut_build_failed=1
       else
         echo "Not need trigger Ut: ${ut_args[0]}"
       fi
@@ -1439,7 +1486,7 @@ build_ut() {
         cmake ${CMAKE_ARGS} ..
       fi
     fi
-    cmake --build . --target ${UT_TARGES[@]} -- ${VERBOSE} -j $THREAD_NUM || ut_build_failed=1
+    cmake --build . --target ${UT_TARGES[@]} -- ${VERBOSE} -k -j $THREAD_NUM || ut_build_failed=1
   fi
 
   if [[ "$ENABLE_COVERAGE" =~ "TRUE" && "$enable_cov" == "TRUE" ]]; then
@@ -1749,6 +1796,13 @@ build_torch_extension_whl() {
         else
             unset TORCH_EXTENSION_OPS
             unset TORCH_EXTENSION_VENDOR
+        fi
+
+        if [[ "${ENABLE_EXPERIMENTAL}" == "TRUE" ]]; then
+            export TORCH_EXTENSION_EXPERIMENTAL="TRUE"
+            echo "[INFO] Building torch_extension whl with experimental ops only"
+        else
+            unset TORCH_EXTENSION_EXPERIMENTAL
         fi
 
         python3 -m build --wheel -n 2>&1 || {

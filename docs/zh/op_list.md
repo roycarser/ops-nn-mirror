@@ -47,7 +47,7 @@
     <td>AI Core</td>
     <td>正数直接输出，负数用平滑指数曲线输出。</td>
   </tr>
- <tr>
+  <tr>
     <td>activation</td>
     <td><a href="../../activation/clipped_swiglu/README.md">clipped_swiglu</a></td>
     <td>✓</td>
@@ -56,6 +56,16 @@
     <td>✓</td>
     <td>AI Core</td>
     <td>带截断的Swish门控线性单元激活函数，实现x的SwiGlu计算。本算子相较于SwiGlu算子，新增了部分输入参数：groupIndex、alpha、limit、bias、interleaved，用于支持GPT-OSS模型使用的变体SwiGlu以及MoE模型使用的分组场景。</td>
+  </tr>
+  <tr>
+    <td>activation</td>
+    <td><a href="../../activation/clipped_swiglu_grad/README.md">clipped_swiglu_grad</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✗</td>
+    <td>✓</td>
+    <td>AI Core</td>
+    <td>带截断的Swish门控线性单元激活函数的反向算子，计算输入x的梯度gradXOut。</td>
   </tr>
   <tr>
     <td>activation</td>
@@ -156,6 +166,16 @@
     <td>✓</td>
     <td>AI Core</td>
     <td>将输入Tensor按照最后一个维度分为左右两个Tensor：x1和x2，对左边的x1进行Threshold计算，将计算结果与x2相乘。</td>
+  </tr>
+  <tr>
+    <td>activation</td>
+    <td><a href="../../activation/fused_bias_leaky_relu/README.md">fused_bias_leaky_relu</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✗</td>
+    <td>✓</td>
+    <td>AI Core</td>
+    <td>BiasAdd + LeakyReLU + Scale 三合一前向算子，对应MMCV FusedBiasLeakyReLU前向。</td>
   </tr>
   <tr>
     <td>activation</td>
@@ -596,6 +616,26 @@
     <td>✓</td>
     <td>AI Core</td>
     <td>该算子暂无Ascend C代码实现，欢迎开发者补充贡献，贡献方式参考<a href="../../CONTRIBUTING.md">贡献指南</a>。</td>
+  </tr>
+  <tr>
+    <td>activation</td>
+    <td><a href="../../activation/situ_glu/README.md">situ_glu</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>AI Core</td>
+    <td>SiTU门控线性单元激活函数，对输入张量沿指定维度切分为门控与上路径两半，按SiTU公式计算输出。</td>
+  </tr>
+  <tr>
+    <td>activation</td>
+    <td><a href="../../activation/situ_glu_grad/README.md">situ_glu_grad</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>AI Core</td>
+    <td>SiTU门控线性单元激活函数的反向梯度计算，根据上游梯度和前向输入计算输入梯度。</td>
   </tr>
   <tr>
     <td>activation</td>
@@ -2829,6 +2869,16 @@
   </tr>
   <tr>
     <td>matmul</td>
+    <td><a href="../../matmul/matmul_emu_split_weight/README.md">matmul_emu_split_weight</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✗</td>
+    <td>AI Core</td>
+    <td>使用双路BF16 GEMM融合模拟FP32精度矩阵乘法。离线将FP32权重拆分为高位BF16与低位残差BF16，推理阶段执行两次BF16 GEMM并做线性组合，激活值全程保持BF16，两路矩阵乘均运行在Cube上。</td>
+  </tr>
+  <tr>
+    <td>matmul</td>
     <td><a href="../../matmul/matmul_v2_compress_dequant/README.md">matmul_v2_compress_dequant</a></td>
     <td>✗</td>
     <td>✗</td>
@@ -3740,6 +3790,16 @@
   </tr>
   <tr>
     <td>optim</td>
+    <td><a href="../../optim/inplace_apply_proximal_adagrad/README.md">inplace_apply_proximal_adagrad</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✗</td>
+    <td>AI Core</td>
+    <td>ApplyProximalAdagrad的inplace双输出版本，将var和accum均显式暴露为输出端口（inplace alias），完整反映Proximal Adagrad算法的inplace更新语义，对标TensorFlow的ApplyProximalAdagrad接口。</td>
+  </tr>
+  <tr>
+    <td>optim</td>
     <td><a href="../../optim/lamb_apply_optimizer_assign/README.md">lamb_apply_optimizer_assign</a></td>
     <td>✓</td>
     <td>✓</td>
@@ -4054,8 +4114,8 @@
     <td>✓</td>
     <td>✓</td>
     <td>✓</td>
-    <td>✗</td>
-    <td>AI Core</td>
+    <td>✓</td>
+    <td>AI Core/AI CPU</td>
     <td>根据输入的outputSize计算每次kernel的大小，对输入self进行2维最大池化操作，输出池化后的值outputOut和索引indicesOut。aclnnAdaptiveMaxPool2d与aclnnMaxPool2d的区别在于，只需指定outputSize大小，并按outputSize的大小来划分pooling区域。</td>
   </tr>
   <tr>
@@ -4077,6 +4137,16 @@
     <td>✓</td>
     <td>AI Core</td>
     <td>对输入Tensor进行窗口为kH * kW、步长为sH * sW的二维平均池化操作，其中k为kernelSize，表示池化窗口的大小，s为stride，表示池化操作的步长。</td>
+  </tr>
+  <tr>
+    <td>pooling</td>
+    <td><a href="../../pooling/avg_pool1_d/README.md">avg_pool1d</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✗</td>
+    <td>✓</td>
+    <td>AI Core</td>
+    <td>对输入Tensor的最后一维做一维平均池化，支持不对称padding、ceil_mode输出长度修正和count_include_pad分母选择。</td>
   </tr>
   <tr>
     <td>pooling</td>
@@ -4537,6 +4607,46 @@
     <td>✓</td>
     <td>AI Core</td>
     <td>FakeQuantWithMinMaxArgs的反向梯度算子，通过Nudge后的nudgedMin/nudgedMax构建0/1 mask，对梯度进行乘法门控。</td>
+  </tr>
+  <tr>
+    <td>quant</td>
+    <td><a href="../../quant/fake_quant_with_min_max_vars/README.md">fake_quant_with_min_max_vars</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✗</td>
+    <td>✓</td>
+    <td>AI Core</td>
+    <td>对输入x进行per-tensor假量化，通过Nudge算法将min/max调整为量化步长的整数倍后，执行量化-反量化操作。与FakeQuantWithMinMaxArgs的区别在于min/max作为可训练变量（tensor输入）参与梯度更新，适用于量化感知训练。</td>
+  </tr>
+  <tr>
+    <td>quant</td>
+    <td><a href="../../quant/fake_quant_with_min_max_vars_gradient/README.md">fake_quant_with_min_max_vars_gradient</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✗</td>
+    <td>✓</td>
+    <td>AI Core</td>
+    <td>FakeQuantWithMinMaxVars的反向梯度算子，用于量化感知训练的反向传播。通过Nudge后的nudgedMin/nudgedMax构建0/1 mask，对梯度进行乘法门控，同时计算min/max的越界梯度之和。</td>
+  </tr>
+  <tr>
+    <td>quant</td>
+    <td><a href="../../quant/fake_quant_with_min_max_vars_per_channel/README.md">fake_quant_with_min_max_vars_per_channel</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✗</td>
+    <td>✓</td>
+    <td>AI Core</td>
+    <td>对输入x进行per-channel假量化，沿最后一轴的每个通道使用各自的min/max独立执行Nudge量化-反量化操作。每个通道拥有独立的量化参数，能更好地适应不同通道的数值范围差异，适用于量化感知训练。</td>
+  </tr>
+  <tr>
+    <td>quant</td>
+    <td><a href="../../quant/fake_quant_with_min_max_vars_per_channel_gradient/README.md">fake_quant_with_min_max_vars_per_channel_gradient</a></td>
+    <td>✓</td>
+    <td>✓</td>
+    <td>✗</td>
+    <td>✓</td>
+    <td>AI Core</td>
+    <td>FakeQuantWithMinMaxVarsPerChannel的反向梯度算子，用于per-channel量化感知训练的反向传播。通过per-channel Nudge后的nudgedMin/nudgedMax构建0/1 mask，对梯度进行乘法门控，同时计算min/max的per-channel越界梯度之和。</td>
   </tr>
   <tr>
     <td>quant</td>

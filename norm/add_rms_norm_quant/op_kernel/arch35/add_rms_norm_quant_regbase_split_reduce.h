@@ -65,7 +65,7 @@ public:
 
         tailNDtypeAlign_ = CeilAlign(static_cast<uint64_t>(tailN_), static_cast<uint64_t>(BLOCK_SIZE / sizeof(T_X)));
         baseNB8Align_ = CeilAlign(baseN_, B8_BLOCK_NUM);
-        uint64_t reduceBufLen = baseNReduceAlign_ / (2 * V_LENGTH);
+        uint64_t reduceBufLen = baseNReduceAlign_ / (REDUCE_VREG_PER_REPEAT * V_LENGTH);
         reduceBufAlign_ = CeilAlign(reduceBufLen, B32_BLOCK_NUM);
     }
 
@@ -311,7 +311,7 @@ private:
         LocalTensor<T_X> x1Local = inQueueX1_.DeQue<T_X>();
         LocalTensor<T_X> x2Local = inQueueX2_.DeQue<T_X>();
 
-        __local_mem__ T_X* x2Addr = (__ubuf__ T_X*)x2Local.GetPhyAddr();
+        __ubuf__ T_X* x2Addr = (__ubuf__ T_X*)x2Local.GetPhyAddr();
 
         LocalTensor<T_Y> y1Local = outQueueY1_.AllocTensor<T_Y>();
         LocalTensor<T_Y> y2Local;
@@ -320,7 +320,7 @@ private:
         }
 
         LocalTensor<T_X> resOutLocal;
-        __local_mem__ T_X* resOutAddr = nullptr;
+        __ubuf__ T_X* resOutAddr = nullptr;
         if constexpr (HAS_RESOUT) {
             resOutLocal = outQueueResOut_.AllocTensor<T_X>();
             resOutAddr = (__ubuf__ T_X*)resOutLocal.GetPhyAddr();

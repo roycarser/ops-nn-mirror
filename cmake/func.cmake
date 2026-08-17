@@ -513,7 +513,10 @@ function(add_modules_sources)
 
   # op_api目录已移出的算子，SOURCE_DIR为算子根目录路径，路径不以op_host结尾；移出前SOURCE_DIR为算子op_host目录路径
   if(NOT "${SOURCE_DIR}" MATCHES "/op_host$")
+    set(_OP_ROOT ${SOURCE_DIR})
     set(SOURCE_DIR ${SOURCE_DIR}/op_host)
+  else()
+    get_filename_component(_OP_ROOT ${SOURCE_DIR} DIRECTORY)
   endif()
 
   # 获取算子层级目录名称
@@ -533,7 +536,18 @@ function(add_modules_sources)
   endif()
 
   add_tf_plugin_sources()
-  add_graph_plugin_sources()
+
+  # op_graph: 从算子根目录下的 op_graph/ 递归收集所有 .cpp
+  file(GLOB_RECURSE OP_GRAPH_SRCS ${_OP_ROOT}/op_graph/*.cpp)
+  if(OP_GRAPH_SRCS)
+    add_graph_plugin_modules()
+    target_sources(${GRAPH_PLUGIN_NAME}_obj PRIVATE ${OP_GRAPH_SRCS})
+  endif()
+  file(GLOB OP_GRAPH_PROTO_HEADERS ${_OP_ROOT}/op_graph/*_proto*.h)
+  if(OP_GRAPH_PROTO_HEADERS)
+    target_sources(${GRAPH_PLUGIN_NAME}_proto_headers INTERFACE ${OP_GRAPH_PROTO_HEADERS})
+  endif()
+
   add_onnx_plugin_sources()
 
   file(GLOB OPINFER_SRCS ${SOURCE_DIR}/*_infershape*.cpp)
@@ -633,7 +647,12 @@ function(add_kernel_sources)
   set(multiValueArgs COMPUTE_UNITS OPTIONS)
   cmake_parse_arguments(MODULE "" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
-  set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+  # 兼容两种调用位置：在 op_kernel 目录内调用（旧）或在算子顶层调用（新）
+  if(CMAKE_CURRENT_SOURCE_DIR MATCHES "/op_kernel$")
+    set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+  else()
+    set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/op_kernel)
+  endif()
   get_filename_component(OP_DIR ${SOURCE_DIR} DIRECTORY)
   get_filename_component(op_name ${OP_DIR} NAME)
 
@@ -739,11 +758,7 @@ function(add_graph_plugin_sources)
   get_filename_component(PARENT_DIR ${SOURCE_DIR} DIRECTORY)
   get_filename_component(OP_NAME ${PARENT_DIR} NAME)
 
-  if(BUILD_WITH_INSTALLED_DEPENDENCY_CANN_PKG)
-    file(GLOB GRAPH_PLUGIN_SRCS ${SOURCE_DIR}/*_graph*.cpp ${SOURCE_DIR}/*_fallback.cpp ${SOURCE_DIR}/fusion_pass/*_pass.cpp)
-  else()
-    file(GLOB GRAPH_PLUGIN_SRCS ${SOURCE_DIR}/*_graph*.cpp ${SOURCE_DIR}/*_fallback.cpp)
-  endif()
+  file(GLOB_RECURSE GRAPH_PLUGIN_SRCS ${SOURCE_DIR}/*.cpp)
   if(GRAPH_PLUGIN_SRCS)
     add_graph_plugin_modules()
     target_sources(${GRAPH_PLUGIN_NAME}_obj PRIVATE ${GRAPH_PLUGIN_SRCS})
@@ -1248,4 +1263,79 @@ macro(add_sources)
     set(TEMP_LIST ${PE_OBJECTS_LIST})
     list(APPEND TEMP_LIST ${NEW_OBJECT_EXPRESSION})
     set(PE_OBJECTS_LIST ${TEMP_LIST} CACHE INTERNAL "List of PyTorch extension objects" FORCE)
+endmacro()
+
+# usage: add_all_modules_sources([OPTYPE] ACLNNTYPE DEPENDENCIES COMPUTE_UNIT TILING_DIR DISABLE_IN_OPP)
+# 收编算子顶层 CMakeLists 的统一入口，自适应 op_api 目录位置（算子根或 op_host 下），
+# 内部复用 add_modules_sources 既有逻辑，并触发 add_all_ut_sources 收集 UT 源。
+# 格式如下所示：
+# [OPTYPE op_name]              算子类型名称，缺省自动取算子目录名；显式传入时以用户设置为准
+# ACLNNTYPE aclnn_type          aclnn类型，必填，支持 aclnn/aclnn_inner/aclnn_exclude
+# [DEPENDENCIES dep_op...]      依赖的算子名称列表，缺省为空
+# [COMPUTE_UNIT ascendxx...]    支持的芯片版本号，必须与TILING_DIR一一对应，缺省为配置所有的soc
+# [TILING_DIR archxx...]        每种芯片类型对应的tiling文件目录，必须与COMPUTE_UNIT一一对应，缺省为空
+# [DISABLE_IN_OPP TRUE/FALSE]   是否在opp包中编译tiling文件，缺省为FALSE
+macro(add_all_modules_sources)
+  set(oneValueArgs DISABLE_IN_OPP)
+  set(multiValueArgs OPTYPE ACLNNTYPE DEPENDENCIES COMPUTE_UNIT TILING_DIR)
+
+  cmake_parse_arguments(MODULE "" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+
+  # 自适应 DIR：op_api 在算子根目录（模式B）则 DIR=算子根；否则 DIR=算子根/op_host（模式A）
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/op_api")
+    set(_HOST_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+  else()
+    set(_HOST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/op_host)
+  endif()
+
+  get_filename_component(_OP_NAME ${CMAKE_CURRENT_SOURCE_DIR} NAME)
+
+  # OPTYPE 未传入时，自动取算子目录名
+  if(NOT MODULE_OPTYPE)
+    set(MODULE_OPTYPE ${_OP_NAME})
+  endif()
+
+  add_modules_sources(DIR ${_HOST_DIR} OPTYPE ${MODULE_OPTYPE} ACLNNTYPE ${MODULE_ACLNNTYPE}
+      DEPENDENCIES ${MODULE_DEPENDENCIES} COMPUTE_UNIT ${MODULE_COMPUTE_UNIT}
+      TILING_DIR ${MODULE_TILING_DIR} DISABLE_IN_OPP ${MODULE_DISABLE_IN_OPP})
+
+  add_all_ut_sources(OP_NAME ${_OP_NAME})
+  unset(_HOST_DIR)
+  unset(_OP_NAME)
+endmacro()
+
+# usage: add_all_ut_sources(OP_NAME op_name)
+# 收集算子各类型 UT 源；op_api UT 同时扫描 tests/ut/op_api 与 tests/ut/op_host 两处位置以兼容历史。
+macro(add_all_ut_sources)
+  set(oneValueArgs OP_NAME)
+  cmake_parse_arguments(MODULE "" "${oneValueArgs}" "" ${ARGN})
+  set(_UT_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/tests/ut)
+
+  if(UT_TEST_ALL OR OP_API_UT)
+    if(EXISTS "${_UT_ROOT}/op_api")
+      add_modules_ut_sources(HOSTNAME ${OP_API_MODULE_NAME} MODE PRIVATE DIR ${_UT_ROOT}/op_api)
+    endif()
+    if(EXISTS "${_UT_ROOT}/op_host")
+      add_modules_ut_sources(HOSTNAME ${OP_API_MODULE_NAME} MODE PRIVATE DIR ${_UT_ROOT}/op_host)
+    endif()
+    # 兼容历史：部分算子 aclnn 测试放在 tests/ut/op_host/op_api 下
+    if(EXISTS "${_UT_ROOT}/op_host/op_api")
+      add_modules_ut_sources(HOSTNAME ${OP_API_MODULE_NAME} MODE PRIVATE DIR ${_UT_ROOT}/op_host/op_api)
+    endif()
+  endif()
+
+  if(UT_TEST_ALL OR OP_HOST_UT)
+    if(EXISTS "${_UT_ROOT}/op_host")
+      add_modules_ut_sources(HOSTNAME ${OP_TILING_MODULE_NAME} MODE PRIVATE DIR ${_UT_ROOT}/op_host)
+      add_modules_ut_sources(HOSTNAME ${OP_INFERSHAPE_MODULE_NAME} MODE PRIVATE DIR ${_UT_ROOT}/op_host)
+    endif()
+  endif()
+
+  if(UT_TEST_ALL OR OP_GRAPH_UT)
+    if(EXISTS "${_UT_ROOT}/op_graph")
+      add_modules_ut_sources(HOSTNAME ${OP_GRAPH_MODULE_NAME} MODE PRIVATE DIR ${_UT_ROOT}/op_graph)
+    endif()
+  endif()
+
+  unset(_UT_ROOT)
 endmacro()

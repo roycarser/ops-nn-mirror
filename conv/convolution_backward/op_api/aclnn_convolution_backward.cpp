@@ -162,6 +162,28 @@ static bool IsPaddingValidFor3D(const aclTensor* weight, const ConvolutionBackwa
     return true;
 }
 
+static int32_t CalcBl1MinSizeFor3DDw(int64_t wOut, int64_t kernelHDilation, int32_t tempStrideH, int32_t kl1Min,
+                                     int32_t minKL0, int32_t k0, int32_t bDtypeBytes)
+{
+    constexpr int64_t kDefaultC0 = 16;
+    int32_t bl1MinSize = 0;
+    if (wOut >= kDefaultC0) {
+        if (wOut % kDefaultC0 == 0) {
+            bl1MinSize = kernelHDilation * kl1Min * minKL0 * k0 * bDtypeBytes;
+        } else {
+            bl1MinSize = (kernelHDilation + tempStrideH) * kl1Min * minKL0 * k0 * bDtypeBytes;
+        }
+    } else {
+        wOut = std::max(1, static_cast<int32_t>(wOut));
+        int32_t bl1AlignFactor = (kDefaultC0 + static_cast<int32_t>(wOut) - 1) / static_cast<int32_t>(wOut);
+        bl1AlignFactor += (kDefaultC0 % wOut != 0) ? 1 : 0;
+        int64_t raw = (kernelHDilation + (bl1AlignFactor - 1) * tempStrideH) * kl1Min;
+        int32_t alignedVal = (raw + kDefaultC0 - 1) / kDefaultC0 * kDefaultC0;
+        bl1MinSize = alignedVal * minKL0 * k0 * bDtypeBytes;
+    }
+    return bl1MinSize;
+}
+
 static bool IsExceedL1For3DDw(const aclTensor* gradOutput, const aclTensor* input, const aclTensor* weight,
                               const ConvolutionBackwardParams& params)
 {
@@ -200,22 +222,7 @@ static bool IsExceedL1For3DDw(const aclTensor* gradOutput, const aclTensor* inpu
 
     int32_t al1MinSize = kDefaultC0 * k0 * aDtypeBytes * minKL0;
     int32_t kl1Min = static_cast<int32_t>(wIn);
-    int32_t bl1MinSize = 0;
-
-    if (wOut >= kDefaultC0) {
-        if (wOut % kDefaultC0 == 0) {
-            bl1MinSize = kernelHDilation * kl1Min * minKL0 * k0 * bDtypeBytes;
-        } else {
-            bl1MinSize = (kernelHDilation + tempStrideH) * kl1Min * minKL0 * k0 * bDtypeBytes;
-        }
-    } else {
-        wOut = std::max(1, static_cast<int32_t>(wOut));
-        int32_t bl1AlignFactor = (kDefaultC0 + static_cast<int32_t>(wOut) - 1) / static_cast<int32_t>(wOut);
-        bl1AlignFactor += (kDefaultC0 % wOut != 0) ? 1 : 0;
-        int64_t raw = (kernelHDilation + (bl1AlignFactor - 1) * tempStrideH) * kl1Min;
-        int32_t alignedVal = (raw + kDefaultC0 - 1) / kDefaultC0 * kDefaultC0;
-        bl1MinSize = alignedVal * minKL0 * k0 * bDtypeBytes;
-    }
+    int32_t bl1MinSize = CalcBl1MinSizeFor3DDw(wOut, kernelHDilation, tempStrideH, kl1Min, minKL0, k0, bDtypeBytes);
 
     uint64_t l1Size = 0;
     auto platformInfo = GetCurrentPlatformInfo().GetPlatformInfos();
@@ -1061,6 +1068,43 @@ static const aclTensor* PerformConv2DBackpropInput(ConvolutionBackwardInputTenso
     return gradInputNC1HWC0;
 }
 
+static const aclTensor* CalcConv2DBpInputByPostDilation(ConvolutionBackwardInputTensor& inputTensor,
+                                                        ConvolutionBackwardParams& params, aclOpExecutor* executor)
+{
+    int64_t newstrideVector[] = {1, 1};
+    int64_t newpaddingVector[] = {0, 0, 0, 0};
+    aclIntArray* newstride = executor->AllocIntArray(newstrideVector, 2);
+    CHECK_RET(newstride != nullptr, nullptr);
+    // 4: newpaddingVector 数组分配的空间大小
+    aclIntArray* newpadding = executor->AllocIntArray(newpaddingVector, 4);
+    CHECK_RET(newpadding != nullptr, nullptr);
+    op::Shape newInputStorageShape;
+    op::Shape newInputOrishape;
+    for (size_t i = 0; i < inputTensor.input->GetStorageShape().GetDimNum(); i++) {
+        newInputStorageShape.AppendDim(i == kHDimNC1HWC0Idx || i == kWDimNC1HWC0Idx ?
+                                           inputTensor.gradOutput->GetStorageShape().GetDim(i) :
+                                           inputTensor.input->GetStorageShape().GetDim(i));
+    }
+    for (size_t i = 0; i < inputTensor.input->GetViewShape().GetDimNum(); i++) {
+        newInputOrishape.AppendDim(i == kHDimNCHWIdx || i == kWDimNCHWIdx ?
+                                       inputTensor.gradOutput->GetViewShape().GetDim(i) :
+                                       inputTensor.input->GetViewShape().GetDim(i));
+    }
+    auto newInput = executor->AllocTensor(newInputStorageShape, newInputOrishape, inputTensor.weight->GetDataType(),
+                                          inputTensor.input->GetStorageFormat(),
+                                          inputTensor.input->GetOriginalFormat());
+    ConvolutionBackwardInputTensor newInputTensor = {inputTensor.gradOutput, newInput, inputTensor.weight};
+    ConvolutionBackwardParams newparams = {params.biasSizes, newstride,         newpadding,
+                                           params.dilation,  params.transposed, params.outputPadding,
+                                           params.groups,    params.outputMask, params.cubeMathType};
+    auto dxGradInputNC1HWC0 = PerformConv2DBackpropInput(newInputTensor, newparams, executor);
+    OP_CHECK(dxGradInputNC1HWC0 != nullptr,
+             OP_LOGE(ACLNN_ERR_INNER_NULLPTR,
+                     "The calculation with PerformConv2DBackpropInput failed, Conv2dBackpropInput return nullptr."),
+             return nullptr);
+    return PostDilation(dxGradInputNC1HWC0, inputTensor, params, executor);
+}
+
 static const aclTensor* CalculateConv2DBackpropInput(ConvolutionBackwardInputTensor& inputTensor,
                                                      ConvolutionBackwardParams& params, aclOpExecutor* executor)
 {
@@ -1080,39 +1124,7 @@ static const aclTensor* CalculateConv2DBackpropInput(ConvolutionBackwardInputTen
         dxGradInputNC1HWC0Res = PerformConv2DBackpropInput(newInputTensor, newparams, executor);
     } else if (IsPostInsertDilation(inputTensor.weight, params) && IsInputSupportInsertDilation() &&
                inputTensor.input->GetDataType() != DataType::DT_BF16) {
-        const aclTensor* dxGradInputNC1HWC0 = nullptr;
-        int64_t newstrideVector[] = {1, 1};
-        int64_t newpaddingVector[] = {0, 0, 0, 0};
-        aclIntArray* newstride = executor->AllocIntArray(newstrideVector, 2);
-        CHECK_RET(newstride != nullptr, nullptr);
-        // 4: newpaddingVector 数组分配的空间大小
-        aclIntArray* newpadding = executor->AllocIntArray(newpaddingVector, 4);
-        CHECK_RET(newpadding != nullptr, nullptr);
-        op::Shape newInputStorageShape;
-        op::Shape newInputOrishape;
-        for (size_t i = 0; i < inputTensor.input->GetStorageShape().GetDimNum(); i++) {
-            newInputStorageShape.AppendDim(i == kHDimNC1HWC0Idx || i == kWDimNC1HWC0Idx ?
-                                               inputTensor.gradOutput->GetStorageShape().GetDim(i) :
-                                               inputTensor.input->GetStorageShape().GetDim(i));
-        }
-        for (size_t i = 0; i < inputTensor.input->GetViewShape().GetDimNum(); i++) {
-            newInputOrishape.AppendDim(i == kHDimNCHWIdx || i == kWDimNCHWIdx ?
-                                           inputTensor.gradOutput->GetViewShape().GetDim(i) :
-                                           inputTensor.input->GetViewShape().GetDim(i));
-        }
-        auto newInput = executor->AllocTensor(newInputStorageShape, newInputOrishape, inputTensor.weight->GetDataType(),
-                                              inputTensor.input->GetStorageFormat(),
-                                              inputTensor.input->GetOriginalFormat());
-        ConvolutionBackwardInputTensor newInputTensor = {inputTensor.gradOutput, newInput, inputTensor.weight};
-        ConvolutionBackwardParams newparams = {params.biasSizes, newstride,         newpadding,
-                                               params.dilation,  params.transposed, params.outputPadding,
-                                               params.groups,    params.outputMask, params.cubeMathType};
-        dxGradInputNC1HWC0 = PerformConv2DBackpropInput(newInputTensor, newparams, executor);
-        OP_CHECK(dxGradInputNC1HWC0 != nullptr,
-                 OP_LOGE(ACLNN_ERR_INNER_NULLPTR,
-                         "The calculation with PerformConv2DBackpropInput failed, Conv2dBackpropInput return nullptr."),
-                 return nullptr);
-        dxGradInputNC1HWC0Res = PostDilation(dxGradInputNC1HWC0, inputTensor, params, executor);
+        dxGradInputNC1HWC0Res = CalcConv2DBpInputByPostDilation(inputTensor, params, executor);
     } else {
         dxGradInputNC1HWC0Res = PerformConv2DBackpropInput(inputTensor, params, executor);
     }
@@ -1249,6 +1261,48 @@ static bool Check2DTransTo1x1DwFlag(ConvolutionBackwardInputTensor& inputTensor,
     return true;
 }
 
+static const aclTensor* PrepareXTensorForDw1x1(const aclTensor* xTensor, int64_t batchDim, int64_t cInDim,
+                                               int64_t hKernelDim, int64_t wKernelDim, int64_t hOutDim, int64_t wOutDim,
+                                               aclOpExecutor* executor)
+{
+    // X: reshape from(N, Ci, Hi, Wi) to(N*Ci, Ho, Hk, Wo, Wk)
+    auto shape = op::ToShapeVector(xTensor->GetViewShape());
+    FVector<int64_t> newShape = {batchDim * cInDim, hOutDim, hKernelDim, wOutDim, wKernelDim};
+    aclIntArray* shapeArray = executor->AllocIntArray(newShape.data(), newShape.size());
+    CHECK_RET(shapeArray != nullptr, nullptr);
+    auto xTensorTmp = l0op::Reshape(xTensor, shapeArray, executor);
+    CHECK_RET(xTensorTmp != nullptr, nullptr);
+    // X: permute(0, 2, 4, 1, 3)
+    FVector<int64_t> newShapeDims = {0, 2, 4, 1, 3};
+    auto permAfter = executor->AllocIntArray(newShapeDims.data(), newShapeDims.size());
+    CHECK_RET(permAfter != nullptr, nullptr);
+    xTensorTmp = l0op::Transpose(xTensorTmp, permAfter, executor);
+    CHECK_RET(xTensorTmp != nullptr, nullptr);
+    // X: reshape from(N*Ci, Hk, Wk, Ho, Wo) to(N, Ci*Hk*Wk, Ho, Wo)
+    auto tmpShape = op::Shape({batchDim, cInDim * hKernelDim * wKernelDim, hOutDim, wOutDim});
+    auto xTensorForDw1x1 = ViewWithShape(xTensorTmp, tmpShape, executor);
+    CHECK_RET(xTensorForDw1x1 != nullptr, nullptr);
+    if (xTensorForDw1x1->GetStorageFormat() != xTensor->GetStorageFormat()) {
+        xTensorForDw1x1 = l0op::ReFormat(xTensorForDw1x1, xTensor->GetStorageFormat());
+        CHECK_RET(xTensorForDw1x1 != nullptr, nullptr);
+    }
+    return xTensorForDw1x1;
+}
+
+static const aclTensor* PrepareWeightTensorForDw1x1(const aclTensor* wTensor, int64_t cOutDim, int64_t cInDim,
+                                                    int64_t hKernelDim, int64_t wKernelDim, aclOpExecutor* executor)
+{
+    // W: reshape from(Co, Ci, Hk, Wk) to(Co, Ci*Hk*Wk, 1, 1)
+    auto tmpShape = op::Shape({cOutDim, cInDim * hKernelDim * wKernelDim, 1, 1});
+    auto wTensorForDw1x1 = ViewWithShape(wTensor, tmpShape, executor);
+    CHECK_RET(wTensorForDw1x1 != nullptr, nullptr);
+    if (wTensorForDw1x1->GetStorageFormat() != wTensor->GetStorageFormat()) {
+        wTensorForDw1x1 = l0op::ReFormat(wTensorForDw1x1, wTensor->GetStorageFormat());
+        CHECK_RET(wTensorForDw1x1 != nullptr, nullptr);
+    }
+    return wTensorForDw1x1;
+}
+
 static const aclTensor* Conv2DBackpropFilterBy1x1Dw(ConvolutionBackwardInputTensor& inputTensor,
                                                     ConvolutionBackwardParams& params, aclOpExecutor* executor,
                                                     vector<bool>& conv3DBp2MatmulMask)
@@ -1271,35 +1325,11 @@ static const aclTensor* Conv2DBackpropFilterBy1x1Dw(ConvolutionBackwardInputTens
     int64_t wKernelDim = weightShape.GetDim(widthIdx);
     int64_t hOutDim = gradOutShape.GetDim(heightIdx);
     int64_t wOutDim = gradOutShape.GetDim(widthIdx);
-    // X: reshape from(N, Ci, Hi, Wi) to(N*Ci, Ho, Hk, Wo, Wk)
-    auto shape = op::ToShapeVector(xTensor->GetViewShape());
-    FVector<int64_t> newShape = {batchDim * cInDim, hOutDim, hKernelDim, wOutDim, wKernelDim};
-    aclIntArray* shapeArray = executor->AllocIntArray(newShape.data(), newShape.size());
-    CHECK_RET(shapeArray != nullptr, nullptr);
-    auto xTensorTmp = l0op::Reshape(xTensor, shapeArray, executor);
-    CHECK_RET(xTensorTmp != nullptr, nullptr);
-    // X: permute(0, 2, 4, 1, 3)
-    FVector<int64_t> newShapeDims = {0, 2, 4, 1, 3};
-    auto permAfter = executor->AllocIntArray(newShapeDims.data(), newShapeDims.size());
-    CHECK_RET(permAfter != nullptr, nullptr);
-    xTensorTmp = l0op::Transpose(xTensorTmp, permAfter, executor);
-    CHECK_RET(xTensorTmp != nullptr, nullptr);
-    // X: reshape from(N*Ci, Hk, Wk, Ho, Wo) to(N, Ci*Hk*Wk, Ho, Wo)
-    auto tmpShape = op::Shape({batchDim, cInDim * hKernelDim * wKernelDim, hOutDim, wOutDim});
-    auto xTensorForDw1x1 = ViewWithShape(xTensorTmp, tmpShape, executor);
+    auto xTensorForDw1x1 = PrepareXTensorForDw1x1(xTensor, batchDim, cInDim, hKernelDim, wKernelDim, hOutDim, wOutDim,
+                                                  executor);
     CHECK_RET(xTensorForDw1x1 != nullptr, nullptr);
-    if (xTensorForDw1x1->GetStorageFormat() != xTensor->GetStorageFormat()) {
-        xTensorForDw1x1 = l0op::ReFormat(xTensorForDw1x1, xTensor->GetStorageFormat());
-        CHECK_RET(xTensorForDw1x1 != nullptr, nullptr);
-    }
-    // W: reshape from(Co, Ci, Hk, Wk) to(Co, Ci*Hk*Wk, 1, 1)
-    tmpShape = op::Shape({cOutDim, cInDim * hKernelDim * wKernelDim, 1, 1});
-    auto wTensorForDw1x1 = ViewWithShape(wTensor, tmpShape, executor);
+    auto wTensorForDw1x1 = PrepareWeightTensorForDw1x1(wTensor, cOutDim, cInDim, hKernelDim, wKernelDim, executor);
     CHECK_RET(wTensorForDw1x1 != nullptr, nullptr);
-    if (wTensorForDw1x1->GetStorageFormat() != wTensor->GetStorageFormat()) {
-        wTensorForDw1x1 = l0op::ReFormat(wTensorForDw1x1, wTensor->GetStorageFormat());
-        CHECK_RET(wTensorForDw1x1 != nullptr, nullptr);
-    }
     // 新建一个ConvolutionBackwardInputTensor
     ConvolutionBackwardInputTensor inputTensorForDw1x1 = {gradOutTensor, xTensorForDw1x1, wTensorForDw1x1};
     // 新建一个ConvolutionBackwardParams: stride[1, 1] pad[0, 0]
@@ -2092,8 +2122,37 @@ static aclnnStatus GenConvMmDwInputByMode(BatchMatmulInput& batchMmInput, Convol
     return ACLNN_SUCCESS;
 }
 
+static aclnnStatus GenConvMmDwInputBy1x1Mode(BatchMatmulInput& batchMmInput,
+                                             ConvolutionBackwardInputTensor& inputTensor, aclOpExecutor* executor)
+{
+    // 1x1x1 kernel + batch=1 场景下，dw 可转为 2D matmul：
+    // gradOutput [N=1, Co, D, H, W] -> [1, Co, D*H*W]，作为左矩阵(不转置)
+    // input       [N=1, Cin, D, H, W] -> [1, Cin, D*H*W]，作为右矩阵(转置)
+    // matmul 输出 [1, Co, Cin]，对应 gradWeight [Co, Cin, 1, 1, 1]
+    const vector<int64_t> dhwIdxUnionVec{dDimNCDHWIdx, hDimNCDHWIdx, wDimNCDHWIdx};
+    auto gradOutput = inputTensor.gradOutput;
+    auto input = inputTensor.input;
+    op::Shape gradOutputShape2d = op::Shape(
+        {1, gradOutput->GetViewShape()[cDimNCDHWIdx], CalcCountByAxisVec(gradOutput->GetViewShape(), dhwIdxUnionVec)});
+    auto gradOutput2d = ViewWithShape(gradOutput, gradOutputShape2d, executor);
+    CHECK_RET(gradOutput2d != nullptr, ACLNN_ERR_INNER_NULLPTR);
+    auto gradOutputND = l0op::ReFormat(gradOutput2d, op::Format::FORMAT_ND);
+
+    op::Shape inputShape2d = op::Shape(
+        {1, input->GetViewShape()[cDimNCDHWIdx], CalcCountByAxisVec(input->GetViewShape(), dhwIdxUnionVec)});
+    auto input2d = ViewWithShape(input, inputShape2d, executor);
+    CHECK_RET(input2d != nullptr, ACLNN_ERR_INNER_NULLPTR);
+    auto inputND = l0op::ReFormat(input2d, op::Format::FORMAT_ND);
+
+    batchMmInput.leftData = gradOutputND;
+    batchMmInput.isLeftTranspose = false;
+    batchMmInput.rightData = inputND;
+    batchMmInput.isRightTranspose = true;
+    return ACLNN_SUCCESS;
+}
+
 static aclnnStatus GenConvMmDwOutputByMode(aclTensor*& mmDwOutput, ConvolutionBackwardResult& outputTensor,
-                                           aclOpExecutor* executor, [[maybe_unused]] Conv3DBp2MmMode conv2MmMode)
+                                           aclOpExecutor* executor)
 {
     auto gradWeight = outputTensor.gradWeight;
     op::Shape mmDwOutShape2d = op::Shape({1,
@@ -2113,16 +2172,22 @@ static aclnnStatus GenConvMmDwOutputByMode(aclTensor*& mmDwOutput, ConvolutionBa
 static aclnnStatus CalculateConv3DBackwardDwByMmMode(ConvolutionBackwardInputTensor& inputTensor,
                                                      ConvolutionBackwardResult& outputTensor,
                                                      ConvolutionBackwardParams& params, aclOpExecutor* executor,
-                                                     Conv3DBp2MmMode conv2MmMode)
+                                                     bool w1B1FmNDwTransToMmFlag = false)
 {
     BatchMatmulInput batchMmInput;
-    auto status = GenConvMmDwInputByMode(batchMmInput, inputTensor, executor);
+    aclnnStatus status;
+    if (w1B1FmNDwTransToMmFlag) {
+        OP_LOGD("Enter 1x1 dw matmul optimization path");
+        status = GenConvMmDwInputBy1x1Mode(batchMmInput, inputTensor, executor);
+    } else {
+        status = GenConvMmDwInputByMode(batchMmInput, inputTensor, executor);
+    }
     if (status != ACLNN_SUCCESS) {
         return status;
     }
     OP_LOGD("Enter backprop filter calculate with matmul mode");
     aclTensor* mmDwOutput = nullptr;
-    status = GenConvMmDwOutputByMode(mmDwOutput, outputTensor, executor, conv2MmMode);
+    status = GenConvMmDwOutputByMode(mmDwOutput, outputTensor, executor);
     if (status != ACLNN_SUCCESS) {
         OP_LOGD("GenConvMmDwOutputByMode False");
         return status;
@@ -2228,7 +2293,7 @@ static bool IsW1B1FmNDxTransToMm(const ConvolutionBackwardInputTensor& inputTens
         inputShape.GetDim(NCDHW_W_DIM) == 1) {
         return false;
     }
-    //是否是超大shape,超过l2cache(128MB)进行拦截
+    // 是否是超大shape,超过l2cache(128MB)进行拦截
     if (IsGreaterL2Cache(inputTensor, params)) {
         return false;
     }
@@ -2236,6 +2301,75 @@ static bool IsW1B1FmNDxTransToMm(const ConvolutionBackwardInputTensor& inputTens
             "from [w.shape(Cout, Cin, 1, 1, 1), Dy.shape(1, Cout, Dout=Din, Hout=Hin, Wout=Win), Dx.shape(1, Cin, Din, "
             "Hin, Win)] "
             "to [a.shape(Cout, Cin), b.shape(Cout, Din*Hin*Win), c.shape(Cin, Din*Win*Hin)].");
+    return true;
+}
+
+static bool IsGreaterL2CacheForDw1x1(const ConvolutionBackwardInputTensor& inputTensor)
+{
+    op::Shape weightShape = inputTensor.weight->GetViewShape();
+    op::Shape inputShape = inputTensor.input->GetViewShape();
+    int64_t cOutDim = weightShape.GetDim(NCDHW_N_DIM);
+    int64_t cInDim = weightShape.GetDim(NCDHW_C_DIM);
+    int64_t dInDim = inputShape.GetDim(NCDHW_D_DIM);
+    int64_t hInDim = inputShape.GetDim(NCDHW_H_DIM);
+    int64_t wInDim = inputShape.GetDim(NCDHW_W_DIM);
+    // dw 1x1 转Matmul: gradOutput[Co, D*H*W] x input[Cin, D*H*W]^T -> gradWeight[Co, Cin]
+    int64_t m = cOutDim;
+    int64_t k = dInDim * hInDim * wInDim;
+    int64_t n = cInDim;
+    int64_t typeSize = ge::GetSizeByDataType(inputTensor.input->GetDataType());
+    // 类型错误
+    if (typeSize == -1) {
+        return false;
+    }
+    const int64_t l2CacheSize = 128 * 1024 * 1024;
+    // 数据量超过l2cache(128MB)时不走matmul路径
+    if ((m * k + k * n + n * m) * typeSize > l2CacheSize) {
+        OP_LOGD("dw 1x1 shape exceeds L2Cache, can not convert to Matmul, m = %ld, k = %ld, n = %ld", m, k, n);
+        return true;
+    }
+    return false;
+}
+
+static bool Is1x1DwTransToMm(const ConvolutionBackwardInputTensor& inputTensor, const ConvolutionBackwardParams& params)
+{
+    // only support  ASCEND950
+    if (!(Ops::NN::AclnnUtil::IsRegbase())) {
+        return false;
+    }
+    op::Shape weightShape = inputTensor.weight->GetViewShape();
+    // 5D NCDHW weight + 1x1x1 kernel
+    if (weightShape.GetDimNum() != CONV3DINPUTDIM || weightShape[dDimNCDHWIdx] != 1 || weightShape[hDimNCDHWIdx] != 1 ||
+        weightShape[wDimNCDHWIdx] != 1) {
+        return false;
+    }
+    // batch=1
+    if (inputTensor.input->GetViewShape()[nDimNCDHWIdx] != 1) {
+        return false;
+    }
+    // groups=1
+    if (params.groups != 1) {
+        return false;
+    }
+    // stride=1
+    if ((*params.stride)[CONV3D_ATTR_D_IDX] != 1 || (*params.stride)[CONV3D_ATTR_H_IDX] != 1 ||
+        (*params.stride)[CONV3D_ATTR_W_IDX] != 1) {
+        return false;
+    }
+    // pad=0
+    if ((*params.padding)[CONV3D_ATTR_D_IDX] != 0 || (*params.padding)[CONV3D_ATTR_H_IDX] != 0 ||
+        (*params.padding)[CONV3D_ATTR_W_IDX] != 0) {
+        return false;
+    }
+    // dilation=1
+    if ((*params.dilation)[CONV3D_ATTR_D_IDX] != 1 || (*params.dilation)[CONV3D_ATTR_H_IDX] != 1 ||
+        (*params.dilation)[CONV3D_ATTR_W_IDX] != 1) {
+        return false;
+    }
+    // 是否是超大shape,超过l2cache(128MB)进行拦截
+    if (IsGreaterL2CacheForDw1x1(inputTensor)) {
+        return false;
+    }
     return true;
 }
 
@@ -2297,8 +2431,9 @@ static aclnnStatus CalculateConv3DBackwardByMatmulImpl(ConvolutionBackwardInputT
     OP_LOGD("Enter CalculateConv3DBackwardByMatmulImpl");
     // 是否满足新的条件
     bool w1B1FmNDxTransToMmFlag = IsW1B1FmNDxTransToMm(inputTensor, params); // 判定条件函数
+    bool w1B1FmNDwTransToMmFlag = Is1x1DwTransToMm(inputTensor, params);
     auto conv2MmMode = GetConv3DBp2MmMode(inputTensor, params);
-    if (conv2MmMode == Conv3DBp2MmMode::CONV3D_BP_NO_MM && !w1B1FmNDxTransToMmFlag) {
+    if (conv2MmMode == Conv3DBp2MmMode::CONV3D_BP_NO_MM && !w1B1FmNDxTransToMmFlag && !w1B1FmNDwTransToMmFlag) {
         return ACLNN_SUCCESS;
     }
     if ((*params.outputMask)[0]) {
@@ -2308,27 +2443,36 @@ static aclnnStatus CalculateConv3DBackwardByMatmulImpl(ConvolutionBackwardInputT
             CHECK_RET(status == ACLNN_SUCCESS, status);
             conv3DBp2MatmulMask[0] = true;
         } else {
-            BatchMatmulInput batchMmInput;
-            auto status = GenDxInOutByConvBp2MmMode(batchMmInput, inputTensor, outputTensor, executor, conv2MmMode);
-            CHECK_RET(status == ACLNN_SUCCESS, status);
-            OP_LOGD("Enter Conv3DBackpropInput Calculation By Matmul Implementation.");
-            auto gradInputND = ExecBatchMatmulOp(batchMmInput.leftData, batchMmInput.rightData, batchMmInput.outputData,
-                                                 batchMmInput.isLeftTranspose, batchMmInput.isRightTranspose,
-                                                 params.cubeMathType, executor);
-            OP_CHECK(gradInputND != nullptr,
-                     OP_LOGE(ACLNN_ERR_INNER_NULLPTR, "The Mamtul In Conv3DBackpropInput Return Nullptr."),
-                     return ACLNN_ERR_INNER_NULLPTR);
-            auto gradInputNCDHW = DoPostMatmulForConv3dBpInput(gradInputND, inputTensor, outputTensor, executor,
-                                                               conv2MmMode);
-            CHECK_RET(gradInputNCDHW != nullptr, ACLNN_ERR_INNER_NULLPTR);
-            status = OutputPostProcess(outputTensor.gradInput, gradInputNCDHW, "gradInput", params.groups, executor);
-            CHECK_RET(status == ACLNN_SUCCESS, status);
-            conv3DBp2MatmulMask[0] = true;
+            if (conv2MmMode != Conv3DBp2MmMode::CONV3D_BP_NO_MM) {
+                BatchMatmulInput batchMmInput;
+                auto status = GenDxInOutByConvBp2MmMode(batchMmInput, inputTensor, outputTensor, executor, conv2MmMode);
+                CHECK_RET(status == ACLNN_SUCCESS, status);
+                OP_LOGD("Enter Conv3DBackpropInput Calculation By Matmul Implementation.");
+                auto gradInputND = ExecBatchMatmulOp(batchMmInput.leftData, batchMmInput.rightData,
+                                                     batchMmInput.outputData, batchMmInput.isLeftTranspose,
+                                                     batchMmInput.isRightTranspose, params.cubeMathType, executor);
+                OP_CHECK(gradInputND != nullptr,
+                         OP_LOGE(ACLNN_ERR_INNER_NULLPTR, "The Mamtul In Conv3DBackpropInput Return Nullptr."),
+                         return ACLNN_ERR_INNER_NULLPTR);
+                auto gradInputNCDHW = DoPostMatmulForConv3dBpInput(gradInputND, inputTensor, outputTensor, executor,
+                                                                   conv2MmMode);
+                CHECK_RET(gradInputNCDHW != nullptr, ACLNN_ERR_INNER_NULLPTR);
+                status = OutputPostProcess(outputTensor.gradInput, gradInputNCDHW, "gradInput", params.groups,
+                                           executor);
+                CHECK_RET(status == ACLNN_SUCCESS, status);
+                conv3DBp2MatmulMask[0] = true;
+            }
         }
     }
-    // 当前dw的实现仅支持FM等于Kernel场景
-    if ((*params.outputMask)[1] && conv2MmMode == Conv3DBp2MmMode::CONV3D_BP_MM_FEATURE_MAP_EQ_KERNEL) {
-        auto status = CalculateConv3DBackwardDwByMmMode(inputTensor, outputTensor, params, executor, conv2MmMode);
+    // dw: FM=KERNEL场景 或 1x1x1 kernel + batch=1 + stride=1 + pad=0 + dilation=1 + groups=1场景
+    if ((*params.outputMask)[1] &&
+        (conv2MmMode == Conv3DBp2MmMode::CONV3D_BP_MM_FEATURE_MAP_EQ_KERNEL || w1B1FmNDwTransToMmFlag)) {
+        // FM=KERNEL与1x1重叠时优先走FM=KERNEL路径
+        if (conv2MmMode == Conv3DBp2MmMode::CONV3D_BP_MM_FEATURE_MAP_EQ_KERNEL) {
+            w1B1FmNDwTransToMmFlag = false;
+        }
+        auto status = CalculateConv3DBackwardDwByMmMode(inputTensor, outputTensor, params, executor,
+                                                        w1B1FmNDwTransToMmFlag);
         CHECK_RET(status == ACLNN_SUCCESS, status);
         conv3DBp2MatmulMask[1] = true;
     }

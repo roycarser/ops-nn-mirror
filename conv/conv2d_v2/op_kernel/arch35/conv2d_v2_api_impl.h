@@ -16,7 +16,7 @@
 #ifndef CONV2D_V2_API_IMPL_H
 #define CONV2D_V2_API_IMPL_H
 
-#include "../../common/arch35/conv_framework_util.h"
+#include "../../common/arch35/conv_framework_util_arch35.h"
 #include "conv2d_v2_common_func.h"
 #include "conv2d_v2_config.h"
 #include "conv2d_v2_util.h"
@@ -108,7 +108,7 @@ public:
         Conv2dFunc::C04LoadUB2L1Tools<Intf> c04LoadUB2L1Tools;
         Conv2dFunc::C04ProcessTools<Intf> c04ProcessTools;
 
-#if defined(__NPU_ARCH__) && (__NPU_ARCH__ != 5102)
+#if !defined(__DAV_35_FAMILY__)
         // Used in weight ub trans mode
         Conv2dFunc::WeightLoadGM2UBTools<Intf> weightUbLoadGM2UBTools;
         Conv2dFunc::WeightND2NZTools<Intf> weightUbTransND2NZTools;

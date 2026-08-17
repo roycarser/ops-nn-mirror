@@ -11,33 +11,124 @@ import numpy as np
 import torch
 
 
-__golden__ = {"kernel": {"hard_sigmoid": "hard_sigmoid_golden"}}
+__spec__ = {
+    "hard_sigmoid": "HardSigmoidKernelSpec",
+    "aclnnHardsigmoid": "HardSigmoidAclnnSpec",
+    "aclnnInplaceHardsigmoid": "HardSigmoidAclnnInplaceSpec",
+}
 __input__ = {"kernel": {"hard_sigmoid": "hard_sigmoid_input"}}
 
+_TOL_KERNEL = {
+    "float32": {"standard": "cross_check", "level": "L1"},
+    "float16": {"standard": "cross_check", "level": "L1"},
+    "bfloat16": {"standard": "cross_check", "level": "L1"},
+    "int32": {"standard": "binary_equal"},
+}
+_TOL_LOCAL = {
+    "float32": {"standard": "stat_rel_err"},
+    "float16": {"standard": "stat_rel_err"},
+    "bfloat16": {"standard": "stat_rel_err"},
+    "int32": {"standard": "binary_equal"},
+}
 
-def hard_sigmoid_golden(x, alpha=1.0 / 6.0, beta=0.5, **kwargs):
-    """Compute HardSigmoid through PyTorch operator composition."""
-    del kwargs
-    input_dtype = x.dtype
+
+def _to_torch_tensor(x):
+    if isinstance(x, torch.Tensor):
+        return x
+    input_dtype = np.asarray(x).dtype
     if input_dtype.name == "bfloat16":
-        input_tensor = torch.tensor(
-            np.asarray(x, dtype=np.float32), dtype=torch.bfloat16
-        )
+        return torch.tensor(np.asarray(x, dtype=np.float32), dtype=torch.bfloat16)
+    return torch.from_numpy(np.asarray(x))
+
+
+def _prepare_hard_sigmoid_input(x, alpha, beta):
+    input_tensor = _to_torch_tensor(x)
+    if (
+        input_tensor.dtype in (torch.float16, torch.bfloat16)
+        or not input_tensor.is_floating_point()
+    ):
+        compute_tensor = input_tensor.to(torch.float32)
+        alpha_value = float(np.float32(alpha))
+        beta_value = float(np.float32(beta))
     else:
-        input_tensor = torch.from_numpy(np.asarray(x))
-    alpha32 = float(np.float32(alpha))
-    beta32 = float(np.float32(beta))
-    result = torch.clamp(
-        input_tensor.to(torch.float32) * alpha32 + beta32, min=0.0, max=1.0
+        compute_tensor = input_tensor
+        alpha_value = float(alpha)
+        beta_value = float(beta)
+    return input_tensor, compute_tensor, alpha_value, beta_value
+
+
+def _hard_sigmoid_golden_compute(x, alpha=1.0 / 6.0, beta=0.5):
+    input_tensor, compute_tensor, alpha_value, beta_value = _prepare_hard_sigmoid_input(
+        x, alpha, beta
+    )
+    linear = compute_tensor * alpha_value + beta_value
+    result = torch.where(
+        linear <= 0.0,
+        torch.zeros_like(linear),
+        torch.where(linear >= 1.0, torch.ones_like(linear), linear),
     )
     if not input_tensor.is_floating_point():
         result = torch.trunc(result)
-    result = result.to(input_tensor.dtype)
-    return (
-        result.to(torch.float32).cpu().numpy()
-        if input_dtype.name == "bfloat16"
-        else result.cpu().numpy()
+    return result.to(input_tensor.dtype)
+
+
+def _hard_sigmoid_third_party_compute(x, alpha=1.0 / 6.0, beta=0.5):
+    input_tensor, compute_tensor, alpha_value, beta_value = _prepare_hard_sigmoid_input(
+        x, alpha, beta
     )
+    result = torch.clamp(compute_tensor * alpha_value + beta_value, min=0.0, max=1.0)
+    if not input_tensor.is_floating_point():
+        result = torch.trunc(result)
+    return result.to(input_tensor.dtype)
+
+
+def _torch_to_numpy(tensor, target_dtype):
+    if tensor.dtype == torch.bfloat16:
+        return tensor.to(torch.float32).cpu().numpy()
+    return tensor.cpu().numpy().astype(target_dtype, copy=False)
+
+
+class _HardSigmoidCompose:
+    def __init__(self, alpha=1.0 / 6.0, beta=0.5, **kwargs):
+        self.alpha = alpha
+        self.beta = beta
+
+    def __call__(self, input_x, **kwargs):
+        return [_hard_sigmoid_third_party_compute(input_x, self.alpha, self.beta)]
+
+
+def _hard_sigmoid_aclnn_third_party(
+    self, alpha=1.0 / 6.0, beta=0.5, out=None, **kwargs
+):
+    return [_hard_sigmoid_third_party_compute(self, alpha, beta)]
+
+
+class HardSigmoidKernelSpec:
+    @staticmethod
+    def golden(input_x, alpha=1.0 / 6.0, beta=0.5, **kwargs):
+        result = _hard_sigmoid_golden_compute(input_x, alpha, beta)
+        return [_torch_to_numpy(result, np.asarray(input_x).dtype)]
+
+    third_party = {"torch": _HardSigmoidCompose}
+    tolerance = _TOL_KERNEL
+
+
+class HardSigmoidAclnnSpec:
+    @staticmethod
+    def golden(self, out=None, **kwargs):
+        return [_hard_sigmoid_golden_compute(self)]
+
+    third_party = {"torch": _hard_sigmoid_aclnn_third_party}
+    tolerance = _TOL_LOCAL
+
+
+class HardSigmoidAclnnInplaceSpec:
+    @staticmethod
+    def golden(self, **kwargs):
+        return [_hard_sigmoid_golden_compute(self)]
+
+    third_party = {"torch": _hard_sigmoid_aclnn_third_party}
+    tolerance = _TOL_LOCAL
 
 
 def hard_sigmoid_input(x, alpha=1.0 / 6.0, beta=0.5, **kwargs):
@@ -99,3 +190,6 @@ def hard_sigmoid_input(x, alpha=1.0 / 6.0, beta=0.5, **kwargs):
     count = min(flat.size, critical.size)
     flat[:count] = critical[:count].astype(result.dtype, copy=False)
     return [flat.reshape(result.shape)]
+
+
+# Not registered in __spec__: no e2e, TensorFlow, ONNX, or fusion path is delivered.

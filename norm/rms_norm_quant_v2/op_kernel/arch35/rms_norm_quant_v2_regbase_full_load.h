@@ -74,11 +74,11 @@ private:
     uint32_t yDtypeSize{1};
 
     // align value
-    int64_t xGammaBetaAlign{32};
-    int64_t scalesAlign{32};
-    int64_t zeroPointsAlign{32};
-    int64_t yAlign{32};
-    int64_t rstdAlign{32};
+    int64_t xGammaBetaAlign{0};
+    int64_t scalesAlign{0};
+    int64_t zeroPointsAlign{0};
+    int64_t yAlign{0};
+    int64_t rstdAlign{0};
 
     // calculate value
     int64_t curBlockFactor{0};
@@ -612,16 +612,16 @@ private:
         uint32_t sregR = static_cast<uint16_t>(numR);
         uint32_t sregxGammaBetaAlign = static_cast<uint16_t>(xGammaBetaAlign);
         uint32_t sregyAlign = static_cast<uint16_t>(yAlign);
-        __local_mem__ T_X* xAddr = (__ubuf__ T_X*)xLocal.GetPhyAddr();
-        __local_mem__ float* rstdAddr = (__ubuf__ float*)rstdLocal.GetPhyAddr();
-        __local_mem__ T_X* gammaAddr = (__ubuf__ T_X*)gammaLocal.GetPhyAddr();
-        __local_mem__ T_SCALES* scales1Addr = (__ubuf__ T_SCALES*)scales1Local.GetPhyAddr();
-        __local_mem__ T_ZEROPOINTS* zeroPoints1Addr;
-        __local_mem__ T_SCALES* scales2Addr;
-        __local_mem__ T_ZEROPOINTS* zeroPoints2Addr;
-        __local_mem__ T_X* betaAddr;
-        __local_mem__ yDtype* y1Addr;
-        __local_mem__ yDtype* y2Addr;
+        __ubuf__ T_X* xAddr = (__ubuf__ T_X*)xLocal.GetPhyAddr();
+        __ubuf__ float* rstdAddr = (__ubuf__ float*)rstdLocal.GetPhyAddr();
+        __ubuf__ T_X* gammaAddr = (__ubuf__ T_X*)gammaLocal.GetPhyAddr();
+        __ubuf__ T_SCALES* scales1Addr = (__ubuf__ T_SCALES*)scales1Local.GetPhyAddr();
+        __ubuf__ T_ZEROPOINTS* zeroPoints1Addr;
+        __ubuf__ T_SCALES* scales2Addr;
+        __ubuf__ T_ZEROPOINTS* zeroPoints2Addr;
+        __ubuf__ T_X* betaAddr;
+        __ubuf__ yDtype* y1Addr;
+        __ubuf__ yDtype* y2Addr;
 
         if constexpr (HAS_ZEROPINTS1) {
             zeroPoints1Addr = (__ubuf__ T_ZEROPOINTS*)zeroPoints1Local.GetPhyAddr();

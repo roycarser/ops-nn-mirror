@@ -4,14 +4,24 @@
 
 ## 产品支持情况
 
-| 产品                                                         |  是否支持   |
-| :----------------------------------------------------------- |:-------:|
-| <term>Ascend 950PR/Ascend 950DT</term>                             |    √    |
-| <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>     |    √    |
-| <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term> |    √    |
-| <term>Atlas 200I/500 A2 推理产品</term>|      ×     |
-| <term>Atlas 推理系列产品</term>|      √     |
-| <term>Atlas 训练系列产品</term>|      ×     |
+<!-- npu="950" id1 -->
+- <term>Ascend 950PR/Ascend 950DT</term>：支持
+<!-- end id1 -->
+<!-- npu="A3" id2 -->
+- <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>：支持
+<!-- end id2 -->
+<!-- npu="910b" id3 -->
+- <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>：支持
+<!-- end id3 -->
+<!-- npu="310b" id4 -->
+- <term>Atlas 200I/500 A2 推理产品</term>：不支持
+<!-- end id4 -->
+<!-- npu="310p" id5 -->
+- <term>Atlas 推理系列产品</term>：支持
+<!-- end id5 -->
+<!-- npu="910" id6 -->
+- <term>Atlas 训练系列产品</term>：不支持
+<!-- end id6 -->
 
 ## 功能说明
 
@@ -173,7 +183,7 @@ aclnnStatus aclnnWeightQuantBatchMatmulV2(
         <td>输入</td>
         <td>表示在伪量化pergroup和MX<a href="../../../docs/zh/context/quant_mode_introduction.md" target="_blank">量化模式</a>下，对输入<code>weight</code>进行反量化计算的groupSize输入，描述一组反量化参数对应的待反量化数据量在Reduce方向的大小。</td>
         <td>当伪量化算法不为pergroup和MX<a href="../../../docs/zh/context/quant_mode_introduction.md" target="_blank">量化模式</a>时传入0。<br>当伪量化算法为pergroup<a href="../../../docs/zh/context/quant_mode_introduction.md" target="_blank">量化模式</a>时传入值的范围为[32, k-1]且值要求是32的倍数。<br>在MX<a href="../../../docs/zh/context/quant_mode_introduction.md" target="_blank">量化模式</a>，仅支持32。</td>
-        <td>-</td>
+        <td>INT</td>
         <td>-</td>
         <td>-</td>
         <td>-</td>
@@ -211,17 +221,24 @@ aclnnStatus aclnnWeightQuantBatchMatmulV2(
     </tbody>
   </table>
 
+  <!-- npu="950" id7 -->
   - <term>Ascend 950PR/Ascend 950DT</term>：
 
     - 上表数据类型列中的角标“1”代表该系列不支持的数据类型；
 
+  <!-- end id7 -->
+  <!-- npu="A3,910b" id8 -->
   - <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>、<term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>：
 
     - 上表数据类型列中的角标“2”代表该系列不支持的数据类型。
 
+  <!-- end id8 -->
+  <!-- npu="310p" id9 -->
   - <term>Atlas 推理系列产品</term>：
 
     - 上表数据类型列中的角标“3”代表该系列不支持的数据类型。
+
+  <!-- end id9 -->
 
 - **返回值：**
 
@@ -341,6 +358,7 @@ aclnnStatus aclnnWeightQuantBatchMatmulV2(
 
 <a id="a2_a3_系列产品"></a>
 
+<!-- npu="A3,910b" id10 -->
 <details>
 <summary><term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>、<term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term></summary>
 
@@ -373,9 +391,11 @@ aclnnStatus aclnnWeightQuantBatchMatmulV2(
     - perchannel[量化模式](../../../docs/zh/context/quant_mode_introduction.md)：当[数据格式](../../../docs/zh/context/data_format.md)为ND时，推荐使用转置后的`weight`输入；当[数据格式](../../../docs/zh/context/data_format.md)为FRACTAL_NZ时，推荐使用非转置的`weight`输入。m范围为[65, 96]时，推荐使用数据类型为UINT64或INT64的antiquantScale。
 
 </details>
+<!-- end id10 -->
 
 <a id="Atlas 推理系列产品"></a>
 
+<!-- npu="310p" id11 -->
 <details>
 <summary><term>Atlas 推理系列产品</term></summary>
 
@@ -402,9 +422,11 @@ aclnnStatus aclnnWeightQuantBatchMatmulV2(
   - `y`（aclTensor *,计算输出）：
 
 </details>
+<!-- end id11 -->
 
 <a id="ascend_950pr_ascend950dt"></a>
 
+<!-- npu="950" id12 -->
 <details>
 <summary><term>Ascend 950PR/Ascend 950DT</term></summary>
 
@@ -466,14 +488,12 @@ aclnnStatus aclnnWeightQuantBatchMatmulV2(
     | C量化 | FLOAT16/BFLOAT16 | INT4/INT32 | (m, k) | (k, n) | (1,n)或(n,) | (1,n)或(n,)/null | (n,)或(1,n)/null | 0 |
     | G量化 | FLOAT16/BFLOAT16 | INT4/INT32 | (m, k) | (k, n) | (⌈k/group_size⌉, n) | (⌈k/group_size⌉, n)/null | (n,)或(1,n)/null | [32, k-1]且为32倍数 |
     | MX量化 | FLOAT16/BFLOAT16 | FLOAT4_E2M1/FLOAT | (m, k) | (k, n) | (⌈k/32⌉, n) | null | (n,)或(1,n)/null | 32 |
-    | G量化 | FLOAT16/BFLOAT16 | FLOAT4_E2M1/FLOAT | (m, k) | (k, n) | (⌈k/32⌉, n) | null | (n,)或(1,n)/null | 32/64/128/256 |
 
     - **约束说明**
 
       除[公共约束](#公共约束)外，其余约束如下：
       - 若`weight`数据类型为INT4或FLOAT4_E2M1，则weight的最后一维应为2对齐；若`weight`数据类型为INT32或FLOAT，则weight的最后一维应为8对齐。
       - 若`weight`数据类型为INT32/FLOAT时，必须配合`aclnnConvertWeightToINT4Pack`接口完成从INT32/FLOAT到紧密排布的INT4/FLOAT4_E2M1的转换，[详情可参考样例](../../convert_weight_to_int4_pack/docs/aclnnConvertWeightToINT4Pack.md)。
-      - 若`weight`数据类型为FLOAT4_E2M1或者FLOAT，且为G量化时，`weight`仅支持非转置。其他数据流`weight`同时支持转置和非转置。
 
   <a id="ascend_950pr_ascend950dt_性能优化建议"></a>
 
@@ -486,12 +506,16 @@ aclnnStatus aclnnWeightQuantBatchMatmulV2(
     </details>
 
 </details>
+<!-- end id12 -->
 
 ## 调用示例
 
   示例代码如下，仅供参考，具体编译和执行过程请参考[编译与运行样例](../../../docs/zh/context/compile_and_run_sample.md)。
 
+<!-- npu="950,A3,910b" id13 -->
 - <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>、<term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>、<term>Ascend 950PR/Ascend 950DT</term>：
+<!-- end id13 -->
+
 A16W8调用示例：
 
   ```cpp
@@ -726,7 +750,10 @@ A16W8调用示例：
   }
   ```
 
+<!-- npu="950" id14 -->
 - <term>Ascend 950PR/Ascend 950DT</term>：
+<!-- end id14 -->
+
 A16MxFp4调用示例，需要调用`aclnnConvertWeightToINT4Pack`接口辅助完成调用：
 
   ``` cpp

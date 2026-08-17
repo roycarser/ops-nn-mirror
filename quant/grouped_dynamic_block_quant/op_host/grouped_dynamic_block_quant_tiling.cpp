@@ -81,21 +81,15 @@ inline static ge::graphStatus GroupedDynamicBlockQuantSetTilingData(gert::Tiling
 inline static void PrintTilingData(const gert::TilingContext* context, GroupedDynamicBlockQuantTilingData& tilingData)
 {
     OP_LOGI(context,
-            "tilingData is tilingKey:%ld, totalCoreNum:%ld, ubSize:%ld, vfLen:%ld, usedCoreNum:%ld, headCoreNum:%ld, "
-            "tailCoreNum:%ld, minScale:%f,"
-            "roundMode:%ld, dstType:%ld, rowBlockSize:%ld, colBlockSize:%ld, dstTypeMax:%f, batchNum:%ld, rowNum:%ld, "
-            "colNum:%ld,"
+            "tilingData is tilingKey:%ld, usedCoreNum:%ld, nBatch:%ld, minScale:%f, "
+            "rowBlockSize:%ld, colBlockSize:%ld, dstTypeMax:%f, batchNum:%ld, rowNum:%ld, colNum:%ld, "
             "scaleRowNum:%ld, scaleColNum:%ld, uo:%ld, groupNum:%ld, blockFactor:%ld, tailBlockFactor:%ld, "
-            "groupBlockNumHeadCore:%ld,"
-            "groupBlockNumTailCore:%ld, maxUbRow:%ld",
-            tilingData.get_tilingKey(), tilingData.get_totalCoreNum(), tilingData.get_ubSize(), tilingData.get_vfLen(),
-            tilingData.get_usedCoreNum(), tilingData.get_headCoreNum(), tilingData.get_tailCoreNum(),
-            tilingData.get_minScale(), tilingData.get_roundMode(), tilingData.get_dstType(),
-            tilingData.get_rowBlockSize(), tilingData.get_colBlockSize(), tilingData.get_dstTypeMax(),
-            tilingData.get_batchNum(), tilingData.get_rowNum(), tilingData.get_colNum(), tilingData.get_scaleRowNum(),
-            tilingData.get_scaleColNum(), tilingData.get_uo(), tilingData.get_groupNum(), tilingData.get_blockFactor(),
-            tilingData.get_tailBlockFactor(), tilingData.get_groupBlockNumHeadCore(),
-            tilingData.get_groupBlockNumTailCore(), tilingData.get_maxUbRow());
+            "maxUbRow:%ld",
+            tilingData.get_tilingKey(), tilingData.get_usedCoreNum(), tilingData.get_nBatch(),
+            tilingData.get_minScale(), tilingData.get_rowBlockSize(), tilingData.get_colBlockSize(),
+            tilingData.get_dstTypeMax(), tilingData.get_batchNum(), tilingData.get_rowNum(), tilingData.get_colNum(),
+            tilingData.get_scaleRowNum(), tilingData.get_scaleColNum(), tilingData.get_uo(), tilingData.get_groupNum(),
+            tilingData.get_blockFactor(), tilingData.get_tailBlockFactor(), tilingData.get_maxUbRow());
 }
 
 static RoundModeList GetRoundMode(const std::string& roundMode)
@@ -398,25 +392,6 @@ static ge::graphStatus DoTiling(const gert::TilingContext* context, GroupedDynam
                                       tilingParam.colNum % tilingParam.colBlockSize;
 
     tilingParam.uo = Ops::Base::CeilDiv(tilingParam.colNum, tilingParam.colBlockSize);
-    int64_t splitCoreData = tilingParam.uo * tilingParam.batchNum;
-
-    bool isNotNeedCutGroup = splitCoreData >= tilingParam.totalCoreNum;
-    if (isNotNeedCutGroup) {
-        tilingParam.usedCoreNum = tilingParam.totalCoreNum;
-        tilingParam.groupBlockNumHeadCore = Ops::Base::CeilDiv(splitCoreData, tilingParam.usedCoreNum);
-        tilingParam.groupBlockNumTailCore = tilingParam.groupBlockNumHeadCore - 1;
-        tilingParam.tailCoreNum = tilingParam.groupBlockNumHeadCore * tilingParam.usedCoreNum - splitCoreData;
-        tilingParam.headCoreNum = tilingParam.usedCoreNum - tilingParam.tailCoreNum;
-        tilingParam.groupBlockNumHeadCore *= tilingParam.groupNum;
-        tilingParam.groupBlockNumTailCore *= tilingParam.groupNum;
-    } else {
-        splitCoreData *= tilingParam.groupNum;
-        tilingParam.usedCoreNum = std::min(splitCoreData, tilingParam.totalCoreNum);
-        tilingParam.groupBlockNumHeadCore = Ops::Base::CeilDiv(splitCoreData, tilingParam.usedCoreNum);
-        tilingParam.groupBlockNumTailCore = tilingParam.groupBlockNumHeadCore - 1;
-        tilingParam.tailCoreNum = tilingParam.groupBlockNumHeadCore * tilingParam.usedCoreNum - splitCoreData;
-        tilingParam.headCoreNum = tilingParam.usedCoreNum - tilingParam.tailCoreNum;
-    }
 
     // 推导公式
     // (BYTES_OF_INPUT_TYPE+BYTES_OF_OUTPUT_TYPE)*colBlockSize*maxUbAvailableRows +
@@ -434,6 +409,52 @@ static ge::graphStatus DoTiling(const gert::TilingContext* context, GroupedDynam
 
     CalcTilingKey(inDtype, outDtype, blockIsSmallThanUB, tilingParam);
 
+    // wide-N 优化：当 rowBlockSize=1 且 M 轴行数远小于 maxUbRow 时，UB 的 M 轴容量被浪费。
+    // 将 UB 容量从 M 轴转向 N 轴批量加载：每次 CopyIn 加载 nBatch 个 N 轴 sub-block，
+    // 在 UB 内循环计算每个 colBlockSize 元素的 scale，将 MTE 调度次数降低 nBatch 倍。
+    // 条件：rowBlockSize==1，M 轴总行数(rowNum*batchNum) 不足 maxUbRow 的一半，N 轴 block 数足够多。
+    // 相比旧实现放宽了"colNum 可被 colBlockSize 整除"的限制：
+    // 不整除时最后一个 sub-block 只有 rem 个元素，若按整块对齐参与 wide-N 会越界读 GM，
+    // 故 wide-N 仅覆盖 [0, fullSubBlocks) 个整 sub-block，余量 rem 由 kernel 侧 ProcessPartialTail
+    // 按原始小块路径逐行补齐（每行一次，开销极小）。
+    if (blockIsSmallThanUB && tilingParam.rowBlockSize == BLOCK_SIZE_1 &&
+        tilingParam.rowNum * tilingParam.batchNum < tilingParam.maxUbRow / 2 && tilingParam.uo > 4) {
+        // nBatch 上限为 maxUbRow-1：LoadAlign 每次加载 vfLen(256) 个元素到寄存器，
+        // 即使 mask 只选中 colBlockSize(128) 个，硬件仍读取 vfLen 个元素的地址范围。
+        // 最后一个 sub-block 起始偏移为 (nBatch-1)*colBlockSize，加载范围到 (nBatch-1)*colBlockSize+vfLen-1，
+        // 需 <= maxUbRow*colBlockSize-1，故 nBatch <= maxUbRow - vfLen/colBlockSize = maxUbRow - 1。
+        int64_t rem = tilingParam.colNum % tilingParam.colBlockSize;
+        int64_t fullSubBlocks = (rem == 0) ? tilingParam.uo : (tilingParam.uo - 1);
+        if (fullSubBlocks > 4) {
+            int64_t nBatchLimit = tilingParam.maxUbRow - 1;
+            int64_t nBatch = std::min(nBatchLimit, fullSubBlocks);
+            int64_t wideUo = Ops::Base::CeilDiv(fullSubBlocks, nBatch);
+            int64_t tailFullSubs = fullSubBlocks - (wideUo - 1) * nBatch;
+            tilingParam.blockFactor = nBatch * tilingParam.colBlockSize;
+            tilingParam.tailBlockFactor = tailFullSubs * tilingParam.colBlockSize;
+            tilingParam.uo = wideUo;
+            tilingParam.nBatch = nBatch;
+        }
+        // fullSubBlocks<=4 时整块数过少，维持原始小块路径（blockFactor/tailBlockFactor 不变）
+    }
+
+    // 核数策略：仅对元素量极小的任务回退低核数，降低56核全开的启动/调度开销；
+    // 其余任务一律满核。实测满核对中尺寸2D等非极小任务均为最优或近似最优：
+    // 块数封顶在块数<核数时会把核数压到块数，而这类用例多核并行的memory-level parallelism/
+    // 更浅调度反而更优，故非极小任务直接满核。
+    int64_t totalElements = tilingParam.batchNum * tilingParam.rowNum * tilingParam.colNum;
+    constexpr int64_t ELEMS_TINY_THRESHOLD = 20000;
+    constexpr int64_t ELEMS_PER_CORE = 1024;
+    if (totalElements <= ELEMS_TINY_THRESHOLD) {
+        // 极小任务：max(按数据量估算核数, batch核数)，保留batch并行、抑制行/列碎片化过度开核
+        int64_t dataCore = Ops::Base::CeilDiv(totalElements, ELEMS_PER_CORE);
+        int64_t batchCore = tilingParam.batchNum;
+        tilingParam.usedCoreNum = std::min(tilingParam.totalCoreNum,
+                                           std::max<int64_t>({DIGIT_ONE, dataCore, batchCore}));
+    } else {
+        tilingParam.usedCoreNum = tilingParam.totalCoreNum;
+    }
+
     return ge::GRAPH_SUCCESS;
 }
 
@@ -441,15 +462,9 @@ inline static void SetTilingData(GroupedDynamicBlockQuantTilingData& tilingData,
                                  const GroupedDynamicBlockQuantTilingParam& tilingParam)
 {
     tilingData.set_tilingKey(tilingParam.tilingKey);
-    tilingData.set_totalCoreNum(tilingParam.totalCoreNum);
-    tilingData.set_ubSize(tilingParam.ubSize);
-    tilingData.set_vfLen(tilingParam.vfLen);
     tilingData.set_usedCoreNum(tilingParam.usedCoreNum);
-    tilingData.set_headCoreNum(tilingParam.headCoreNum);
-    tilingData.set_tailCoreNum(tilingParam.tailCoreNum);
+    tilingData.set_nBatch(tilingParam.nBatch);
     tilingData.set_minScale(tilingParam.minScale);
-    tilingData.set_roundMode(tilingParam.roundMode);
-    tilingData.set_dstType(tilingParam.dstType);
     tilingData.set_rowBlockSize(tilingParam.rowBlockSize);
     tilingData.set_colBlockSize(tilingParam.colBlockSize);
     tilingData.set_dstTypeMax(tilingParam.dstTypeMax);
@@ -462,8 +477,6 @@ inline static void SetTilingData(GroupedDynamicBlockQuantTilingData& tilingData,
     tilingData.set_groupNum(tilingParam.groupNum);
     tilingData.set_blockFactor(tilingParam.blockFactor);
     tilingData.set_tailBlockFactor(tilingParam.tailBlockFactor);
-    tilingData.set_groupBlockNumHeadCore(tilingParam.groupBlockNumHeadCore);
-    tilingData.set_groupBlockNumTailCore(tilingParam.groupBlockNumTailCore);
     tilingData.set_maxUbRow(tilingParam.maxUbRow);
 }
 

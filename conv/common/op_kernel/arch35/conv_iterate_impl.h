@@ -17,7 +17,7 @@
 #define CONV_ITERATE_IMPL_H
 
 #include "conv_config.h"
-#include "conv_framework_util.h"
+#include "conv_framework_util_arch35.h"
 #include "conv_iterate_base_impl.h"
 #include "conv_iterate_hw_mode_impl.h"
 #include "conv_iterate_m_mode_impl.h"
@@ -890,7 +890,7 @@ template <class Intf, uint32_t ImplType>
 __aicore__ void Iterate<Intf, ImplType>::IterateK(Intf* self)
 {
     MmadParams mmadParams;
-#if defined(__NPU_ARCH__) && (__NPU_ARCH__ == 5102)
+#if defined(__DAV_35_FAMILY__)
     if constexpr (AscendC::IsSameType<typename Intf::FmapT, half>::value) {
         mmadParams.fixShiftVal = self->ctx.convTilingData->fixedShiftValue;
     }

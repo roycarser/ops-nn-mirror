@@ -235,10 +235,25 @@ bool Conv3DDXV2KernelSplitTiling::CheckShapeConditions()
 
 bool Conv3DDXV2KernelSplitTiling::IsBaseShapeFitKernelSplitHW(const uint32_t bestBaseMN)
 {
+    uint64_t availableL1size = platformInfo_.l1_size;
+    if (hasBiasFlag_) {
+        uint64_t dtypeByteBtBuffer = (runInfo_.a_dtype_bytes == ge::GetSizeByDataType(ge::DT_INT8)) ?
+                                         ge::GetSizeByDataType(ge::DT_INT32) :
+                                         ge::GetSizeByDataType(ge::DT_FLOAT);
+        // biasL1 size 需按 64B 对齐：kernel 侧 InitBiasTque 按 64B 分配（L1→BT DataCopy 按 64B 粒度）。
+        uint64_t biasSize = Ops::Base::CeilAlign(dtypeByteBtBuffer * runInfo_.dedx_cin_g, BYTE_64);
+        availableL1size -= biasSize;
+    }
+
+    if (hasScaleFlag_ && runInfo_.quantMode == static_cast<uint8_t>(QuantMode::VECTOR_QUANT)) {
+        uint64_t scaleSize = ge::GetSizeByDataType(ge::DT_INT64) * runInfo_.dedx_cin_g;
+        availableL1size -= scaleSize;
+    }
+
     uint32_t curBaseM = kernelSplitPara_.splitHiWi > bestBaseMN ? bestBaseMN : kernelSplitPara_.splitHiWi;
     int32_t curHo = CalFmapHForKernelSplit(curBaseM);
     uint64_t a1Size = static_cast<uint64_t>(dtypeByteL0a_) * curHo * runInfo_.dedy_w * blockSize_;
-    uint64_t cout1A1 = std::max(static_cast<uint64_t>(1), platformInfo_.l1_size / BUFFER_NUM_DB / a1Size);
+    uint64_t cout1A1 = std::max(static_cast<uint64_t>(1), availableL1size / BUFFER_NUM_DB / a1Size);
     uint64_t cout1 = static_cast<uint64_t>(runInfo_.dedy_cout1_g);
     cout1A1 = cout1A1 >= cout1 ? cout1 : cout1A1;
 
@@ -246,7 +261,7 @@ bool Conv3DDXV2KernelSplitTiling::IsBaseShapeFitKernelSplitHW(const uint32_t bes
     uint64_t nValue = static_cast<uint64_t>(runInfo_.dedx_cin1_g) * BLOCK_CUBE;
     uint32_t curBaseN = nValue > bestBaseMN ? bestBaseMN : nValue;
     uint64_t b1Size = static_cast<uint64_t>(dtypeByteL0b_) * curBaseN * kernelSplitPara_.splitHkWkC0;
-    uint64_t cout1B1 = (platformInfo_.l1_size - cout1A1 * a1Size) / b1Size;
+    uint64_t cout1B1 = (availableL1size - cout1A1 * a1Size) / b1Size;
 
     uint64_t bestBlockCnt = static_cast<uint64_t>(kernelSplitPara_.splitHiWi / BASIC_BLOCK_SIZE_512) * runInfo_.dedx_d *
                             runInfo_.batch_n;
@@ -484,8 +499,8 @@ void Conv3DDXV2KernelSplitTiling::SetTilingData(const CoreTilingParams& corePara
                                                 const L0TilingParams& l0Params)
 {
     SetCommonTilingData(coreParams, l1Params, l0Params);
-    tilingData_.conv3DDxKSTiling.kSCoutFullLoad = kSCoutFullLoad_;
-    tilingData_.conv3DDxKSTiling.kSUseWorkSpace = kSUseWorkSpace_;
+    tilingData_.set_kSCoutFullLoad(kSCoutFullLoad_);
+    tilingData_.set_kSUseWorkSpace(kSUseWorkSpace_);
     uint64_t totalCnt = static_cast<uint64_t>(runInfo_.batch_n) * static_cast<uint64_t>(runInfo_.real_g) *
                         Ops::Base::CeilDiv(static_cast<uint32_t>(runInfo_.dedx_d), coreParams.singleCoreDin) *
                         Ops::Base::CeilDiv(kernelSplitPara_.splitHiWi, coreParams.singleCoreM) *
@@ -500,7 +515,7 @@ void Conv3DDXV2KernelSplitTiling::SetTilingData(const CoreTilingParams& corePara
         uint64_t tmpCnt = Ops::Base::CeilDiv(cntCoutCin1, GetCVRation()); // v100, v120 C:V=1:2
         totalCnt = std::max(totalCnt, tmpCnt); // vector需要的aiCoreNum和cube需要的aiCoreNum不一定一样，取大值
     }
-    tilingData_.conv3DDxTiling.coreNum = std::min(totalCnt, static_cast<uint64_t>(coreNum_));
+    tilingData_.set_coreNum(std::min(totalCnt, static_cast<uint64_t>(coreNum_)));
 
     SetTilingCondition(coreParams, l1Params, l0Params);
 }
@@ -662,22 +677,19 @@ bool Conv3DDXV2KernelSplitTiling::IsL1ParamsValid(const L1TilingParams& l1Params
                           runInfo_.dedy_w * kernelSplitPara_.curStrideW * coutNum;
     uint64_t aL1Size = a1PixelNum * dtypeByteL0a_ * l1Params.al1Pbuffer;
 
-    if (IsSocVersionFuse(context_)) {
-        uint64_t biasSize = 0;
-        uint64_t scaleSize = 0;
-        if (hasBiasFlag_) {
-            uint64_t dtypeByteBtBuffer = (runInfo_.a_dtype_bytes == ge::GetSizeByDataType(ge::DT_INT8)) ?
-                                             ge::GetSizeByDataType(ge::DT_INT32) :
-                                             ge::GetSizeByDataType(ge::DT_FLOAT16);
-            // biasL1 size需要对齐32Bytes
-            biasSize = Ops::Base::CeilAlign(dtypeByteBtBuffer * runInfo_.dedx_cin_g, static_cast<uint64_t>(BYTE_BLOCK));
-        }
-        if (hasScaleFlag_ && runInfo_.quantMode == static_cast<uint8_t>(QuantMode::VECTOR_QUANT)) {
-            scaleSize = ge::GetSizeByDataType(ge::DT_INT64) * runInfo_.dedx_cin_g;
-        }
-        return aL1Size + bL1Size + biasSize + scaleSize <= platformInfo_.l1_size;
+    uint64_t biasSize = 0;
+    uint64_t scaleSize = 0;
+    if (hasBiasFlag_) {
+        uint64_t dtypeByteBtBuffer = (runInfo_.a_dtype_bytes == ge::GetSizeByDataType(ge::DT_INT8)) ?
+                                         ge::GetSizeByDataType(ge::DT_INT32) :
+                                         ge::GetSizeByDataType(ge::DT_FLOAT);
+        // biasL1 size 需按 64B 对齐：kernel 侧 InitBiasTque 按 64B 分配（L1→BT DataCopy 按 64B 粒度）。
+        biasSize = Ops::Base::CeilAlign(dtypeByteBtBuffer * runInfo_.dedx_cin_g, BYTE_64);
     }
-    return aL1Size + bL1Size <= platformInfo_.l1_size;
+    if (hasScaleFlag_ && runInfo_.quantMode == static_cast<uint8_t>(QuantMode::VECTOR_QUANT)) {
+        scaleSize = ge::GetSizeByDataType(ge::DT_INT64) * runInfo_.dedx_cin_g;
+    }
+    return aL1Size + bL1Size + biasSize + scaleSize <= platformInfo_.l1_size;
 }
 
 bool Conv3DDXV2KernelSplitTiling::ShrinkBaseMN(L1TilingParams& l1Params, L0TilingParams& l0Params)
@@ -894,7 +906,7 @@ bool Conv3DDXV2KernelSplitTiling::GetTilingFromRepo()
     Conv3DDXV2KernelSplitTiling::TranslateRunInfoData();
     Conv3DDXV2KernelSplitTiling::TranslateTilingData(tunerTiling);
     Conv3DDXV2KernelSplitTiling::TranslateTilingRunInfo(tunerTiling);
-    if (tilingData_.conv3DDxTiling.enlarge == 1) {
+    if (tilingData_.get_enlarge() == 1) {
         groupConvMode_ = TILING_GROUP_MODE_ORIGIN;
     } else {
         groupConvMode_ = TILING_GROUP_MODE_ENLARGE;

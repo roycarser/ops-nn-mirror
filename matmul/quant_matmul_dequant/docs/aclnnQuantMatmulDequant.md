@@ -2,14 +2,24 @@
 
 ## 产品支持情况
 
-|产品             |  是否支持  |
-|:-------------------------|:----------:|
-| <term>Ascend 950PR/Ascend 950DT</term>    |     ×    |
-|  <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>   |     ×    |
-|  <term>Atlas A2训练系列产品/Atlas 800I A2推理产品/A200I A2 Box异构组件</term>     |     ×    |
-|  <term>Atlas 200I/500 A2 推理产品</term>    |     ×    |
-|  <term>Atlas 推理系列产品</term>    |     √    |
-|  <term>Atlas 训练系列产品</term>    |     ×    |
+<!-- npu="950" id1 -->
+- <term>Ascend 950PR/Ascend 950DT</term>：不支持
+<!-- end id1 -->
+<!-- npu="A3" id2 -->
+- <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>：不支持
+<!-- end id2 -->
+<!-- npu="910b" id7 -->
+- <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>：不支持
+<!-- end id7 -->
+<!-- npu="310b" id3 -->
+- <term>Atlas 200I/500 A2 推理产品</term>：不支持
+<!-- end id3 -->
+<!-- npu="310p" id4 -->
+- <term>Atlas 推理系列产品</term>：支持
+<!-- end id4 -->
+<!-- npu="910" id5 -->
+- <term>Atlas 训练系列产品</term>：不支持
+<!-- end id5 -->
 
 ## 功能说明
 
@@ -48,7 +58,7 @@
       out = (x_{quantized}@weight_{quantized} + bias) * scale_{weight}
     $$
 
-    特别说明：如果是上述4.2场景，说明$scale_{weight}$输入前已经和$scale_{x}$做过了矩阵乘运算，因此算子内部计算时省略了该步骤，这要求必须要是pertensor静态量化的场景。即输入前要对$scale_{weight}做如下处理得到INT64类型的数据：
+    特别说明：如果是上述4.2场景，说明$scale_{weight}$输入前已经和$scale_{x}$做过了矩阵乘运算，因此算子内部计算时省略了该步骤，这要求必须要是pertensor静态量化的场景。即输入前要对$scale_{weight}$做如下处理得到INT64类型的数据：
 
     $$
     scale_{weight} = scale_{weight} * scale_{x} \\
@@ -322,7 +332,11 @@ aclnnStatus aclnnQuantMatmulDequant(
 ## 约束说明
 
 - 确定性说明：
+
+  <!-- npu="910,310p" id6 -->
   - <term>Atlas 训练系列产品</term>、<term>Atlas 推理系列产品</term>：aclnnQuantMatmulDequant默认确定性实现。
+
+  <!-- end id6 -->
 
 - n，k都需要是16的整数倍。
 - 当weightScale数据类型为INT64时，必须要求xScaleOptional数据类型为FLOAT16，且xQuantMode值为pertensor；当xScaleOptional数据类型为FLOAT16时，必须要求weightScale数据类型为INT64，且xQuantMode值为pertensor。

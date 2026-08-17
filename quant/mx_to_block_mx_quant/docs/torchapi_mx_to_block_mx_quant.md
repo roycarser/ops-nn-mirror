@@ -162,17 +162,17 @@ cann_ops_nn.mx_to_block_mx_quant(x, mxscale, *, dst_type=292, x_type=296)
 - `x`只支持2维或3维输入，且-2轴是64的倍数，-1轴是2的倍数。
 - 关于`x`、`mxscale`、`scale1`、`scale2`的shape约束说明如下：
   - rank(mxscale) = rank(x) + 1。
-  - mxscale.shape[-2] = (Ceil(x.shape[-1], 32) + 2 - 1) / 2。
+  - mxscale.shape[-2] = (Ceil(x.shape[-1] / 32) + 2 - 1) / 2。
   - mxscale.shape[-1] = 2。
   - 其它维度与输入`x`一致。
 - 关于输出`scale1`的shape约束说明如下：
   - rank(scale1) = rank(x) + 1。
-  - scale1.shape[-2] = (Ceil(x.shape[-1], 32) + 2 - 1) / 2。
+  - scale1.shape[-2] = (Ceil(x.shape[-1] / 32) + 2 - 1) / 2。
   - scale1.shape[-1] = 2。
   - 其它维度和输入`x`保持一致。
 - 关于输出`scale2`的shape约束说明如下：
   - rank(scale2) = rank(x) + 1。
-  - scale2.shape[-3] = ((Ceil(x.shape[-2], 32) + 2 - 1) / 2) * 2 / 2。
+  - scale2.shape[-3] = ((Ceil(x.shape[-2] / 32) + 2 - 1) / 2) * 2 / 2。
   - scale2.shape[-2] = x.shape[-1]。
   - scale2.shape[-1] = 2。
   - 其它维度和输入`x`保持一致。
@@ -183,7 +183,7 @@ cann_ops_nn.mx_to_block_mx_quant(x, mxscale, *, dst_type=292, x_type=296)
 
 默认支持确定性计算。
 
-## 调用说明
+## 调用示例
 
 - 单算子模式调用（eager）
 
@@ -204,7 +204,7 @@ cann_ops_nn.mx_to_block_mx_quant(x, mxscale, *, dst_type=292, x_type=296)
     print("npu_dynamic_mx_quant:============")
     print(x)
 
-    y, scale1, scale2 = torch.ops.cann_ops_nn.mx_to_block_mx_quant(
+    y, scale1, scale2 = cann_ops_nn.mx_to_block_mx_quant(
         x, mxscale, dst_type=torch_npu.float8_e5m2, x_type=torch_npu.float4_e1m2fn_x2
     )
     print("npu_mx_to_block_mx_quant:============")
@@ -237,7 +237,7 @@ cann_ops_nn.mx_to_block_mx_quant(x, mxscale, *, dst_type=292, x_type=296)
             dst_type=torch_npu.float8_e4m3fn,
             x_type=torch_npu.float4_e2m1fn_x2,
         ):
-            return torch.ops.cann_ops_nn.mx_to_block_mx_quant(
+            return cann_ops_nn.mx_to_block_mx_quant(
                 x, mxscale, dst_type=dst_type, x_type=x_type
             )
 

@@ -104,15 +104,12 @@ constexpr uint32_t FP8_SIZE = 1;
 constexpr uint32_t B16_SIZE = 2;
 constexpr uint32_t NUM_TWO = 2;
 constexpr uint32_t NUM_FOUR = 4;
-constexpr uint32_t B32_BLOCK_NUM = 8;
 constexpr uint64_t ALIGN_FACTOR_512 = 512;
-constexpr uint64_t COL_ALIGN_NUM = 64;
 constexpr uint32_t UB_RESERVE_FOR_RSTD_ALIGN = 1024;
 constexpr uint32_t UB_RESERVE_FOR_OUTPUT_Y_ALIGN = 1536;
 constexpr uint64_t ARND_REDUCE_EMPTY_PRIORITY = 500;
 constexpr uint64_t ARND_R_FULL_LOAD_PRIORITY = 1000;
 constexpr uint64_t ARND_SPLIT_R_PRIORITY = 2000;
-constexpr uint64_t FULL_LOAD_R_MAX = 16384;
 
 // DstType enum values
 constexpr int64_t DST_TYPE_E5M2 = 35;

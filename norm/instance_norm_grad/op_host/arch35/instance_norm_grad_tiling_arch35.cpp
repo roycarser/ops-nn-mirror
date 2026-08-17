@@ -225,15 +225,10 @@ ge::graphStatus InstanceNormGradRegBaseTiling::BlockTiling()
     }
     cTile_ = Ops::Base::CeilDiv(C_, cTileNum_);
 
-    const int64_t blkF32 = static_cast<int64_t>(blockSize_) / FLOAT_DTYPE_BYTES;
-    // Enforce reserveSpace + one M-row of flow fits UB; shrink cTile (more tiles) otherwise.
+    // 收缩 cTile 直到「参数区 + 一行流水」装得下 UB;记账口径与内核实际分配严格一致。
     while (cTileNum_ <= C_) {
-        int64_t cAlignF32 = Ops::Base::CeilAlign(cTile_, blkF32);
-        int64_t reserveBytes = static_cast<int64_t>(PARAM_BUFFERS) * cAlignF32 * FLOAT_DTYPE_BYTES;
-        int64_t rowBytes = Ops::Base::CeilAlign(cTile_ * static_cast<int64_t>(tTypeBytes_),
-                                                static_cast<int64_t>(blockSize_));
-        int64_t oneRowFlow = rowBytes * UB_COPIES_3 * DOUBLE_BUFFER;
-        if (reserveBytes + oneRowFlow <= static_cast<int64_t>(ubSize_) || cTileNum_ >= C_) {
+        int64_t oneRowFlow = FlowTileBytes(cTile_, 1) * UB_COPIES_3 * DOUBLE_BUFFER;
+        if (Stage1ParamBytes(cTile_) + oneRowFlow <= static_cast<int64_t>(ubSize_) || cTileNum_ >= C_) {
             break;
         }
         cTileNum_ += 1;
@@ -255,32 +250,70 @@ ge::graphStatus InstanceNormGradRegBaseTiling::BlockTiling()
     return ge::GRAPH_SUCCESS;
 }
 
+// stage1 参数区的实际占用。与 op_kernel/arch35/instance_norm_grad_base.h 的 InitStage1Buffers 一一对应:
+//   PARAM_BUFFERS 个 fp32 缓冲 + 1 个输入 dtype 的临时缓冲,长度均为 C 对齐到【向量长度】后的值。
+// 注意对齐粒度是 vectorLen_ 而非 blockSize:内核用 CeilAlign(cTile, VL_FP32),按 block 对齐会少算。
+int64_t InstanceNormGradRegBaseTiling::Stage1ParamBytes(int64_t cTile) const
+{
+    const int64_t cAlign = Ops::Base::CeilAlign(cTile, static_cast<int64_t>(vectorLen_));
+    // tmpParamBuf 各 dtype 均分配:除低精度载入暂存外,N==1 时的 f32->T 落盘(WritePartialOrOutput)也用它。
+    const int64_t tmpBytes = cAlign * static_cast<int64_t>(tTypeBytes_);
+    return static_cast<int64_t>(PARAM_BUFFERS) * cAlign * FLOAT_DTYPE_BYTES + tmpBytes;
+}
+
+// 单个流水缓冲(x/dy/pd_x 之一,未计双缓冲)的实际占用,对应内核的
+//   tileBytes = (mUbTile * rowStrideMaxT + VL_FP32) * sizeof(T)
+// 末尾那一个向量长度是内核的补边,必须一并计入,否则记账偏小。
+int64_t InstanceNormGradRegBaseTiling::FlowTileBytes(int64_t cTile, int64_t mRows) const
+{
+    const int64_t rowStrideT = Ops::Base::CeilAlign(cTile * static_cast<int64_t>(tTypeBytes_),
+                                                    static_cast<int64_t>(blockSize_)) /
+                               static_cast<int64_t>(tTypeBytes_);
+    return (mRows * rowStrideT + static_cast<int64_t>(vectorLen_)) * static_cast<int64_t>(tTypeBytes_);
+}
+
 ge::graphStatus InstanceNormGradRegBaseTiling::UbTiling()
 {
-    const int64_t blkF32 = static_cast<int64_t>(blockSize_) / FLOAT_DTYPE_BYTES;
-    int64_t cAlignF32 = Ops::Base::CeilAlign(cTile_, blkF32);
-    int64_t reserveBytes = static_cast<int64_t>(PARAM_BUFFERS) * cAlignF32 * FLOAT_DTYPE_BYTES;
-    OP_CHECK_IF(static_cast<int64_t>(ubSize_) <= reserveBytes,
-                OP_LOGE(context_->GetNodeName(), "ubSize less than reserveSpace"), return ge::GRAPH_FAILED);
-    int64_t canUseUB = (static_cast<int64_t>(ubSize_) - reserveBytes) / DOUBLE_BUFFER;
+    const int64_t paramBytes = Stage1ParamBytes(cTile_);
+    OP_CHECK_IF(static_cast<int64_t>(ubSize_) <= paramBytes,
+                OP_LOGE(context_->GetNodeName(), "ubSize less than stage1 param space"), return ge::GRAPH_FAILED);
 
-    int64_t rowBytes = Ops::Base::CeilAlign(cTile_ * static_cast<int64_t>(tTypeBytes_),
-                                            static_cast<int64_t>(blockSize_));
-    int64_t fullLoadBytes = rowBytes * M_ * UB_COPIES_3;
-    if (fullLoadBytes <= canUseUB) {
+    // 流水缓冲共 UB_COPIES_3 份、每份双缓冲,故单份预算为剩余 UB 的 1/(3*2)。
+    const int64_t perTileBudget = (static_cast<int64_t>(ubSize_) - paramBytes) / (UB_COPIES_3 * DOUBLE_BUFFER);
+    const int64_t rowStrideT = Ops::Base::CeilAlign(cTile_ * static_cast<int64_t>(tTypeBytes_),
+                                                    static_cast<int64_t>(blockSize_)) /
+                               static_cast<int64_t>(tTypeBytes_);
+    // C==0(空 tensor 的类别维为零)时 rowStrideT 为 0,流水缓冲不占空间,全部 M 行都装得下,
+    // 直接按 full_load 处理;否则由 FlowTileBytes 反解行数:
+    //   (rows * rowStrideT + vectorLen_) * tTypeBytes_ <= perTileBudget
+    int64_t rowsCap = M_;
+    if (rowStrideT > 0) {
+        rowsCap = (perTileBudget / static_cast<int64_t>(tTypeBytes_) - static_cast<int64_t>(vectorLen_)) / rowStrideT;
+        OP_CHECK_IF(rowsCap <= 0, OP_LOGE(context_->GetNodeName(), "UB too small for one M row, cTile too large"),
+                    return ge::GRAPH_FAILED);
+    }
+
+    if (rowsCap >= M_) {
         modeKey_ = MODE_FULL_LOAD;
         mUbTile_ = static_cast<uint32_t>(M_);
         mUbIterNum_ = 1;
         mUbTailNum_ = static_cast<uint32_t>(M_);
     } else {
         modeKey_ = MODE_RECOMPUTE;
-        int64_t rowsCap = canUseUB / (rowBytes * UB_COPIES_3);
-        OP_CHECK_IF(rowsCap <= 0, OP_LOGE(context_->GetNodeName(), "recompute rowsCap is zero, cTile too large"),
-                    return ge::GRAPH_FAILED);
-        mUbTile_ = static_cast<uint32_t>(std::min<int64_t>(rowsCap, M_));
+        mUbTile_ = static_cast<uint32_t>(rowsCap);
         mUbIterNum_ = static_cast<uint32_t>((M_ + mUbTile_ - 1) / mUbTile_);
         mUbTailNum_ = static_cast<uint32_t>(M_ - static_cast<int64_t>(mUbIterNum_ - 1) * mUbTile_);
     }
+
+    // 下发给内核的三个缓冲字节数,以及自检:总占用必须真的装得下 UB。
+    const int64_t cAlign = Ops::Base::CeilAlign(cTile_, static_cast<int64_t>(vectorLen_));
+    paramBufBytes_ = static_cast<uint32_t>(cAlign * FLOAT_DTYPE_BYTES);
+    tmpParamBufBytes_ = static_cast<uint32_t>(cAlign * static_cast<int64_t>(tTypeBytes_));
+    tileBytes_ = static_cast<uint32_t>(FlowTileBytes(cTile_, static_cast<int64_t>(mUbTile_)));
+    const int64_t totalBytes = paramBytes + static_cast<int64_t>(tileBytes_) * UB_COPIES_3 * DOUBLE_BUFFER;
+    OP_CHECK_IF(totalBytes > static_cast<int64_t>(ubSize_),
+                OP_LOGE(context_->GetNodeName(), "stage1 UB budget %ld exceeds ubSize %lu", totalBytes, ubSize_),
+                return ge::GRAPH_FAILED);
     return ge::GRAPH_SUCCESS;
 }
 
@@ -322,6 +355,23 @@ ge::graphStatus InstanceNormGradRegBaseTiling::GetWorkspaceSize()
     cBlockFactor_ = std::max<int64_t>(cBlockFactor_, blkF32);
     stage2CoreUsed_ = static_cast<uint32_t>(Ops::Base::CeilDiv(C_, cBlockFactor_));
     cTailBlockFactor_ = C_ - cBlockFactor_ * (static_cast<int64_t>(stage2CoreUsed_) - 1);
+
+    // stage2 每次处理的通道数由 UB 决定,不能在内核里硬编码:内核 Stage2Process 先 pipe_->Reset(),
+    // 之后每通道占 STAGE2_BUFFERS_F32 个 float 缓冲(in 双缓冲 2 + accDg/accDb + 两个 Kahan 补偿)
+    // 外加 1 份输出 dtype。改动内核缓冲个数时必须同步 STAGE2_BUFFERS_F32,否则 UB 超限。
+    const int64_t stage2BytesPerCh = static_cast<int64_t>(STAGE2_BUFFERS_F32) * FLOAT_DTYPE_BYTES +
+                                     static_cast<int64_t>(tTypeBytes_);
+    // 向下对齐到一个向量长度:内核直接按此值分配,不再二次向上对齐(向上取整会越过本容量)。
+    const int64_t vl = static_cast<int64_t>(vectorLen_);
+    int64_t stage2Cap = static_cast<int64_t>(ubSize_) / stage2BytesPerCh / vl * vl;
+    OP_CHECK_IF(stage2Cap <= 0,
+                OP_LOGE(context_->GetNodeName(), "ubSize %lu is too small for the stage2 reduction.", ubSize_),
+                return ge::GRAPH_FAILED);
+    // cBlockFactor_ 本身不一定是向量长度整数倍,取整数倍上界即可(不足一个向量时保底一个向量)。
+    stage2SubCap_ = static_cast<uint32_t>(std::min<int64_t>(stage2Cap, Ops::Base::CeilDiv(cBlockFactor_, vl) * vl));
+    // 与内核 InitStage2Buffers 一一对应:STAGE2_BUFFERS_F32 份 fp32 缓冲 + 1 份输出 dtype 缓冲。
+    stage2BufBytes_ = stage2SubCap_ * FLOAT_DTYPE_BYTES;
+    stage2OutBufBytes_ = stage2SubCap_ * tTypeBytes_;
     return ge::GRAPH_SUCCESS;
 }
 
@@ -360,6 +410,12 @@ void InstanceNormGradRegBaseTiling::SetTilingData()
     tilingData.set_stage2CoreUsed(stage2CoreUsed_);
     tilingData.set_cBlockFactor(cBlockFactor_);
     tilingData.set_cTailBlockFactor(cTailBlockFactor_);
+    tilingData.set_stage2SubCap(stage2SubCap_);
+    tilingData.set_paramBufBytes(paramBufBytes_);
+    tilingData.set_tmpParamBufBytes(tmpParamBufBytes_);
+    tilingData.set_tileBytes(tileBytes_);
+    tilingData.set_stage2BufBytes(stage2BufBytes_);
+    tilingData.set_stage2OutBufBytes(stage2OutBufBytes_);
 }
 
 void InstanceNormGradRegBaseTiling::PrintTilingData() const
@@ -368,29 +424,26 @@ void InstanceNormGradRegBaseTiling::PrintTilingData() const
     OP_LOGD(opName, "mode=%u mUbTile=%u mUbIterNum=%u mUbTailNum=%u", modeKey_, mUbTile_, mUbIterNum_, mUbTailNum_);
     OP_LOGD(opName, "stage1CoreUsed=%u taskNumPerCore=%u taskNumPerTailCore=%u tailCore=%u", stage1CoreUsed_,
             taskNumPerCore_, taskNumPerTailCore_, tailCore_);
-    OP_LOGD(opName, "reduceNCnt=%ld workSpaceSize=%ld stage2CoreUsed=%u cBlockFactor=%ld cTailBlockFactor=%ld",
-            reduceNCnt_, workSpaceSize_, stage2CoreUsed_, cBlockFactor_, cTailBlockFactor_);
+    OP_LOGD(opName,
+            "reduceNCnt=%ld workSpaceSize=%ld stage2CoreUsed=%u cBlockFactor=%ld cTailBlockFactor=%ld stage2SubCap=%u",
+            reduceNCnt_, workSpaceSize_, stage2CoreUsed_, cBlockFactor_, cTailBlockFactor_, stage2SubCap_);
 }
 
 // ---- dispatch ----------------------------------------------------------------------------------
 static bool TilingShapeEmptyJudge(gert::TilingContext* context)
 {
     auto xShapePtr = context->GetInputShape(INPUT_IDX_X);
-    auto gammaShapePtr = context->GetInputShape(INPUT_IDX_GAMMA);
-    if (xShapePtr == nullptr || gammaShapePtr == nullptr) {
+    if (xShapePtr == nullptr) {
         return false;
     }
     auto xShape = xShapePtr->GetStorageShape();
-    auto gammaShape = gammaShapePtr->GetStorageShape();
     int64_t xSize = 1;
-    int64_t gammaSize = 1;
     for (size_t i = 0; i < xShape.GetDimNum(); i++) {
         xSize *= xShape.GetDim(i);
     }
-    for (size_t i = 0; i < gammaShape.GetDimNum(); i++) {
-        gammaSize *= gammaShape.GetDim(i);
-    }
-    return (xSize == 0) && (gammaSize != 0);
+    // x 为空即走空 tensor 路径,C 轴为 0(gamma 同样为空)也在内:主 tiling 的 BlockTiling 会算出
+    // cTileNum_ = 0 并触发 CeilDiv(C_, 0) 除零。
+    return xSize == 0;
 }
 
 ge::graphStatus TilingInstanceNormGrad(gert::TilingContext* context)
