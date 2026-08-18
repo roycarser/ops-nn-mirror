@@ -96,8 +96,8 @@ public:
 
             if (localCoutOffset < coutLengthInBlock) {
                 const uint32_t processCoutLength = Std::min(localCoutLength, coutLengthInBlock - localCoutOffset);
-                // cin非32B对齐时, UB上每行按alignedCin*9排布(有padding=0), 需要跳过空隙
-                // cin已32B对齐时, alignedCin==cin, 无padding, 流程无变化
+                // cin非32B对齐时, UB上每行按alignedCin*9排布, 需要跳过cin对齐后产生的alignedCin-cin空隙
+                // cin已32B对齐时, alignedCin==cin, 无空隙, 流程无变化
                 uint32_t alignedCin = Ops::Base::CeilAlign(localBlock.cinLength, C0<float>());
                 const uint32_t coutCin = processCoutLength * alignedCin;
 
@@ -123,8 +123,13 @@ public:
                                         localBlock.cinLength * KERNEL_3x3 * (coutIdx - localBlock.coutIdx);
 
                     if (hasGap) {
-                        // UB上按alignedCin行对齐(有padding=0), tailGm按cin紧凑存储
-                        // 用blockCount=1+LoopMode跳过UB侧padding, GM侧行步长=cin*9*4
+                        // UB上按alignedCin行对齐(有空隙), tailGm按cin紧凑存储
+                        // 用blockCount=1+LoopMode跳过UB侧空隙, GM侧行步长=cin*9*4
+                        //
+                        // DataCopyPad底层指令里srcStride是两个block头的间隔，但是接口暴露出的srcStride是前一个block尾和后一个block头间的间隔
+                        // 当跳过cin对齐产生的空隙时，我们需要设置每个block(cin*9)间头的间隔为(alignedCin*9)，由于当前接口的srcStride含义不对应
+                        // 所以我们用SetLoopModePara实现stride，不确定通过loopMode循环和copy指令里设置blockCount在性能上存在什么差异,所以当前
+                        // 对齐场景保持原有代码不变，直接用一条copy指令搬出，后面是不是可以考虑下直接使用tensor-api将2个分支归一
                         uint32_t ubRowBytes = alignedCin * KERNEL_3x3 * sizeof(DstT);
                         uint32_t gmRowBytes = localBlock.cinLength * KERNEL_3x3 * sizeof(DstT);
 
