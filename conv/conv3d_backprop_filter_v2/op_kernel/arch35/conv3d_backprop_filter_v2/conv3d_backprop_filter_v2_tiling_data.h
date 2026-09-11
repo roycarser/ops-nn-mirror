@@ -79,8 +79,18 @@ struct TConv3DDwTiling {
     uint64_t singleCoreBatchDout = 1;
 };
 
+// fmap_resident 场景私有子结构（W4 尾部 append-only：既有 59 字段零位移，kb/binary 兼容）
+struct TFmapResidentTiling {
+    uint32_t mLoad = 32;       // dedy 单次载入 M 宽（默认值仅为结构体兜底——既有 UT 全量 tiling 期望串
+                               // 按此默认值生成[P-10]；场景 host 容量门产出恒 RES_M=64[方案 0]并覆写）
+    uint32_t batchExtent = 1;  // dedy 单次载入 batch 数（case1=1 / case2=8）
+    uint32_t reserved0 = 0;    // 8 字节对齐预留
+    uint32_t reserved1 = 0;
+};
+
 struct Conv3DBackpropFilterV2TilingData {
     TConv3DDwTiling dwTiling;
+    TFmapResidentTiling fmapResidentTiling;
 };
 } // namespace conv_bp_v2_kernel
 } // namespace AscendC

@@ -20,6 +20,7 @@
 #include "conv3d_backprop_filter_v2/conv3d_dw_v2_basic_block_arch35.h"
 #include "conv3d_backprop_filter_v2/conv3d_backprop_filter_v2_tiling_data.h"
 #include "conv3d_backprop_filter_v2/conv2d_dw_winograd.h"
+#include "fmap_resident_kernel/fmap_resident_pipeline.h"
 
 using namespace AscendC;
 
@@ -65,10 +66,13 @@ __global__ __aicore__ void conv3d_backprop_filter_v2_arch35(GM_ADDR x, GM_ADDR f
         CONV3D_DX_INPUT_RUN_OP(Conv2dDwWinograd<DTYPE_X, DTYPE_Y, winogradTilingFlag, winogradResidentFlag>);
         return;
     }
-    Conv3dDwInitOutput<DTYPE_Y> opInitOutput;
-    opInitOutput.Init(y, &tilingData);
-    opInitOutput.Process();
-    opInitOutput.Destroy();
+    // fmap_resident：全覆写直出（kNeedInitOutput=false，design §2.1）——既有 12 组合编译期恒 true 不变
+    if constexpr (conv3DDWTemplateId != TPL_FMAP_RESIDENT) {
+        Conv3dDwInitOutput<DTYPE_Y> opInitOutput;
+        opInitOutput.Init(y, &tilingData);
+        opInitOutput.Process();
+        opInitOutput.Destroy();
+    }
 
     if constexpr (conv3DDWTemplateId == TPL_STREAM_K) {
         CONV3D_DX_INPUT_RUN_OP(Conv3dDwBasicBlockStreamK<DTYPE_X, FORMAT_X, DTYPE_OUT_BACKPROP, FORMAT_OUT_BACKPROP,
@@ -76,6 +80,11 @@ __global__ __aicore__ void conv3d_backprop_filter_v2_arch35(GM_ADDR x, GM_ADDR f
     } else if constexpr (conv3DDWTemplateId == TPL_MN_STREAM_K) {
         CONV3D_DX_INPUT_RUN_OP(Conv3dDwBasicBlockMNStreamK<DTYPE_X, FORMAT_X, DTYPE_OUT_BACKPROP, FORMAT_OUT_BACKPROP,
                                                            DTYPE_Y, FORMAT_Y, isSplitKernelHW, groupEnlarge>);
+    }
+    // fmap_resident 分支（W1 hunk3，D-1 方案②纯插入：净零括号差，链结构不变）
+    else if constexpr (conv3DDWTemplateId == TPL_FMAP_RESIDENT) {
+        CONV3D_DX_INPUT_RUN_OP(Conv3dBpFmapResident<DTYPE_X, FORMAT_X, DTYPE_OUT_BACKPROP, FORMAT_OUT_BACKPROP,
+                                                           DTYPE_Y, FORMAT_Y>);
     }
 }
 #endif // CONV3D_BACKPROP_FILTER_V2_ARCH35_H
