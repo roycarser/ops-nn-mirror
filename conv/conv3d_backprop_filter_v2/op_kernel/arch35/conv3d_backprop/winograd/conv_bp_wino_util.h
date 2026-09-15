@@ -18,7 +18,7 @@
 
 #include "utils/std/algorithm.h"
 #include "op_kernel/math_util.h"
-#include "../util/conv_bp_util.h"
+#include "../util/conv_bp_common_util.h"
 
 
 using BpUtils::C0;

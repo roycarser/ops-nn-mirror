@@ -9,14 +9,17 @@
  */
 
 /*!
- * \file conv_bp_util.h
+ * \file conv_bp_common_util.h
  * \brief 卷积反向公共工具层：winograd/fullload 等模板共用的输入张量枚举、基本块范围描述与核号解算。
+ *        ★文件名/守卫须保持全局唯一（第十二轮续3）：旧名 conv_bp_util.h 与引擎
+ *        conv_bp_util_arch35.h / arch22 conv_bp_util.h 三者守卫 CONV_BP_UTIL_H 撞名，
+ *        引擎 TU 先含引擎头时本文件内容被守卫整体跳过 → BpUtils 未声明（板测实证）。
  *        显式包含 kernel_basic_intf.h（GetBlockIdx/GetBlockNum/ASCEND_IS_AIC/DEFAULT_C0_SIZE 来源），
  *        其余零工程内依赖
  */
 
-#ifndef CONV_BP_UTIL_H
-#define CONV_BP_UTIL_H
+#ifndef CONV_BP_COMMON_UTIL_H
+#define CONV_BP_COMMON_UTIL_H
 
 #include "basic_api/kernel_basic_intf.h"
 
@@ -97,4 +100,4 @@ static inline uint32_t __aicore__ AivNums() { return AscendC::GetBlockNum() * Ai
 
 }
 
-#endif // CONV_BP_UTIL_H
+#endif // CONV_BP_COMMON_UTIL_H

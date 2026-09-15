@@ -22,9 +22,9 @@ struct ShapeAttribute {
 };
 
 struct FullLoadTiling {
-    //传进来的基本块c轴要32byte对齐
-    uint16_t singleShapeFullLoadAlignedCin;
-    uint16_t singleShapeAlignedCout;
+    //传进来的基本块c轴要16byte对齐
+    uint16_t singleShapeFullLoadAligned16Cin;
+    uint16_t singleShapeAligned16Cout;
     uint16_t kl0HoWo;
 };
 
