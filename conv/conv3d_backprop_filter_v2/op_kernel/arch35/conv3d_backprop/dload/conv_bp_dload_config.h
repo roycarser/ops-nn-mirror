@@ -1,5 +1,5 @@
-#ifndef CONV_BP_BL1_DLOAD_CONFIG_H
-#define CONV_BP_BL1_DLOAD_CONFIG_H
+#ifndef CONV_BP_DLOAD_CONFIG_H
+#define CONV_BP_DLOAD_CONFIG_H
 
 namespace BpDLoad {
 
@@ -26,12 +26,14 @@ struct DLoadTiling {
     uint16_t singleShapeAligned16Cin;
     uint16_t singleShapeAligned16Cout;
     uint16_t kl0HoWo;
+    // ★第二十三轮 hf32：Mmad HF32 模式开关（WinoMMAD 同款——Init 设置/End 关闭）
+    bool hf32Flag = false;
 };
 
-struct BL1DLoadConfig {
+struct DLoadConfig {
     ShapeAttribute shape;
     DLoadTiling tiling;
 };
 
 } // namespace BpDLoad
-#endif // CONV_BP_BL1_DLOAD_CONFIG_H
+#endif // CONV_BP_DLOAD_CONFIG_H

@@ -49,7 +49,7 @@ public:
     //                                       WCnt
 
     __aicore__ static inline void CalBlockGrid(uint32_t h, uint32_t w, uint16_t& outBlockH, uint16_t& outBlockW,
-                                               uint32_t coreNum = 0)
+                                               uint32_t coreNum)
     {
         constexpr uint16_t CORE_NUM_32 = 32;
         constexpr uint16_t CORE_NUM_28 = 28;
@@ -60,7 +60,7 @@ public:
         constexpr uint16_t GRID_W_28C = 7;
         constexpr uint16_t GRID_H_36C = 6;
         constexpr uint16_t GRID_W_36C = 6;
-        uint16_t realCoreNum = static_cast<uint16_t>(coreNum != 0 ? coreNum : AscendC::GetBlockNum());
+        uint16_t realCoreNum = static_cast<uint16_t>(coreNum);
         uint16_t bestH = 1;
         uint16_t bestW = realCoreNum;
 
@@ -94,9 +94,9 @@ public:
     }
 
     __aicore__ inline SwizzleTopology2D(uint32_t h, uint32_t w, uint16_t blockH, uint16_t blockW,
-                                        uint32_t coreNum = 0)
+                                        uint32_t coreNum)
         : h_(h), w_(w), blockH_(blockH), blockW_(blockW), fullSuperRows_(h / blockH), totalCnt_(h * w),
-          coreNum_(coreNum != 0 ? coreNum : static_cast<uint32_t>(AscendC::GetBlockNum()))
+          coreNum_(coreNum)
     {}
 
     __aicore__ inline bool GetHW(uint32_t loopIdx, uint16_t coreId, uint32_t& outH, uint32_t& outW) const
@@ -249,11 +249,15 @@ public:
     }
 
     // singleShapeCout/Cin 由构造入参传入（泛化：不再依赖 TilingT/BlockConfig 模板静态量）；
-    // blockNum：核数来源，0 = GetBlockNum()（winograd 生产路径），>0 = 直调/UT 显式指定
+    // blockNum：核数来源，0 = GetBlockNum()（★第二十三轮补：Create 内一次兜底赋值——
+    // 构造函数与 CalBlockGrid 直收外层输入，不再各自判 0/内部默认），>0 = 显式指定
     static inline __aicore__ BlockIterator Create(bool onlyIterMainBlocks, uint32_t cout, uint32_t cin,
                                                   uint32_t singleShapeCout, uint32_t singleShapeCin,
                                                   uint32_t blockNum = 0)
     {
+        if (blockNum == 0) {
+            blockNum = static_cast<uint32_t>(AscendC::GetBlockNum());
+        }
         uint32_t coutCnt = Ops::Base::CeilDiv(cout, singleShapeCout);
         uint32_t cinCnt = Ops::Base::CeilDiv(cin, singleShapeCin);
         uint32_t topologyH = (IterDir == CIN) ? coutCnt : cinCnt;
@@ -273,7 +277,7 @@ private:
           singleShapeCout_(singleShapeCout),
           singleShapeCin_(singleShapeCin),
           topology_(topologyH, topologyW, topologyBlockH, topologyBlockW, blockNum),
-          coreNum_(blockNum != 0 ? blockNum : static_cast<uint32_t>(AscendC::GetBlockNum())),
+          coreNum_(blockNum),
           blocksIterCnt_(GetBlockIterCnt(onlyIterMainBlocks, coreNum_, topology_.TotalCnt()))
     {}
 

@@ -9,8 +9,8 @@
  */
 
 /*!
- * \file conv_bp_bl1_dload_compute.h
- * \brief BL1 DLoad（d 轴 MTE2 载入）模板 L0 搬运与 Mmad 计算循环
+ * \file conv_bp_dload_compute.h
+ * \brief DLoad（d 轴 MTE2 载入）模板 L0 搬运与 Mmad 计算循环
  *        （板测版：camodel 30/30 case 验证终态语义；第二十一轮前名 fullload——历史
  *        验证记录 .cannbot/.../sim/验证记录.md 中的轮次叙述沿用旧名，语义连续）
  *
@@ -71,15 +71,15 @@
  *       触发 S64 标量溢出（check_status overflow）；GM/GlobalTensor 侧偏移才用 u64
  */
 
-#ifndef CONV_BP_BL1_DLOAD_COMPUTE_H
-#define CONV_BP_BL1_DLOAD_COMPUTE_H
+#ifndef CONV_BP_DLOAD_COMPUTE_H
+#define CONV_BP_DLOAD_COMPUTE_H
 
 #include "basic_api/kernel_basic_intf.h"
 #include "op_kernel/math_util.h"
 #include "utils/std/algorithm.h"
 
 #include "../util/conv_bp_common_util.h"
-#include "conv_bp_bl1_dload_config.h"
+#include "conv_bp_dload_config.h"
 
 namespace BpDLoad {
 
@@ -88,13 +88,13 @@ using BpUtils::C0;
 using BpUtils::CoutCinRange;
 
 template <typename SrcT>
-class BL1DLoadCompute {
+class DLoadCompute {
 public:
     // GM 张量入口（fmap = 正向输入 NCDHW [batch][cin][din][hin][win]，dy = 反向梯度 NCDHW
     // [batch][cout][dout][hout][wout]）+ config（★第二十轮修正 1：bBufCnt_ 在此一次计算，
     // tiling 上界口径跨块恒定——不再逐块按本块 cinAlign16 计算）
     __aicore__ inline void Init(const GlobalTensor<SrcT>& fmap, const GlobalTensor<SrcT>& dy,
-                                const BL1DLoadConfig& config)
+                                const DLoadConfig& config)
     {
         fmap_ = fmap;
         dy_ = dy;
@@ -108,15 +108,33 @@ public:
         const ShapeAttribute& shape = config.shape;
         const DLoadTiling& tiling = config.tiling;
         const uint32_t hkwk = shape.hk * shape.wk;
+        const uint32_t dhwk = shape.dk * hkwk;
         const uint32_t l0bTileRows = (tiling.kl0HoWo + 7) / 8 * 8;
         const uint32_t nL0cUpper = (tiling.singleShapeAligned16Cin + 15) / 16 * 16 * hkwk;
         bBufTileBytes_ = (l0bTileRows * nL0cUpper * sizeof(SrcT) + 31) / 32 * 32;
         uint32_t bufCnt = TOTAL_L0B_SIZE / bBufTileBytes_;
         bBufCnt_ = static_cast<uint8_t>(bufCnt > 4 ? 4 : bufCnt);
         ASCENDC_ASSERT(bBufCnt_ >= 2, {
-            KERNEL_LOG(KERNEL_ERROR, "BL1 dload L0B tile overflow: tile=%uB (need ≤ %uB for 2-buf)",
+            KERNEL_LOG(KERNEL_ERROR, "dload L0B tile overflow: tile=%uB (need ≤ %uB for 2-buf)",
                        bBufTileBytes_, static_cast<uint32_t>(TOTAL_L0B_SIZE / 2));
         });
+        // ★★改造 1（第二十二轮，PP 变体主线化）：L0C 双 buf ping-pong 门判定（Init 一次，
+        //   tiling 上界口径跨块恒定——dhwk/cin16G/cout16G/cout16/cin16 排布空间占用）：
+        //   开门 ⟺ 2 × alignedCout × alignedCin × dhwk × sizeof ≤ TOTAL_L0C_SIZE（256KB）
+        //   ——单视图 L0C 占用 = alignedCout(aCout 上界) × alignedCin(aCin 上界) × dhwk，
+        //   即每块 [cout16][cin16][dk][tap] 全 dhw 块序整块视图的字节数。上界口径同时
+        //   保证：①门判定跨块恒定（不破坏 l0cPong_ 交替序）②半区基址几何跨块一致
+        //   （尾块 cinAlign16 < alignedCin 时若按本块口径，块间 Mmad/fixpipe 数据竞争
+        //   ——PP 变体 v24 camodel 实证）；开门时本块单视图门（IterateK 内本块口径）
+        //   蕴含成立（半区 ≤ 上界 ≤ L0C/2）。专家场景 cout32/cin32/k3³：半区 108KB、
+        //   双 buf 216KB ≤ 256KB 开门 ✓。同 kernel shape 恒定 → 门恒定 → 两路径不混用
+        // ★第二十三轮：半区从 L0C 中间切（类似 L1 bank 切法）——ping @0 / pong @L0C/2
+        //   各 128KB，无需保存 l0cHalfElems_ 与计算 l0cHalfBytes；门判定简化为
+        //   单视图占用 ≤ TOTAL_L0C_SIZE/2（等价原 2×占用 ≤ TOTAL_L0C_SIZE）
+        const uint32_t l0cHalfElems = tiling.singleShapeAligned16Cout * tiling.singleShapeAligned16Cin * dhwk;
+        l0cPingpong_ = static_cast<uint64_t>(l0cHalfElems) * sizeof(SrcT) <= TOTAL_L0C_SIZE / 2;
+
+
         // 跨半区背压预置位（框架 InitBuffer:193 同款 + winograd 释放向预置位先例）：
         //   MTE1_MTE2(0/1)：L1 双半区（B1+A1 归一链，★第二十轮修正 2：fmap/dy 同 k 段
         //     同半区节奏装载——单游标 l1pong_ 单 id 对，原 fmap 0/1 + dy 2/3 四 id 归一）
@@ -126,30 +144,40 @@ public:
         //   M_MTE1(6/7)：L0A(dy) 双 buf 释放链首用免等（固定 6/7，与 L0B 池无重叠）
         //   M_MTE1 释放链语义（第十二轮修改1）：Wait 前置装载前、Mmad 后只 Set——末次 Set
         //     无消费者，Drain 补消费
-        SetFlag<HardEvent::MTE1_MTE2>(L1Flag(false));
-        SetFlag<HardEvent::MTE1_MTE2>(L1Flag(true));
+        SetFlag<HardEvent::MTE1_MTE2>(0);
+        SetFlag<HardEvent::MTE1_MTE2>(1);
+        // FIX_M 双 id（★改造 1：开门 = 半区 id 0/1（首两块免等）；关门 = id0（现行为），
+        // id1 预置由 Drain 直接消费配平）
         SetFlag<HardEvent::FIX_M>(0);
+        SetFlag<HardEvent::FIX_M>(1);
+        // ★第二十三轮 hf32（WinoMMAD 先例 conv_bp_wino_mmad.h:47/60）：按 tiling 标志
+        //   开 HF32 模式（Mmad 使用前设置；End 收尾关闭——残留开启会污染同核后续 kernel）
+        SetHF32Mode(tiling.hf32Flag);
         for (uint8_t i = 0; i < bBufCnt_; ++i) {
-            SetFlag<HardEvent::M_MTE1>(i);
+            SetFlag<HardEvent::M_MTE1>(MTE1FlagFmap(i));
         }
-        SetFlag<HardEvent::M_MTE1>(MTE1Flag<BpUtils::InputTensor::DY>(false));
-        SetFlag<HardEvent::M_MTE1>(MTE1Flag<BpUtils::InputTensor::DY>(true));
+        SetFlag<HardEvent::M_MTE1>(MTE1FlagDy(false));
+        SetFlag<HardEvent::M_MTE1>(MTE1FlagDy(true));
     }
 
-    // kernel 入口在全部块迭代结束后调用：消费跨半区背压的残留 Set（TQue Reset 残留
-    // freeBufEvt 消费先例）——漏掉则残留 flag 会污染同核后续 kernel 的首块装载
-    __aicore__ inline void Drain()
+    // kernel 入口在全部块迭代结束后调用（★第二十三轮 Drain→End，与 winograd/既有 kernel
+    // 实现命名一致）：消费跨半区背压的残留 Set（TQue Reset 残留 freeBufEvt 消费先例）
+    // ——漏掉则残留 flag 会污染同核后续 kernel 的首块装载
+    __aicore__ inline void End()
     {
         // 消费残留 Set（Set/Wait 全程配平铁律，防跨 kernel 污染同核后续算子；★第二十轮
         // 修正 1/2：L1 归一链 2 id + L0B 池按 bBufCnt_ 循环 + L0A 6/7——与 Init 预置逐项对称）
-        WaitFlag<HardEvent::MTE1_MTE2>(L1Flag(false));
-        WaitFlag<HardEvent::MTE1_MTE2>(L1Flag(true));
+        WaitFlag<HardEvent::MTE1_MTE2>(0);
+        WaitFlag<HardEvent::MTE1_MTE2>(1);
         WaitFlag<HardEvent::FIX_M>(0);
+        WaitFlag<HardEvent::FIX_M>(1);
+        // ★第二十三轮 hf32：收尾关闭（WinoMMAD End 同款）
+        SetHF32Mode(false);
         for (uint8_t i = 0; i < bBufCnt_; ++i) {
-            WaitFlag<HardEvent::M_MTE1>(i);
+            WaitFlag<HardEvent::M_MTE1>(MTE1FlagFmap(i));
         }
-        WaitFlag<HardEvent::M_MTE1>(MTE1Flag<BpUtils::InputTensor::DY>(false));
-        WaitFlag<HardEvent::M_MTE1>(MTE1Flag<BpUtils::InputTensor::DY>(true));
+        WaitFlag<HardEvent::M_MTE1>(MTE1FlagDy(false));
+        WaitFlag<HardEvent::M_MTE1>(MTE1FlagDy(true));
     }
 
     // 单个基本块 [coutRange × cinRange] 的 K 全载计算（第十七轮 B1+A1 双流预载结构）：
@@ -189,7 +217,7 @@ public:
     //   Wait 消费（pong 位跨块持续保证相邻块半区错开）
     //   其余链同旧版：L0B buf 池 + L0A 双 buf 的 M_MTE1 背压（Wait 前置装载前 + Mmad 后
     //   只 Set）、FIX/M_FIX 即时对 + FIX_M 跨块
-    __aicore__ inline void IterateK(const BL1DLoadConfig& config, const CoutCinRange& cRange, GlobalTensor<SrcT>& y,
+    __aicore__ inline void IterateK(const DLoadConfig& config, const CoutCinRange& cRange, GlobalTensor<SrcT>& y,
                                     uint64_t yBase)
     {
         const ShapeAttribute& shape = config.shape;
@@ -211,13 +239,13 @@ public:
         // 约束：kl0HoWo 须为 16 的倍数（load3d mStartPt = 窗起点须 16 对齐）
         const uint32_t howoWin = tiling.kl0HoWo;
         ASCENDC_ASSERT(howoWin != 0 && howoWin % 16 == 0,
-                       { KERNEL_LOG(KERNEL_ERROR, "BL1 dload kl0HoWo invalid: %u (need 16-multiple)", howoWin); });
+                       { KERNEL_LOG(KERNEL_ERROR, "dload kl0HoWo invalid: %u (need 16-multiple)", howoWin); });
         // ★容量门（本路径不支持超容量 shape，无 fallback）：
         //   L0C: alignedCout·(16·cin16G·dhwk)·sizeof ≤ TOTAL_L0C_SIZE（256KB，全 dhw 驻留单视图）
         //   L0B: bBufCnt_ ≥ 2 门已在 Init（第二十轮修正 1：tiling 上界口径一次计算——
         //        本块 tile 实占 ≤ 上界 tileBytes ≤ bBufTileBytes_·bBufCnt_ ≤ L0B 恒成立）
         ASCENDC_ASSERT(static_cast<uint64_t>(alignedCout) * (cinAlign16 * dhwk) * sizeof(SrcT) <= TOTAL_L0C_SIZE, {
-            KERNEL_LOG(KERNEL_ERROR, "BL1 dload L0C overflow: %u*%u*%uB", alignedCout, cinAlign16 * dhwk,
+            KERNEL_LOG(KERNEL_ERROR, "dload L0C overflow: %u*%u*%uB", alignedCout, cinAlign16 * dhwk,
                        static_cast<uint32_t>(sizeof(SrcT)));
         });
 
@@ -253,10 +281,25 @@ public:
         // ——与旧门 2×(bl1Half+al1Half) ≤ TOTAL_L1_SIZE 数学等价，按 bank 语义表述；
         // 不含 batch 因子（第十七轮泛化：旧结构 batch×B1 全驻留门在大 batch 场景超限拒算）
         ASCENDC_ASSERT(static_cast<uint64_t>(bl1HalfBytes) + al1HalfBytes <= TOTAL_L1_SIZE / 2,
-                       { KERNEL_LOG(KERNEL_ERROR, "BL1 dload L1 bank overflow: %u+%uB > %uB", bl1HalfBytes,
+                       { KERNEL_LOG(KERNEL_ERROR, "dload L1 bank overflow: %u+%uB > %uB", bl1HalfBytes,
                                     al1HalfBytes, static_cast<uint32_t>(TOTAL_L1_SIZE / 2)); });
 
-        LocalTensor<SrcT> l0c(TPosition::CO1, 0, TOTAL_L0C_SIZE / sizeof(SrcT));
+        LocalTensor<SrcT> l0c(TPosition::CO1, 0, TOTAL_L0C_SIZE / sizeof(SrcT)); // 关门默认全区视图
+        // ★★改造 1（第二十二轮，PP 变体主线化）：L0C 半区分派（门判定在 Init，l0cPingpong_
+        //   跨块恒定）——开门：本块 Mmad 写半区 p、块尾 fixpipe 读 p，与下块 Mmad 写 !p
+        //   并行（块级 ping-pong，FIX_M 背压深度 2 等"上上块同半区"）；关门：单视图全区
+        //   （现行为，FIX_M id 0 深度 1 等上一块）。★第二十三轮半区从 L0C 中间切：基址
+        //   = p × TOTAL_L0C_SIZE/2（L1 bank 同构，128KB 对齐无忧）；每半区
+        //   仍为全 nFull（[dk][tap][cin16] 全 dhw 块序）整块视图——不按 dk 段拆、不改 L0C
+        //   布局与 fixpipe 参数，仅基址半区化
+        const uint8_t l0cId = l0cPingpong_ ? l0cPong_ : 0; // 本块半区（开门翻转前值；关门恒 0）
+        if (l0cPingpong_) {
+            l0cPong_ = !l0cPong_;
+            // 半区基址 = l0cId × TOTAL_L0C_SIZE/2（L1 bank 切法同构）；size 取 L0C 剩余
+            // 容量（≥ 实际占用——B2 位置"size 精确=用量"camodel 挂死陷阱的同款规避）
+            l0c = LocalTensor<SrcT>(TPosition::CO1, l0cId * (TOTAL_L0C_SIZE / 2),
+                                    (TOTAL_L0C_SIZE - l0cId * (TOTAL_L0C_SIZE / 2)) / sizeof(SrcT));
+        }
 
         // ★load3d 状态外提（第十五轮）：Fmatrix/padding 参数仅依赖 shape（块内恒定），
         // 块首设置一次；LoadL0Fmap 的 LoadDataWithStride 以 L3D_NO_RESET（{false,false}）
@@ -267,76 +310,68 @@ public:
                    FmatrixMode::FMATRIX_LEFT);
         SetLoadDataPaddingValue(static_cast<SrcT>(0));
 
-        // ★L1 双半区归一预载 batch0（★第二十轮修正 2：单游标 l1pong_ 单 id 对——fmap/dy
-        // 双流同 k 段同半区节奏装载（预载段/循环段均成对无条件执行、游标同点翻转恒等），
-        // 归一合法；半区 id = l1pong_ 翻转前值，fmap 先 dy 后）
-        const uint32_t l1PreloadPong = l1pong_;
-        l1pong_ = !l1pong_;
-        {
-            LocalTensor<SrcT> bl1;
-            LocalTensor<SrcT> al1;
-            GetL1Buf(l1PreloadPong != 0, bl1HalfBytes, bl1HalfElems, al1Elems, bl1, al1);
-            // L1 半区背压（归一链）：等 2 个 k 段前同半区的全部 load3d+load2d（MTE1 流）
-            // 排空（跨块续链：上一块对同半区的末次 Set——首用靠 Init 预置）
-            WaitFlag<HardEvent::MTE1_MTE2>(L1Flag(l1PreloadPong));
-            LoadL1Fmap(bl1, config, cRange, 0);
-            LoadA1Dy(al1, config, cRange, 0);
-            // 双流装载就绪（归一单 Set：挂 MTE2 队列两条装载之后，两条都完成才 fire）
-            SetFlag<HardEvent::MTE2_MTE1>(L1Flag(l1PreloadPong));
-        }
+        // ★★改造 2（第二十二轮）：batch 循环装载/计算合并为单循环一份代码（游标延迟形态）
+        //   ——改造前装载与计算代码各内联展开多份（预载 b0 段 + 循环段 + 末批段，装载 3 处/
+        //   计算 2 处文本），AscendC 全内联下目标码体积/编译时间随份数放大。合并后：
+        //     for (i = 0; i <= batch; ++i) { if (i < batch) 装载 i（唯一一份）;
+        //                                  if (i > 0) 计算 i-1（唯一一份） }
+        //   执行序与改造前逐拍等价：i=0 仅装载（= 预载 b0）；i=1..batch-1 装载 i → 计算
+        //   i-1（装载先发射 = 预载语义保持，硬件重叠靠事件链不变）；i=batch 仅计算（=
+        //   末批）。装载游标 l1LoadPong = l1pong_ 翻转前值；计算游标 = 上一轮装载后的
+        //   pong（首批计算 = 预载半区）。空段（batch=1）行为等价：i=0 装载、i=1 计算。
+        //   L1 归一链配平账目与改造前逐 id 等价（装载次数 = 计算次数 = batch，半区序一致）
+        uint32_t l1ComputePong = l1pong_;  // 首批计算半区 = i=0 装载半区（装载翻转前同值）
+        uint32_t l1LoadedPong = l1pong_;   // 本迭代装载半区（计算段末接续用——★修复：原
+                                           // 写 l1pong_（翻转后）在奇数次装载后错位一格，
+                                           // batch≥2 时 Wait<MTE2_MTE1> 消费不到本批 Set →
+                                           // camodel "no matched setflag"/挂死，v41 实锤）
 
-        // FIX→M 跨块背压：等上一块 fixpipe 读完 L0C（首块靠 Init 预置位；放预载 batch0
-        // 之后使 MTE2 装载与上一块 fixpipe 并行——延续旧版并行窗口）
-        WaitFlag<HardEvent::FIX_M>(0);
-
-        // 计算侧半区 pong（循环外声明）：首批计算用预载半区
-        uint32_t l1ComputePong = l1PreloadPong;
-
-        // ★双流预载主循环：先发本批（batchIdx）的 fmap+dy MTE2 装载（抢在上一批 load3d
-        // 洪流前入队），再计算上一批（batchIdx-1，计算侧半区 l1ComputePong）
-        for (uint32_t batchIdx = 1; batchIdx < shape.batch; batchIdx++) {
-            const uint32_t l1LoadPong = l1pong_;
-            l1pong_ = !l1pong_;
-            {
-                LocalTensor<SrcT> bl1;
-                LocalTensor<SrcT> al1;
-                GetL1Buf(l1LoadPong != 0, bl1HalfBytes, bl1HalfElems, al1Elems, bl1, al1);
-                WaitFlag<HardEvent::MTE1_MTE2>(L1Flag(l1LoadPong));
-                LoadL1Fmap(bl1, config, cRange, batchIdx);
-                LoadA1Dy(al1, config, cRange, batchIdx);
-                SetFlag<HardEvent::MTE2_MTE1>(L1Flag(l1LoadPong));
+        WaitFlag<HardEvent::FIX_M>(l0cId);
+        for (uint32_t loadIdx = 0; loadIdx <= shape.batch; loadIdx++) {
+            if (loadIdx < shape.batch) {
+                // ---- 装载段（唯一一份）：fmap 先 dy 后，双流同半区归一链（l1pong）----
+                const uint32_t l1LoadPong = l1pong_;
+                l1pong_ = !l1pong_;
+                l1LoadedPong = l1LoadPong; // 记录本迭代装载半区（i=batch 无装载不更新）
+                {
+                    LocalTensor<SrcT> bl1;
+                    LocalTensor<SrcT> al1;
+                    GetL1Buf(l1LoadPong != 0, bl1HalfBytes, bl1HalfElems, al1Elems, bl1, al1);
+                    // L1 半区背压（归一链）：等 2 个 k 段前同半区的全部 load3d+load2d
+                    // （MTE1 流）排空（跨块续链：上一块对同半区的末次 Set——首用靠
+                    // Init 预置）
+                    WaitFlag<HardEvent::MTE1_MTE2>(l1LoadPong);
+                    LoadL1Fmap(bl1, config, cRange, loadIdx);
+                    LoadA1Dy(al1, config, cRange, loadIdx);
+                    // 双流装载就绪（归一单 Set：挂 MTE2 队列两条装载之后，两条都完成才 fire）
+                    SetFlag<HardEvent::MTE2_MTE1>(l1LoadPong);
+                }
             }
-
-            // 计算上一批：B1/A1 计算侧半区 tensor（半区基址承载 batch 维；归一单 Wait：
-            // 双流装载均就绪）
-            LocalTensor<SrcT> bl1Compute;
-            LocalTensor<SrcT> al1Compute;
-            GetL1Buf(l1ComputePong != 0, bl1HalfBytes, bl1HalfElems, al1Elems, bl1Compute, al1Compute);
-            WaitFlag<HardEvent::MTE2_MTE1>(L1Flag(l1ComputePong));
-            IterateKL0(shape, batchIdx - 1, cinAlign16, cout16Align, howoWin, al1Compute, bl1Compute, l0c);
-            // 归一单 Set：本 k 段全部 load3d（读 B1）+ load2d（读 A1）排空后 fire——
-            // 两 L1 区域同被保护（粗粒度但安全：dy 侧多等 fmap 的 load3d，保守无害）
-            SetFlag<HardEvent::MTE1_MTE2>(L1Flag(l1ComputePong));
-
-            l1ComputePong = l1LoadPong; // 本轮预载半区 → 下一轮计算半区
+            if (loadIdx > 0) {
+                // ---- 计算段（唯一一份）：B1/A1 计算侧半区（= 上一轮装载半区）----
+                LocalTensor<SrcT> bl1Compute;
+                LocalTensor<SrcT> al1Compute;
+                GetL1Buf(l1ComputePong != 0, bl1HalfBytes, bl1HalfElems, al1Elems, bl1Compute, al1Compute);
+                // 归一单 Wait：双流装载均就绪
+                WaitFlag<HardEvent::MTE2_MTE1>(l1ComputePong);
+                IterateKL0(shape, loadIdx - 1, cinAlign16, cout16Align, howoWin, al1Compute, bl1Compute, l0c);
+                // 归一单 Set：本 k 段全部 load3d（读 B1）+ load2d（读 A1）排空后 fire——
+                // 两 L1 区域同被保护（粗粒度但安全：dy 侧多等 fmap 的 load3d，保守无害）
+                SetFlag<HardEvent::MTE1_MTE2>(l1ComputePong);
+                // 本轮装载半区 → 下一轮计算半区（★修复：取本迭代装载的半区
+                // l1LoadedPong——原写 l1pong_ 为装载翻转后值 = !本批半区，奇数次装载
+                // 后错位一格；i=batch 无装载不更新，游标不再使用）
+                l1ComputePong = l1LoadedPong;
+            }
         }
 
-        // ★循环外计算最后一批（batch-1；归一链同构）
-        {
-            LocalTensor<SrcT> bl1Compute;
-            LocalTensor<SrcT> al1Compute;
-            GetL1Buf(l1ComputePong != 0, bl1HalfBytes, bl1HalfElems, al1Elems, bl1Compute, al1Compute);
-            WaitFlag<HardEvent::MTE2_MTE1>(L1Flag(l1ComputePong));
-            IterateKL0(shape, shape.batch - 1, cinAlign16, cout16Align, howoWin, al1Compute, bl1Compute, l0c);
-            SetFlag<HardEvent::MTE1_MTE2>(L1Flag(l1ComputePong));
-        }
-
-        // M→FIX 前向（整块一次 fixpipe，即时配对）
-        SetFlag<HardEvent::M_FIX>(0);
-        WaitFlag<HardEvent::M_FIX>(0);
+        // M→FIX 前向（整块一次 fixpipe，即时配对；开门用本块半区 id，关门 id 0）
+        SetFlag<HardEvent::M_FIX>(l0cId);
+        WaitFlag<HardEvent::M_FIX>(l0cId);
         DirectOutL0C(l0c, y, yBase, alignedCout, hkwk, dhwk, cRange, shape.cin);
-        // FIX→M 释放（跨块：下一块 IterateK 预载后的 Wait 消费，末块由 Drain 消费）
-        SetFlag<HardEvent::FIX_M>(0);
+        // FIX→M 释放（跨块：开门 = 下下块同半区 Wait 消费（深度 2）/关门 = 下一块消费
+        // （深度 1），末块由 Drain 消费）
+        SetFlag<HardEvent::FIX_M>(l0cId);
     }
 
 private:
@@ -345,27 +380,17 @@ private:
     // 重设——旧形态即为此，指令数高是 fp32 堵 issueque 的成分之一）
     static constexpr IsResetLoad3dConfig L3D_NO_RESET = {false, false};
 
-    template <BpUtils::InputTensor t>
-    __aicore__ inline uint8_t MTE1Flag(bool pingPong) const
+    __aicore__ inline uint8_t MTE1FlagDy(bool pingPong) const
     {
-        // L0A(dy) 双 buf 固定 6/7（第十八轮挪位：原 2/3——让出低 id 段给 L0B buf 池）
-        if constexpr (t == BpUtils::InputTensor::DY) {
-            return pingPong + 6;
-        }
+        // L0A(dy) 双 buf 固定 6/7（第十八轮挪位：原 2/3——让出低 id 段给 L0B buf 池；
+        // ★第二十三轮去模板化——仅 dy 一用，模板参数冗余）
+        return pingPong + 6;
     }
 
     __aicore__ inline uint8_t MTE1FlagFmap(uint32_t bufIdx) const
     {
         // L0B(fmap) buf 池 0..bBufCnt_-1（第十八轮多 buf：bufCnt ≤ 4，与 L0A 的 6/7 无重叠）
         return static_cast<uint8_t>(bufIdx);
-    }
-
-    __aicore__ inline uint8_t L1Flag(bool pong) const
-    {
-        // ★第二十轮修正 2：L1 双半区（B1 fmap + A1 dy）归一链 id 0/1——双流同 k 段同半区
-        // 节奏装载（游标恒等核验见 IterateK 注释），原 MTE2FlagFmap(0/1)+MTE2FlagDy(2/3)
-        // 四 id 归一为单套
-        return pong;
     }
 
     // ★L1 两 bank 取段（★第二十一轮裁决，wino GetL1Buf 先例 conv_bp_wino_mmad.h:189-203）：
@@ -414,7 +439,7 @@ private:
 
                 LocalTensor<SrcT> l0a(TPosition::A2, a0Pong_ * (TOTAL_L0A_SIZE / 2), l0aHalfElems);
 
-                const uint8_t flagA = MTE1Flag<BpUtils::InputTensor::DY>(a0Pong_);
+                const uint8_t flagA = MTE1FlagDy(a0Pong_);
                 WaitFlag<HardEvent::M_MTE1>(flagA);
 
                 LoadL0Dy(shape, al1, l0a, coutAlign16, doutIdx, howoIdx, howoLen);
@@ -473,7 +498,7 @@ private:
     // A1 半区目的布局（单 batch）：
     //   addr(co, pt) = (co/C0)*(paddedDhowo*C0) + pt*C0 + (co%C0)
     // LoadL0Dy 源偏移删 batch 项（A1 内 batch 维消失），paddedDhowo 行距 16 对齐逻辑照旧
-    __aicore__ inline void LoadA1Dy(const LocalTensor<SrcT>& al1, const BL1DLoadConfig& config,
+    __aicore__ inline void LoadA1Dy(const LocalTensor<SrcT>& al1, const DLoadConfig& config,
                                     const CoutCinRange& cRange, uint32_t batchIdx)
     {
         const ShapeAttribute& shape = config.shape;
@@ -612,7 +637,7 @@ private:
     // B1 双半区 ping-pong + 预载，batch 维由半区基址承载——L1 门不再含 batch 因子
     // （泛化收益：大 batch 场景可算）。半区段宽按本块 cinAlign16（第十六轮裁决，
     // 尾块/主块一套逻辑），与 LoadL0Fmap 的 channelSize 同源。
-    __aicore__ inline void LoadL1Fmap(const LocalTensor<SrcT>& bl1, const BL1DLoadConfig& config,
+    __aicore__ inline void LoadL1Fmap(const LocalTensor<SrcT>& bl1, const DLoadConfig& config,
                                       const CoutCinRange& cRange, uint32_t batchIdx)
     {
         const ShapeAttribute& shape = config.shape;
@@ -674,10 +699,16 @@ private:
     uint8_t bBufCnt_ = 0;       // Init 一次计算：min(TOTAL_L0B_SIZE/bBufTileBytes_, 4)
     uint8_t bBuf_ = 0;
     uint32_t bBufTileBytes_ = 0; // Init 一次计算：tiling 上界口径 tile 步长（跨块恒定）
+    // ★改造 1（第二十二轮，PP 变体主线化）：L0C ping-pong 状态（Init 门判定一次）——
+    //   l0cPingpong_ 开门标志（上界单视图占用 ≤ TOTAL_L0C_SIZE/2，跨块恒定 → 两路径
+    //   不混用）；l0cPong_ 块级翻转（跨块持续保证相邻块半区错开）——★第二十三轮半区
+    //   从 L0C 中间切（ping@0/pong@L0C/2），l0cHalfElems_ 成员删除
+    bool l0cPingpong_ = 0;      // 开门标志：上界单视图占用 ≤ TOTAL_L0C_SIZE/2（跨块恒定）
+    bool l0cPong_ = 0;          // 块级翻转（开门路径使用；跨块持续保证相邻块半区错开）
     GlobalTensor<SrcT> fmap_;
     GlobalTensor<SrcT> dy_;
 };
 
 } // namespace BpDLoad
 
-#endif // CONV_BP_BL1_DLOAD_COMPUTE_H
+#endif // CONV_BP_DLOAD_COMPUTE_H
