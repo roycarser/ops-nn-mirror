@@ -10,18 +10,21 @@
 
 /*!
  * \file conv_bp_common_util.h
- * \brief 卷积反向公共工具层：winograd/fullload 等模板共用的输入张量枚举、基本块范围描述与核号解算。
+ * \brief 卷积反向公共工具层：winograd/dload 等模板共用的输入张量枚举、基本块范围描述与
+ *        核号解算。★蛇形分核走位已拆分至 conv_bp_common_data_blocks.h（第二十一轮改名轮：
+ *        不全挤在 util 里——依赖方向 data_blocks → util 单向）。
  *        ★文件名/守卫须保持全局唯一（第十二轮续3）：旧名 conv_bp_util.h 与引擎
  *        conv_bp_util_arch35.h / arch22 conv_bp_util.h 三者守卫 CONV_BP_UTIL_H 撞名，
  *        引擎 TU 先含引擎头时本文件内容被守卫整体跳过 → BpUtils 未声明（板测实证）。
- *        显式包含 kernel_basic_intf.h（GetBlockIdx/GetBlockNum/ASCEND_IS_AIC/DEFAULT_C0_SIZE 来源），
- *        其余零工程内依赖
+ *        显式包含 kernel_basic_intf.h（GetBlockIdx/GetBlockNum/ASCEND_IS_AIC/DEFAULT_C0_SIZE 来源）
  */
 
 #ifndef CONV_BP_COMMON_UTIL_H
 #define CONV_BP_COMMON_UTIL_H
 
 #include "basic_api/kernel_basic_intf.h"
+#include "op_kernel/math_util.h"
+#include "utils/std/algorithm.h"
 
 namespace BpUtils {
 // L1 NZ 布局 C0 datablock 元素数（32B / sizeof(T)），自 winograd conv_bp_wino_util 迁入

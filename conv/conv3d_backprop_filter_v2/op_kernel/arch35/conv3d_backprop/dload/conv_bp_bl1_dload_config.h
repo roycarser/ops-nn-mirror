@@ -1,7 +1,7 @@
-#ifndef CONV_BP_BL1_FULLLOAD_CONFIG_H
-#define CONV_BP_BL1_FULLLOAD_CONFIG_H
+#ifndef CONV_BP_BL1_DLOAD_CONFIG_H
+#define CONV_BP_BL1_DLOAD_CONFIG_H
 
-namespace BpFullLoad {
+namespace BpDLoad {
 
 struct ShapeAttribute {
     uint16_t hk;
@@ -21,17 +21,17 @@ struct ShapeAttribute {
     uint32_t win;
 };
 
-struct FullLoadTiling {
+struct DLoadTiling {
     //传进来的基本块c轴要16byte对齐
-    uint16_t singleShapeFullLoadAligned16Cin;
+    uint16_t singleShapeAligned16Cin;
     uint16_t singleShapeAligned16Cout;
     uint16_t kl0HoWo;
 };
 
-struct BL1FullLoadConfig {
+struct BL1DLoadConfig {
     ShapeAttribute shape;
-    FullLoadTiling tiling;
+    DLoadTiling tiling;
 };
 
-} // namespace BpFullLoad
-#endif // CONV_BP_BL1_FULLLOAD_CONFIG_H
+} // namespace BpDLoad
+#endif // CONV_BP_BL1_DLOAD_CONFIG_H
