@@ -1,0 +1,211 @@
+/**
+ * Copyright (c) 2026 Huawei Technologies Co., Ltd.
+ * This program is free software and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
+
+/*!
+ * \file conv3d_backprop_filter_v2_dload_tiling.cpp
+ * \brief DLoad host tiling：白名单 6 case（SwinUnetr_net ID4447：0020/0021/0023/0041/0042/0044，
+ *        全部 hfloat32_NCDHW fp32）内嵌常量管控 + 固定档 TilingData 填充。
+ *        优先级 1（winograd 注册 2——DLoad 优先选路，不命中白名单即 fallthrough）。
+ */
+
+#ifndef CONV3D_BACKPROP_FILTER_V2_DLOAD_TILING_CPP
+#define CONV3D_BACKPROP_FILTER_V2_DLOAD_TILING_CPP
+
+#include "conv/conv3d_backprop_filter_v2/op_kernel/arch35/conv3d_backprop_filter_v2/conv3d_backprop_filter_v2_tiling_key.h"
+#include "op_host/tiling_templates_registry.h"
+#include "error_util.h"
+#include "op_host/util/math_util.h"
+#include "conv3d_backprop_filter_v2_dload_tiling.h"
+
+namespace Ops {
+namespace NN {
+namespace Conv {
+namespace {
+// ==================== 白名单（编译期内嵌 6 case 常量表，第二十五轮用户裁决卡严档） ====================
+// 来源：dload_whitelist（SwinUnetr_net ID4447，全部 hfloat32_NCDHW）——shape+attribute 全等
+// 才放通；比对字段：fmap=(batch,ci,di,hi,wi)、dy=(batch,co,dout,ho,wo)、filter=(co,ci,kd,kh,kw)、
+// stride_dhw/pad 六值/dilation_dhw（六 case 全同：stride=1、pad=1、dilation=1、kernel 3³）
+// ★白名单列序实证（UT case1/4 交错档钉死）：dload_whitelist 三列 = [dy(out_backprop),
+//   fmap(input), filter]，非直觉的 [fmap, dy, filter]——0021 按此序 filter[384,768]=
+//   [co,ci] 与 dy C=384(co)/fmap C=768(ci) 完全自洽（反序则 co/ci 冲突）
+struct DLoadWhitelistCase {
+    int32_t batch;
+    int32_t co;   // dy C（= filter co）
+    int32_t dout; // dy D
+    int32_t ci;   // fmap C（= filter ci）
+    int32_t di;   // fmap D
+    int32_t dhw;  // 立方档（3³/6³：fmap dy 同 D/H/W）
+};
+// dout/ho/wo = di/hi/wi 对每 case 恒等（3³ 或 6³ 立方），kd/kh/kw=3
+constexpr DLoadWhitelistCase DLOAD_WHITELIST[6] = {
+    {8, 384, 6, 384, 6, 6},  // 0020: dy[8,384,6,6,6] fmap[8,384,6,6,6] f[384,384,3,3,3]
+    {8, 384, 6, 768, 6, 6},  // 0021: dy[8,384,6,6,6] fmap[8,768,6,6,6] f[384,768,3,3,3]
+    {8, 768, 3, 768, 3, 3},  // 0023: dy[8,768,3,3,3] fmap[8,768,3,3,3] f[768,768,3,3,3]
+    {4, 384, 6, 384, 6, 6},  // 0041: dy[4,384,6,6,6] fmap[4,384,6,6,6] f[384,384,3,3,3]
+    {4, 384, 6, 768, 6, 6},  // 0042: dy[4,384,6,6,6] fmap[4,768,6,6,6] f[384,768,3,3,3]
+    {4, 768, 3, 768, 3, 3},  // 0044: dy[4,768,3,3,3] fmap[4,768,3,3,3] f[768,768,3,3,3]
+};
+} // namespace
+
+bool Conv3DBackpropFilterV2DLoadTiling::CheckFormat()
+{
+    constexpr size_t Y_INDEX = 2;
+    constexpr size_t FILTER_INDEX = 0;
+    constexpr size_t OUTPUT_BP_INDEX = 0;
+
+    const auto fmapDesc = context_->GetInputDesc(OUTPUT_BP_INDEX);
+    OP_TILING_CHECK(fmapDesc == nullptr, CUBE_INNER_ERR_REPORT("Conv3DBackpropFilterV2", "fmap_desc is null"),
+                    return false);
+    auto fmapFormat = static_cast<ge::Format>(ge::GetPrimaryFormat(fmapDesc->GetStorageFormat()));
+    const auto dedyDesc = context_->GetInputDesc(Y_INDEX);
+    OP_TILING_CHECK(dedyDesc == nullptr, CUBE_INNER_ERR_REPORT("Conv3DBackpropFilterV2", "dedyDesc is null"),
+                    return false);
+    auto dedyFormat = static_cast<ge::Format>(ge::GetPrimaryFormat(dedyDesc->GetStorageFormat()));
+    const auto filterDesc = context_->GetOutputDesc(FILTER_INDEX);
+    OP_TILING_CHECK(filterDesc == nullptr, CUBE_INNER_ERR_REPORT("Conv3DBackpropFilterV2", "filterDesc is null"),
+                    return false);
+    auto filterFormat = static_cast<ge::Format>(ge::GetPrimaryFormat(filterDesc->GetStorageFormat()));
+
+    return fmapFormat == ge::FORMAT_NCDHW && dedyFormat == ge::FORMAT_NCDHW && filterFormat == ge::FORMAT_NCDHW;
+}
+
+bool Conv3DBackpropFilterV2DLoadTiling::CheckDLoadDtype()
+{
+    // 白名单全 fp32；仅放通 hf32（cube_math_type==3 → runInfo_.hf32Flag==1，common 层已映射）
+    if (runInfo_.a_dtype != ge::DataType::DT_FLOAT || runInfo_.b_dtype != ge::DataType::DT_FLOAT ||
+        runInfo_.c_dtype != ge::DataType::DT_FLOAT) {
+        OP_LOGD(opName_, "DLoad tiling only support float (whitelist)");
+        return false;
+    }
+    if (runInfo_.hf32Flag != 1) {
+        OP_LOGD(opName_, "DLoad tiling only support hf32 (cube_math_type==3 whitelist)");
+        return false;
+    }
+    return true;
+}
+
+bool Conv3DBackpropFilterV2DLoadTiling::CheckDLoadAttrs()
+{
+    // 白名单六 case 全同：kernel 3³、stride/dilation dhw 全 1、pad 六值全 1、groups=1
+    if (runInfo_.kd != DLOAD_KERNEL_SIZE_3 || runInfo_.kh != DLOAD_KERNEL_SIZE_3 ||
+        runInfo_.kw != DLOAD_KERNEL_SIZE_3) {
+        OP_LOGD(opName_, "DLoad tiling only support 3*3*3 kernel (whitelist)");
+        return false;
+    }
+    if (runInfo_.stride_d != 1 || runInfo_.stride_h != 1 || runInfo_.stride_w != 1 ||
+        runInfo_.dilation_d != 1 || runInfo_.dilation_h != 1 || runInfo_.dilation_w != 1) {
+        OP_LOGD(opName_, "DLoad tiling only support stride/dilation 1 (whitelist)");
+        return false;
+    }
+    if (runInfo_.pad_f != 1 || runInfo_.pad_b != 1 || runInfo_.pad_u != 1 || runInfo_.pad_d != 1 ||
+        runInfo_.pad_l != 1 || runInfo_.pad_r != 1) {
+        OP_LOGD(opName_, "DLoad tiling only support pad 1 (whitelist)");
+        return false;
+    }
+    if (runInfo_.groups != 1) {
+        OP_LOGD(opName_, "DLoad tiling only support groups 1 (whitelist)");
+        return false;
+    }
+    return true;
+}
+
+bool Conv3DBackpropFilterV2DLoadTiling::CheckWhitelist()
+{
+    // shape 全等比对（fmap=(batch,ci,di,hi,wi)、dy=(batch,co,dout,ho,wo)、filter=(co,ci,kd,kh,kw)——
+    // 白名单 case 均立方（hi=wi=di、ho=wo=dout），dout 与 di 同值表内给）
+    for (const auto& c : DLOAD_WHITELIST) {
+        // dy=(batch,co,dout,ho,wo)（白名单第 1 列）、fmap=(batch,ci,di,hi,wi)（第 2 列），
+        // 立方档 dout=ho=wo=di=hi=wi=dhw；filter=(co,ci,3,3,3) 由 co/ci 等值蕴含
+        const bool dyEq = runInfo_.batch == c.batch && runInfo_.co == c.co && runInfo_.dout == c.dout &&
+                          runInfo_.ho == c.dout && runInfo_.wo == c.dout;
+        const bool fmapEq = runInfo_.ci == c.ci && runInfo_.di == c.di && runInfo_.hi == c.di &&
+                            runInfo_.wi == c.di;
+        if (dyEq && fmapEq) {
+            return true;
+        }
+    }
+    OP_LOGD(opName_, "DLoad tiling whitelist miss (shape mismatch)");
+    return false;
+}
+
+bool Conv3DBackpropFilterV2DLoadTiling::IsCapable()
+{
+    // ★SoC a5 限定（用户裁决"只有 a5"）：DAV_3510（winograd IsSocVersion91095 同款判定）
+    if (!IsSocVersion91095()) {
+        return false;
+    }
+    if (!CheckFormat()) {
+        OP_LOGD(opName_, "current format is not support by DLoad tiling");
+        return false;
+    }
+    if (!CheckDLoadDtype()) {
+        return false;
+    }
+    if (!CheckDLoadAttrs()) {
+        return false;
+    }
+    if (!CheckWhitelist()) {
+        return false;
+    }
+    return true;
+}
+
+uint64_t Conv3DBackpropFilterV2DLoadTiling::GetTilingKey() const
+{
+    // ★第一参传模板参数值（原 fmap_resident 先例同款——GET_TPL_TILING_KEY(TPL_FMAP_RESIDENT=3,...)
+    // → key=2）；TPL_DLOAD=3 值沿用 → key=2 二进制兼容。winograd 的 (1,..) 是 TPL_STREAM_K 值
+    const uint64_t tilingKey = GET_TPL_TILING_KEY(TPL_DLOAD, 0, 0, TPL_WINOGRAD_DISABLE, 0);
+    OP_LOGD(context_->GetNodeName(), "tilingKey is: [%lu] , use DLoad tiling", tilingKey);
+    return tilingKey;
+}
+
+ge::graphStatus Conv3DBackpropFilterV2DLoadTiling::DoOpTiling()
+{
+    // runInfo_/shape 链继承基类；SetShapeTiling/SetAttrTiling 复用（shape/attr 全量直传——
+    // DLoad 的 Conv3DDwDLoad 入口从 dwTiling 直取 batch/cin/cout/di/hi/wi/hk/wk/dk/pad/stride）
+    SetShapeTiling(tilingData_.dwTiling);
+    SetAttrTiling(tilingData_.dwTiling);
+
+    auto& dwt = tilingData_.dwTiling;
+    // ★固定档 tiling（白名单档）：baseK=16（kl0HoWo）、baseM=128（cout 块宽）、
+    // baseN=144（=16 cin × 3×3 hkwk，mmad N 轴 → 入口反解 cin=baseN/hkwk=16）
+    dwt.baseK = DLOAD_BASE_K;
+    dwt.baseM = DLOAD_BASE_M;
+    dwt.baseN = DLOAD_BASE_N_PER_HKWK * runInfo_.kh * runInfo_.kw; // 144 = 16×9
+    dwt.hf32Flag = runInfo_.hf32Flag;                               // 白名单恒 1（cube_math_type==3）
+    // 引擎兼容字段（stream_k 语义不生效——kernel 侧 TPL_DLOAD 分支不读这些；置安全默认防
+    // 未初始化）：singleShape 系列按固定档对齐、streamkType 显式 0
+    dwt.singleCoreM = DLOAD_BASE_M;
+    dwt.singleCoreN = dwt.baseN;
+    dwt.singleCoreK = DLOAD_BASE_K;
+    dwt.singleCoreCin = DLOAD_BASE_N_PER_HKWK;
+    dwt.singleCoreCout = DLOAD_BASE_M;
+    dwt.singleCoreGroup = 1;
+    dwt.usedCoreNum = platformInfo_.core_num;
+    dwt.streamkType = 0;
+    dwt.splitWo = runInfo_.wo;
+    return ge::GRAPH_SUCCESS;
+}
+
+ge::graphStatus Conv3DBackpropFilterV2DLoadTiling::GetWorkspaceSize()
+{
+    // DLoad 无 NC1HWC0 预转置 / 无切 k 尾块暂存（与 winograd 的结构差异）——workspace 0
+    size_t* workspaces = context_->GetWorkspaceSizes(1);
+    OP_CHECK_NULL_WITH_CONTEXT(context_, workspaces);
+    workspaces[0] = 0;
+    return ge::GRAPH_SUCCESS;
+}
+
+// ★优先级 1（winograd 注册 2——DLoad 白名单命中优先选路，不命中 fallthrough winograd）
+REGISTER_TILING_TEMPLATE("Conv3DBackpropFilterV2", Conv3DBackpropFilterV2DLoadTiling, 1);
+} // namespace Conv
+} // namespace NN
+} // namespace Ops
+#endif // CONV3D_BACKPROP_FILTER_V2_DLOAD_TILING_CPP
