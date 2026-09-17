@@ -19,7 +19,8 @@
 
 #define TPL_STREAM_K 1
 #define TPL_MN_STREAM_K 2
-#define TPL_FMAP_RESIDENT 3
+#define TPL_DLOAD 3 // ★第二十五轮：原 TPL_FMAP_RESIDENT 改名（fmap_resident 测试代码退役，
+                    // 槽位 3 值沿用——tiling key 二进制兼容，host/kernel 两侧同步）
 #define TPL_WINOGRAD_DISABLE 0
 #define TPL_WINOGRAD_SINGLE_SHAPE_TILE_1 1
 #define TPL_WINOGRAD_SINGLE_SHAPE_TILE_2 2
@@ -29,7 +30,7 @@
 // 模板参数
 ASCENDC_TPL_ARGS_DECL(Conv3dBackPropFilterV2,
                       ASCENDC_TPL_UINT_DECL(conv3DDWTemplateId, ASCENDC_TPL_8_BW, ASCENDC_TPL_UI_LIST, TPL_STREAM_K,
-                                            TPL_MN_STREAM_K, TPL_FMAP_RESIDENT), // LIST模式, 穷举；尾部 append 保序，
+                                            TPL_MN_STREAM_K, TPL_DLOAD), // LIST模式, 穷举；尾部 append 保序，
                       // 既有 STREAM_K(索引0)/MN_STREAM_K(索引1) 编码不变，既有 12 key 零变化
                       ASCENDC_TPL_BOOL_DECL(isSplitKernelHW, 0, 1), ASCENDC_TPL_BOOL_DECL(groupEnlarge, 0, 1),
                       ASCENDC_TPL_UINT_DECL(winogradTilingFlag, ASCENDC_TPL_8_BW, ASCENDC_TPL_UI_LIST,
@@ -105,9 +106,9 @@ ASCENDC_TPL_SEL(
                          ASCENDC_TPL_UINT_SEL(winogradTilingFlag, ASCENDC_TPL_UI_LIST,
                                               TPL_WINOGRAD_SINGLE_SHAPE_TILE_2),
                          ASCENDC_TPL_BOOL_SEL(winogradResidentFlag, TPL_WINOGRAD_RESIDENT_DY)),
-    // fmap_resident tiling key: 新场景第 13 行（dkhkwk 全载 fmap 驻留，priority=-1 host 模板）
+    // DLoad tiling key: 第 13 行（原 fmap_resident 槽位改名——DLoad 主线模板，priority=1 host 模板）
     ASCENDC_TPL_ARGS_SEL(ASCENDC_TPL_KERNEL_TYPE_SEL(ASCENDC_TPL_MIX_AIC_1_2),
-                         ASCENDC_TPL_UINT_SEL(conv3DDWTemplateId, ASCENDC_TPL_UI_LIST, TPL_FMAP_RESIDENT),
+                         ASCENDC_TPL_UINT_SEL(conv3DDWTemplateId, ASCENDC_TPL_UI_LIST, TPL_DLOAD),
                          ASCENDC_TPL_BOOL_SEL(isSplitKernelHW, 0), ASCENDC_TPL_BOOL_SEL(groupEnlarge, 0),
                          ASCENDC_TPL_UINT_SEL(winogradTilingFlag, ASCENDC_TPL_UI_LIST, TPL_WINOGRAD_DISABLE),
                          ASCENDC_TPL_BOOL_SEL(winogradResidentFlag, 0)));
