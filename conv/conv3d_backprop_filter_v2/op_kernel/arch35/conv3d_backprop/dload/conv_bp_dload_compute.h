@@ -87,6 +87,13 @@ using BpUtils::CoutCinRange;
 template <typename SrcT>
 class DLoadCompute {
 public:
+    // 片上存储半区常量（消裸数字）。★TOTAL_L1_SIZE/TOTAL_L0C_SIZE 基的半区常量须
+    // 函数内 constexpr（wino WinoMMAD::GetL1Buf offsetPingPong 同款形态）：device
+    // 编译器对模板类作用域初始化的两阶段查找差异下仅函数体可见（L0A 可见于类作用域）
+    static constexpr uint32_t L0A_HALF_BYTES = TOTAL_L0A_SIZE / 2; // L0A 双 buf 半区（dy ping/pong）
+    // L0B buf 池深度上限（flag id 池语义：QUE_MAX_EVENT=8 − L0A 双 buf 固定 2 id(6/7) − 余量）
+    static constexpr uint32_t MAX_L0B_BUF_CNT = 4;
+
     // GM 张量入口（fmap = 正向输入 NCDHW [batch][cin][din][hin][win]，dy = 反向梯度 NCDHW
     // [batch][cout][dout][hout][wout]）+ config（bBufCnt_ 在此一次计算，tiling 上界口径
     // 跨块恒定——不逐块按本块 cinAlign16 计算）
@@ -94,26 +101,16 @@ public:
     {
         fmap_ = fmap;
         dy_ = dy;
-        // ★L0B buf 池参数（tiling 上界口径，跨块恒定）：
-        //   tileBytes = Ceil(kl0HoWo,8)·8·nL0c上界·sizeof，nL0c上界 = CeilAlign(aCin,16)·hkwk
-        //   （全块最大 cinAlign16：所有块 cinLength ≤ aCin → cinAlign16 ≤ CeilAlign(aCin,16)，
-        //    8 对齐档 aCin=8 时上界 16——与 B1 半区统一口径同式）；
-        //   bBufCnt_ = min(TOTAL_L0B_SIZE/tileBytes, 4)（上限 4：L0A 固定 6/7，总 6 id ≤
-        //   QUE_MAX_EVENT=8）；buf 物理边界跨块恒定是池背压链的物理基础（同 id buf 跨块
-        //   同区间防护、异 id 不相交并行安全）
+        // ★L0B buf 池参数（tiling 上界口径，跨块恒定）：tile 步长 = kl0HoWo·aCin·hkwk·sizeof
+        // （kl0HoWo/aCin 均由 tiling 上层保证 16 对齐——tileBytes 恒为 512B 的倍数，无需再对齐；
+        // 16 对齐下所有块 cinAlign16 ≤ aCin，上界覆盖本块实占）；bBufCnt_ = min(L0B/tileBytes,
+        // MAX_L0B_BUF_CNT)。buf 物理边界跨块恒定是池背压链的物理基础
         const ShapeAttribute& shape = config.shape;
         const DLoadTiling& tiling = config.tiling;
-        const uint32_t hkwk = shape.hk * shape.wk;
-        const uint32_t dhwk = shape.dk * hkwk;
-        const uint32_t l0bTileRows = (tiling.kl0HoWo + 7) / 8 * 8;
-        const uint32_t nL0cUpper = (tiling.singleShapeAligned16Cin + 15) / 16 * 16 * hkwk;
-        bBufTileBytes_ = (l0bTileRows * nL0cUpper * sizeof(SrcT) + 31) / 32 * 32;
+        const uint32_t dhwk = shape.dk * shape.hk * shape.wk;
+        bBufTileBytes_ = tiling.kl0HoWo * tiling.singleShapeAligned16Cin * (shape.hk * shape.wk) * sizeof(SrcT);
         uint32_t bufCnt = TOTAL_L0B_SIZE / bBufTileBytes_;
-        bBufCnt_ = static_cast<uint8_t>(bufCnt > 4 ? 4 : bufCnt);
-        ASCENDC_ASSERT(bBufCnt_ >= 2, {
-            KERNEL_LOG(KERNEL_ERROR, "dload L0B tile overflow: tile=%uB (need ≤ %uB for 2-buf)", bBufTileBytes_,
-                       static_cast<uint32_t>(TOTAL_L0B_SIZE / 2));
-        });
+        bBufCnt_ = static_cast<uint8_t>(Std::min(bufCnt, MAX_L0B_BUF_CNT));
         // ★L0C 双 buf ping-pong 门判定（Init 一次，tiling 上界口径跨块恒定——
         //   dhwk/cin16G/cout16G/cout16/cin16 排布空间占用）：
         //   开门 ⟺ 单视图占用 ≤ TOTAL_L0C_SIZE/2（256KB）
@@ -127,8 +124,10 @@ public:
         //   半区从 L0C 中间切（与 L1 bank 切法同构）——ping @0 / pong @L0C/2 各 128KB，
         //   门判定即单视图占用 ≤ TOTAL_L0C_SIZE/2
         const uint32_t l0cHalfElems = tiling.singleShapeAligned16Cout * tiling.singleShapeAligned16Cin * dhwk;
-        // L0C 恒存 fp32 累加（与输入 SrcT 无关）——容量口径按 sizeof(float)
-        l0cPingpong_ = static_cast<uint64_t>(l0cHalfElems) * sizeof(float) <= TOTAL_L0C_SIZE / 2;
+        // L0C 恒存 fp32 累加（与输入 SrcT 无关）——容量口径按 sizeof(float)；
+        // 半区常量函数内 constexpr（TOTAL_L0C_SIZE 基，见类头常量注释）
+        constexpr uint32_t l0cHalfBytes = TOTAL_L0C_SIZE / 2; // L0C pingpong 半区（中间切）
+        l0cPingpong_ = static_cast<uint64_t>(l0cHalfElems) * sizeof(float) <= l0cHalfBytes;
 
         // 跨半区背压预置位（框架 InitBuffer 同款 + 释放向预置位先例）：
         //   MTE1_MTE2(0/1)：L1 双半区（B1+A1 归一链——fmap/dy 同 k 段同半区节奏装载，
@@ -177,23 +176,19 @@ public:
     // 单个基本块 [coutRange × cinRange] 的 K 全载计算：
     // L0C 全 dhw 驻留单视图（n 轴 [dk][hkwk][cin16] 块序），dk 内移循环 batch×dout×howo16 窗
     // → dk 段内累加（cmatrixInitVal 段首清零），块尾 fixpipe NZ2DN 整块一次直出。
-    //
     // y 布局契约（生产布局）：
     //   y = [cout][cin][dhwK] ND 行主序（全局），dhwK = dk*hwK
     //   本块基址 yBase = coutIdx*cinTotal*dhwK + cinIdx*dhwK（由入口计算）
     //   元素 y[yBase + co*cinTotal*dhwK + ci*dhwK + dk*hwK + tap] = C(co, ci, tap) of 本 dk 段
-    //
     // ★B1+A1 双流预载（归一单 l1pong 链）：
     //   预载 batch0 的 fmap→B1 + dy→A1 → for batchIdx=1..batch-1 { 先发 batchIdx 的
     //   fmap+dy DataCopy（MTE2 抢在上一批 load3d 洪流前入队，先 fmap 后 dy——fmap 的
     //   nValue=dhwin 更大）→ 计算上一 batch } → 循环外计算最后 batch。
     //   每流装载次数 = 计算次数 = batch。
-    //
     // ★L1 布局（四半区）：B1Ping@0 | B1Pong | A1Ping | A1Pong（32B 对齐逐段）——
     //   B1 半区 = 单 batch fmap [c1g][d][h][w][c0]（段宽本块 cinAlign16），A1 半区 =
     //   单 batch dy [co1g][paddedDhowo][co0]。泛化收益：L1 门不含 batch 因子
     //   （2×单batch B1 + 2×A1 ≤ 512KB，cin 大 batch 大但单 batch 小的场景可跑）。
-    //
     // ★事件链时序（L1 归一链——半区 id p∈{0,1}（l1pong），fmap/dy 双流同段同 id）：
     //   装载前 Wait<MTE1_MTE2>(p)（等 2 个 k 段前同半区全部 load3d+load2d 排空，首两轮靠
     //   Init 预置）→ LoadL1Fmap + LoadA1Dy（fmap 先 dy 后）→ Set<MTE2_MTE1>(p)（挂 MTE2
@@ -219,27 +214,14 @@ public:
         const uint32_t hkwk = shape.hk * shape.wk;
         const uint32_t dhwk = shape.dk * hkwk;
 
-        // ★通道量统一：B1 布局与 L0/L0C 视图统一按本块
-        // cinAlign16 = CeilAlign(cinLength,16)（尾块/主块一套逻辑）。
-        //   cin16G = Ceil(cinLength/16)（L0B/L0C 的 16 槽块数）；cinAlign16 = 16·cin16G（= nL0c/hkwk）
-        //   cout16Align = Ceil(coutLength/16)（块按 alignedCout 切、尾块长 ∈ (16k-16,16k]，恒 = alignedCout）
-        const uint32_t cin16G = (cRange.cinLength + 15) / 16;
-        const uint32_t cinAlign16 = 16 * cin16G;
-        const uint32_t cout16Align = (cRange.coutLength + 15) / 16 * 16;
+        // 通道量统一：B1 布局与 L0/L0C 视图按本块 cinAlign16 = CeilAlign(cinLength, 16)
+        // （尾块/主块一套逻辑；cinAlign16/BLOCK_CUBE = L0B/L0C 的 16 槽块数）；
+        // coutAlign16 = CeilAlign(coutLength,16)（块按 alignedCout 切、尾块长 ∈ (16k-16,16k]，恒 = alignedCout）
+        const uint32_t cinAlign16 = Ops::Base::CeilAlign<uint32_t>(cRange.cinLength, BLOCK_CUBE);
+        const uint32_t coutAlign16 = Ops::Base::CeilAlign<uint32_t>(cRange.coutLength, BLOCK_CUBE);
 
-        // ★howo 窗宽（k 轴）：从 tiling.kl0HoWo 传入。
-        // 约束：kl0HoWo 须为 16 的倍数（load3d mStartPt = 窗起点须 16 对齐）
+        // howo 窗宽（k 轴）：tiling.kl0HoWo（上层保证为 16 的倍数——load3d mStartPt 16 对齐）
         const uint32_t howoWin = tiling.kl0HoWo;
-        ASCENDC_ASSERT(howoWin != 0 && howoWin % 16 == 0,
-                       { KERNEL_LOG(KERNEL_ERROR, "dload kl0HoWo invalid: %u (need 16-multiple)", howoWin); });
-        // ★容量门（本路径不支持超容量 shape，无 fallback）：
-        //   L0C: alignedCout·(16·cin16G·dhwk)·sizeof ≤ TOTAL_L0C_SIZE（256KB，全 dhw 驻留单视图）
-        //   L0B: bBufCnt_ ≥ 2 门已在 Init（tiling 上界口径一次计算——本块 tile 实占
-        //        ≤ 上界 tileBytes ≤ bBufTileBytes_·bBufCnt_ ≤ L0B 恒成立）
-        ASCENDC_ASSERT(static_cast<uint64_t>(alignedCout) * (cinAlign16 * dhwk) * sizeof(float) <= TOTAL_L0C_SIZE, {
-            KERNEL_LOG(KERNEL_ERROR, "dload L0C overflow: %u*%u*%uB", alignedCout, cinAlign16 * dhwk,
-                       static_cast<uint32_t>(sizeof(float)));
-        });
 
         // ★L1 两 bank 布局：
         //   ping bank @0 / pong bank @TOTAL_L1_SIZE/2 各占 L1 上下 256KB——bank 内 B1 段
@@ -250,31 +232,14 @@ public:
         //   （元素上界 alignedCout·dout·CeilAlign(howoTotal,16) ≥ 实际占用，paddedDhowo
         //   = Ceil(dhowo,16) 为 A1 实际行距，见 LoadA1Dy dstNzC0Stride）——batch 维由
         //   bank 基址（l1pong）承载。
-        // ★B1 段大小 = 跨块统一口径 dhwin·max(tiling alignedCin, 本块 cinAlign16)——
-        //   该 max 在同核块序列内恒定（aCin≥16 档：所有块 cinAlign16 ≤ aCin → 恒 aCin；
-        //   8 对齐档：所有块 cinLength ≤ 8 → cinAlign16 恒 16 → 恒 16），段物理边界跨块
-        //   稳定是半区背压链的物理基础：同 pong bank 跨块同区间（跨块 Set/Wait 续链防护）、
-        //   异 bank 不相交（块 N+1 预载与块 N 残留 load3d 并行安全）——若按本块
-        //   cinAlign16 逐块定界（如尾块 16 < 主块 32），块间边界漂移致物理重叠
-        //   且背压链不设防（上一块未用目标半区时 Wait 消费 Init 预置直通）→ 数值污染。
-        //   B1 段内实际写入 = Ceil(cinLength/C0)·dhwin·C0
-        //   ≤ dhwin·cinAlign16 ≤ 段大小（布局紧凑、分配统一）
+        // B1 段 = dhwin × aCin（tiling 上界口径跨块恒定——段物理边界跨块稳定是半区背压链
+        // 的物理基础；16 对齐契约下所有块 cinAlign16 ≤ aCin，段覆盖本块实际写入）
         const uint32_t dhwin = shape.din * shape.hin * shape.win;
-        const uint32_t bl1CinSpan = alignedCin > cinAlign16 ? alignedCin : cinAlign16;
-        const uint32_t bl1HalfElems = dhwin * bl1CinSpan;
-        const uint32_t dhowoTotal = shape.dout * shape.hout * shape.wout;
+        const uint32_t bl1HalfElems = dhwin * alignedCin;
         const uint32_t al1Elems = alignedCout * shape.dout *
                                   Ops::Base::CeilAlign<uint32_t>(shape.hout * shape.wout, BLOCK_CUBE);
-        // 32B 对齐保留：bl1HalfBytes 向上取整 32（A1 段起点 = bank 基址 + bl1HalfBytes
-        // 天然对齐；bl1HalfBytes/al1HalfBytes 语义 = bank 内段偏移/段容量）
-        const uint32_t bl1HalfBytes = static_cast<uint32_t>((bl1HalfElems * sizeof(SrcT) + 31) / 32 * 32);
-        const uint32_t al1HalfBytes = (al1Elems * sizeof(SrcT) + 31) / 32 * 32;
-        // ★L1 容量门（bank 口径）：单 bank 装下 B1 段 + A1 段 ≤ TOTAL_L1_SIZE/2；
-        // 不含 batch 因子（大 batch 场景可算）
-        ASCENDC_ASSERT(static_cast<uint64_t>(bl1HalfBytes) + al1HalfBytes <= TOTAL_L1_SIZE / 2, {
-            KERNEL_LOG(KERNEL_ERROR, "dload L1 bank overflow: %u+%uB > %uB", bl1HalfBytes, al1HalfBytes,
-                       static_cast<uint32_t>(TOTAL_L1_SIZE / 2));
-        });
+        // A1 段起点 = bank 基址 + bl1HalfBytes——aCin 16 对齐 ⇒ bl1HalfBytes 为 64B 的倍数，天然对齐
+        const uint32_t bl1HalfBytes = bl1HalfElems * sizeof(SrcT);
 
         // ★L0C 恒 fp32（Mmad 累加 + fixpipe 直出——与输入 SrcT 解耦，输出侧固定 fp32，
         //   非 fp32 输出由外部通路转换）
@@ -288,10 +253,11 @@ public:
         const uint8_t l0cId = l0cPingpong_ ? l0cPong_ : 0; // 本块半区（开门翻转前值；关门恒 0）
         if (l0cPingpong_) {
             l0cPong_ = !l0cPong_;
-            // 半区基址 = l0cId × TOTAL_L0C_SIZE/2；size 取 L0C 剩余
-            // 容量（≥ 实际占用——B2 位置"size 精确=用量"仿真器容量校验陷阱的同款规避）
-            l0c = LocalTensor<float>(TPosition::CO1, l0cId * (TOTAL_L0C_SIZE / 2),
-                                     (TOTAL_L0C_SIZE - l0cId * (TOTAL_L0C_SIZE / 2)) / sizeof(float));
+            // 半区基址 = l0cId × 半区；size 取 L0C 剩余容量（≥ 实际占用——
+            // B2 位置"size 精确=用量"仿真器容量校验陷阱的同款规避）
+            constexpr uint32_t l0cHalfBytes = TOTAL_L0C_SIZE / 2; // TOTAL_L0C_SIZE 基，函数内 constexpr
+            l0c = LocalTensor<float>(TPosition::CO1, l0cId * l0cHalfBytes,
+                                     (TOTAL_L0C_SIZE - l0cId * l0cHalfBytes) / sizeof(float));
         }
 
         // ★load3d 状态外提：Fmatrix/padding 参数仅依赖 shape（块内恒定），块首设置一次；
@@ -331,7 +297,7 @@ public:
                     // （MTE1 流）排空（跨块续链：上一块对同半区的末次 Set——首用靠
                     // Init 预置）
                     WaitFlag<HardEvent::MTE1_MTE2>(l1LoadPong);
-                    LoadL1Fmap(bl1, config, cRange, loadIdx);
+                    LoadL1Fmap(bl1, config, cRange, cinAlign16, loadIdx);
                     LoadA1Dy(al1, config, cRange, loadIdx);
                     // 双流装载就绪（归一单 Set：挂 MTE2 队列两条装载之后，两条都完成才 fire）
                     SetFlag<HardEvent::MTE2_MTE1>(l1LoadPong);
@@ -344,7 +310,7 @@ public:
                 GetL1Buf(l1ComputePong != 0, bl1HalfBytes, bl1HalfElems, al1Elems, bl1Compute, al1Compute);
                 // 归一单 Wait：双流装载均就绪
                 WaitFlag<HardEvent::MTE2_MTE1>(l1ComputePong);
-                IterateKL0(shape, loadIdx - 1, cinAlign16, cout16Align, howoWin, al1Compute, bl1Compute, l0c);
+                IterateKL0(shape, loadIdx - 1, cinAlign16, coutAlign16, howoWin, al1Compute, bl1Compute, l0c);
                 // 归一单 Set：本 k 段全部 load3d（读 B1）+ load2d（读 A1）排空后 fire——
                 // 两 L1 区域同被保护（粗粒度但安全：dy 侧多等 fmap 的 load3d，保守无害）
                 SetFlag<HardEvent::MTE1_MTE2>(l1ComputePong);
@@ -357,7 +323,7 @@ public:
         // M→FIX 前向（整块一次 fixpipe，即时配对；开门用本块半区 id，关门 id 0）
         SetFlag<HardEvent::M_FIX>(l0cId);
         WaitFlag<HardEvent::M_FIX>(l0cId);
-        DirectOutL0C(l0c, y, yBase, alignedCout, hkwk, dhwk, cRange, shape.cin);
+        DirectOutL0C(l0c, y, yBase, alignedCout, cinAlign16, dhwk, cRange, shape.cin);
         // FIX→M 释放（跨块：开门 = 下下块同半区 Wait 消费（深度 2）/关门 = 下一块消费
         // （深度 1），末块由 End 消费）
         SetFlag<HardEvent::FIX_M>(l0cId);
@@ -381,16 +347,18 @@ private:
         return static_cast<uint8_t>(bufIdx);
     }
 
-    // ★L1 两 bank 取段：
-    // PingPong 按 L1/2 为界——ping bank @0 / pong bank @TOTAL_L1_SIZE/2（各 256KB），
-    // bank 内 B1 段在前（+0）、A1 段紧随（+bl1HalfBytes）——ping 与 pong 的 MTE1/MTE2
+    // ★L1 两 bank 取段：PingPong 按 L1/2 为界——ping bank @0 / pong bank @上 bank
+    // （各 256KB），bank 内 B1 段在前（+0）、A1 段紧随（+bl1HalfBytes）——ping 与 pong
+    // 的 MTE1/MTE2
     // 访问落在不同 bank，双流预载下本批 MTE1 写 pong 与上批 MTE2 读 ping 并行零 bank
     // 冲突。bl1HalfBytes 语义 = bank 内 B1→A1 段偏移（32B 对齐——A1 段起点天然对齐）；
     // pong 基址 = L1SIZE/2 单点保证（本 helper 是 L1 布局唯一构造入口，四处调用点共用）
     __aicore__ inline void GetL1Buf(bool pong, uint32_t bl1HalfBytes, uint32_t bl1HalfElems, uint32_t al1Elems,
                                     LocalTensor<SrcT>& bl1, LocalTensor<SrcT>& al1) const
     {
-        const uint32_t bankBytes = static_cast<uint32_t>(pong) * (TOTAL_L1_SIZE / 2);
+        // offsetPingPong 同款（wino GetL1Buf 先例——TOTAL_L1_SIZE 基函数内 constexpr）
+        constexpr uint32_t l1BankBytes = TOTAL_L1_SIZE / 2; // L1 单 bank（ping@0/pong@l1BankBytes）
+        const uint32_t bankBytes = static_cast<uint32_t>(pong) * l1BankBytes;
         bl1 = LocalTensor<SrcT>(TPosition::A1, bankBytes, bl1HalfElems);
         al1 = LocalTensor<SrcT>(TPosition::A1, bankBytes + bl1HalfBytes, al1Elems);
     }
@@ -412,7 +380,7 @@ private:
                                       uint32_t coutAlign16, uint32_t kl0HoWoAlign16, const LocalTensor<SrcT>& al1,
                                       const LocalTensor<SrcT>& bl1, const LocalTensor<float>& l0c)
     {
-        constexpr uint32_t l0aHalfElems = TOTAL_L0A_SIZE / 2 / sizeof(SrcT);
+        constexpr uint32_t l0aHalfElems = L0A_HALF_BYTES / sizeof(SrcT);
         // L0B tile 用 Init 的上界口径成员：bBufTileBytes_/bBufCnt_ 跨块恒定——buf 物理
         // 边界跨块稳定是池背压链的物理基础；本块 tile 实占
         // Ceil(kl0HoWo,8)·8·cinAlign16·hkwk ≤ 上界 tileBytes 恒成立
@@ -423,7 +391,7 @@ private:
             for (uint32_t howoIdx = 0; howoIdx < howoTotal; howoIdx += kl0HoWoAlign16) {
                 const uint32_t howoLen = Std::min(kl0HoWoAlign16, howoTotal - howoIdx);
 
-                LocalTensor<SrcT> l0a(TPosition::A2, a0Pong_ * (TOTAL_L0A_SIZE / 2), l0aHalfElems);
+                LocalTensor<SrcT> l0a(TPosition::A2, a0Pong_ * L0A_HALF_BYTES, l0aHalfElems);
 
                 const uint8_t flagA = MTE1FlagDy(a0Pong_);
                 WaitFlag<HardEvent::M_MTE1>(flagA);
@@ -489,7 +457,7 @@ private:
         const ShapeAttribute& shape = config.shape;
         const uint32_t alignedCout = config.tiling.singleShapeAligned16Cout;
         const uint32_t dhowo = shape.dout * shape.hout * shape.wout;
-        const uint32_t paddedDhowo = (dhowo + 15) / 16 * 16; // A1 行距 16 对齐（见 IterateK 注释）
+        const uint32_t paddedDhowo = Ops::Base::CeilAlign<uint32_t>(dhowo, BLOCK_CUBE); // A1 行距 16 对齐（见 IterateK 注释）
         Dn2NzParams dn2nz;
         dn2nz.dnNum = 1;                   // ★单 batch 搬运（半区承载 batch 维）
         dn2nz.dValue = cRange.coutLength;  // 真实 co 段长（B1 同构取真实段长）
@@ -528,7 +496,10 @@ private:
         load2d.mStep = Ops::Base::CeilDiv<uint32_t>(howoLen, BLOCK_CUBE);
         load2d.kStep = static_cast<uint16_t>(coutAlign16 / C0<SrcT>());
         load2d.srcStride = Ops::Base::CeilDiv<uint32_t>(dhowo, BLOCK_CUBE);
-        load2d.dstStride = static_cast<uint16_t>(load2d.kStep / 2);
+        // dstStride 半单位语义（wino FP32_DST_STRIDE_DIVISOR 同款）：kStep 恒偶
+        // （M=alignedCout 恒 16 对齐 → kStep=M/8 偶），折半无损
+        constexpr uint32_t LOAD2D_DST_STRIDE_DIVISOR = 2;
+        load2d.dstStride = static_cast<uint16_t>(load2d.kStep / LOAD2D_DST_STRIDE_DIVISOR);
         const uint32_t srcOff = (doutIdx * shape.hout * shape.wout + howoIdx) * BpUtils::C0<SrcT>();
         LoadData(l0a, al1[srcOff], load2d);
     }
@@ -612,15 +583,13 @@ private:
     // ---------- fmap GM → B1 单 batch 半区（dnNum=1，与 LoadA1Dy 完全同构） ----------
     // 每 batch 一条 Dn2Nz{dnNum=1, dValue=cinLength, nValue=dhwin}，B1 双半区
     // ping-pong + 预载，batch 维由半区基址承载——L1 门不含 batch 因子
-    // （大 batch 场景可算）。半区段宽按本块 cinAlign16（尾块/主块一套逻辑），
+    // （大 batch 场景可算）。cinAlign16 由外层传入（尾块/主块一套逻辑），
     // 与 LoadL0Fmap 的 channelSize 同源。
     __aicore__ inline void LoadL1Fmap(const LocalTensor<SrcT>& bl1, const DLoadConfig& config,
-                                      const CoutCinRange& cRange, uint32_t batchIdx)
+                                      const CoutCinRange& cRange, uint32_t cinAlign16, uint32_t batchIdx)
     {
         const ShapeAttribute& shape = config.shape;
         const uint64_t dhwin = static_cast<uint64_t>(shape.din) * shape.hin * shape.win;
-        // 本块 16 对齐 cin 段宽（B1 布局量；与 IterateK/LoadL0Fmap 的 cinAlign16 同式）
-        const uint32_t cinAlign16 = (cRange.cinLength + 15) / 16 * 16;
 
         Dn2NzParams dn2nz;
         dn2nz.dnNum = 1;                                    // ★单 batch 搬运（B1 半区承载 batch 维）
@@ -641,8 +610,8 @@ private:
     // S8：fixpipe L0C→GM 直达，COLUMN_MAJOR(NZ2DN)——引擎 LoadL0c2GmNormal 先例
     // （退化 curSingleCoreDk=1：每 dk 段独占 L0C，源固定段基址，无 srcDkStride）
     __aicore__ inline void DirectOutL0C(const LocalTensor<float>& l0c, GlobalTensor<float>& y, uint64_t yBase,
-                                        uint32_t alignedCout, uint32_t hkwk, uint32_t dhwk, const CoutCinRange& cRange,
-                                        uint32_t cinTotal)
+                                        uint32_t alignedCout, uint32_t cinAlign16, uint32_t dhwk,
+                                        const CoutCinRange& cRange, uint32_t cinTotal)
     {
         FixpipeParamsArch3510<CO2Layout::COLUMN_MAJOR> fp;
         fp.params.dnNum = static_cast<uint16_t>(cRange.coutLength); // DN 矩阵数 = co（真实值）
@@ -652,7 +621,8 @@ private:
         // ★L0C 块序 B = cin16G*tap + g（tap 外层，LoadL0Fmap 配对连续落位）。
         // 块序公式 B = (CS*tap + SS*g)/M → CS = M*cin16G（tap 步进 cin16G 块）、SS = M（g 步进 1 块）。
         // y 生产布局不变（DM/DS/nSize/mSize 不动）
-        fp.params.srcNzC0Stride = static_cast<uint16_t>(alignedCout * ((cRange.cinLength + 15) / 16)); // tap 步进
+        fp.params.srcNzC0Stride =
+            static_cast<uint16_t>(alignedCout * (cinAlign16 / BLOCK_CUBE)); // tap 步进
         fp.srcStride = static_cast<uint16_t>(alignedCout); // cin16 组步进（C0 单位）
         fp.dstStride = dhwk;                               // 元素：DN 行长
         fp.params.dstDnMatrixStride = cinTotal * dhwk;     // 元素：相邻 co 的 DN 步进

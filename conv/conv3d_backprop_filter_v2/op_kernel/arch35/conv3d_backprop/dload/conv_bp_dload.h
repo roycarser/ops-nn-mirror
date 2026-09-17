@@ -18,7 +18,6 @@ namespace BpDLoad {
 
 // BL1 全载模板顶层串联类：DLoadCompute（单块 K 全载计算）+ 蛇形分核块走位
 // （BpUtils::BlockIterator）编排——上板可直调形态。
-//
 // 调用契约（三步，顺序不可变；fmap/dy/y 三个 GM 地址全部裸传，调用侧不构造任何
 // GlobalTensor——__gm__ uint8_t* 即 GM_ADDR 展开形态，kernel 入口参数直传零转换）：
 //   1. Init 一次：fmapGm/dyGm 输入 GM 裸地址 + config（shape + tiling）+ blockNum
@@ -29,7 +28,6 @@ namespace BpDLoad {
 //      完成全部块循环、装载、计算与块间同步
 //   3. End 必须调用：消费跨块/跨半区背压残留 Set——漏调则残留 flag 污染同核
 //      后续 kernel 的首块装载（TQue Reset 残留 freeBufEvt 消费先例）
-//
 // 迭代块宽 = tiling.singleShapeAlignedCout（host 侧应取 16 对齐块宽；sim 旧散装编排
 // 传 raw singleShapeCout，16 对齐时两者等价）
 template <typename SrcT>
