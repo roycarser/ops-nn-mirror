@@ -19,8 +19,9 @@
 
 #define TPL_STREAM_K 1
 #define TPL_MN_STREAM_K 2
-#define TPL_DLOAD 3 // ★第二十五轮：原 TPL_FMAP_RESIDENT 改名（fmap_resident 测试代码退役，
-                    // 槽位 3 值沿用——tiling key 二进制兼容，host/kernel 两侧同步）
+// DLoad 模板（原 TPL_FMAP_RESIDENT 改名，槽位 3 值沿用——tiling key 二进制兼容，
+// host/kernel 两侧同步）
+#define TPL_DLOAD 3
 #define TPL_WINOGRAD_DISABLE 0
 #define TPL_WINOGRAD_SINGLE_SHAPE_TILE_1 1
 #define TPL_WINOGRAD_SINGLE_SHAPE_TILE_2 2

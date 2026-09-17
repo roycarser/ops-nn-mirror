@@ -27,12 +27,12 @@ using namespace AscendC;
 // conv_bp_common_data_blocks.h——winograd 侧引用公共版，运行时逻辑零变化（迁移泛化点见
 // data_blocks 头注释：SingleShape 改 Create 入参、coreNum/blockNum 可选显式传入，
 // 本文件调用均走默认 GetBlockNum 路径）
-using BpUtils::SwizzleTopology2D;
-using BpUtils::BlockIterDirection;
-using BpUtils::COUT;
-using BpUtils::CIN;
-using BpUtils::GetBlockFromSwizzle2D;
 using BpUtils::BlockIterator;
+using BpUtils::BlockIterDirection;
+using BpUtils::CIN;
+using BpUtils::COUT;
+using BpUtils::GetBlockFromSwizzle2D;
+using BpUtils::SwizzleTopology2D;
 
 template <typename TilingT>
 class BatchTileKIterator {

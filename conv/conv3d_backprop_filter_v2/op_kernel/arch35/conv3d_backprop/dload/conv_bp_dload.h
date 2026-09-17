@@ -1,3 +1,12 @@
+/**
+ * Copyright (c) 2026 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
 #ifndef CONV_BP_DLOAD_H
 #define CONV_BP_DLOAD_H
 
@@ -25,8 +34,7 @@ namespace BpDLoad {
 template <typename SrcT>
 class ConvBackpropFilterDLoad {
 public:
-    inline __aicore__ void Init(GM_ADDR fmapGm, GM_ADDR dyGm,
-                                const DLoadConfig& config, uint32_t blockNum = 0)
+    inline __aicore__ void Init(GM_ADDR fmapGm, GM_ADDR dyGm, const DLoadConfig& config, uint32_t blockNum = 0)
     {
         config_ = config;
         blockNum_ = blockNum;
@@ -66,10 +74,7 @@ public:
         }
     }
 
-    inline __aicore__ void End()
-    {
-        computer_.End();
-    }
+    inline __aicore__ void End() { computer_.End(); }
 
 private:
     // 生产布局块基址：y[cout][cin][dhwK] 全局 ND，

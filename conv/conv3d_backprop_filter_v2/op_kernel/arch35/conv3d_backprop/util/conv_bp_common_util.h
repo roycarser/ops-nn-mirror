@@ -101,6 +101,6 @@ static inline uint32_t __aicore__ AivCoreId()
 
 static inline uint32_t __aicore__ AivNums() { return AscendC::GetBlockNum() * AivNumInBlock(); }
 
-}
+} // namespace BpUtils
 
 #endif // CONV_BP_COMMON_UTIL_H

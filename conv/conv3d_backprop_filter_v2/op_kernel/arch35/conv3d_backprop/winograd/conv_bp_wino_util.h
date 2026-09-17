@@ -20,7 +20,6 @@
 #include "op_kernel/math_util.h"
 #include "../util/conv_bp_common_util.h"
 
-
 using BpUtils::C0;
 
 template <typename T>
@@ -298,11 +297,10 @@ static __aicore__ inline void CalRtSingleShapeBlock(RtTiling& tiling, uint32_t c
 
 // ConvBpUtil（winograd/fullload 共用），此处保留全局别名兼容既有引用
 using CoutCinRange = BpUtils::CoutCinRange;
-using BpUtils::AivNumInBlock;
 using BpUtils::AicCoreId;
 using BpUtils::AivCoreId;
+using BpUtils::AivNumInBlock;
 using BpUtils::AivNums;
-
 
 // 余数均摊切分实现
 //

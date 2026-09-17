@@ -1,13 +1,12 @@
 /**
  * Copyright (c) 2026 Huawei Technologies Co., Ltd.
- * This program is free software and/or modify it under the terms and conditions of
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
  * CANN Open Software License Agreement Version 2.0 (the "License").
  * Please refer to the License for details. You may not use this file except in compliance with the License.
  * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
  * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
  * See LICENSE in the root of the software repository for the full text of the License.
  */
-
 /*!
  * \file conv3d_backprop_filter_v2_dload_tiling.cpp
  * \brief DLoad host tiling：白名单 6 case（SwinUnetr_net ID4447：0020/0021/0023/0041/0042/0044，
@@ -47,12 +46,12 @@ struct DLoadWhitelistCase {
 };
 // dout/ho/wo = di/hi/wi 对每 case 恒等（3³ 或 6³ 立方），kd/kh/kw=3
 constexpr DLoadWhitelistCase DLOAD_WHITELIST[6] = {
-    {8, 384, 6, 384, 6, 6},  // 0020: dy[8,384,6,6,6] fmap[8,384,6,6,6] f[384,384,3,3,3]
-    {8, 384, 6, 768, 6, 6},  // 0021: dy[8,384,6,6,6] fmap[8,768,6,6,6] f[384,768,3,3,3]
-    {8, 768, 3, 768, 3, 3},  // 0023: dy[8,768,3,3,3] fmap[8,768,3,3,3] f[768,768,3,3,3]
-    {4, 384, 6, 384, 6, 6},  // 0041: dy[4,384,6,6,6] fmap[4,384,6,6,6] f[384,384,3,3,3]
-    {4, 384, 6, 768, 6, 6},  // 0042: dy[4,384,6,6,6] fmap[4,768,6,6,6] f[384,768,3,3,3]
-    {4, 768, 3, 768, 3, 3},  // 0044: dy[4,768,3,3,3] fmap[4,768,3,3,3] f[768,768,3,3,3]
+    {8, 384, 6, 384, 6, 6}, // 0020: dy[8,384,6,6,6] fmap[8,384,6,6,6] f[384,384,3,3,3]
+    {8, 384, 6, 768, 6, 6}, // 0021: dy[8,384,6,6,6] fmap[8,768,6,6,6] f[384,768,3,3,3]
+    {8, 768, 3, 768, 3, 3}, // 0023: dy[8,768,3,3,3] fmap[8,768,3,3,3] f[768,768,3,3,3]
+    {4, 384, 6, 384, 6, 6}, // 0041: dy[4,384,6,6,6] fmap[4,384,6,6,6] f[384,384,3,3,3]
+    {4, 384, 6, 768, 6, 6}, // 0042: dy[4,384,6,6,6] fmap[4,768,6,6,6] f[384,768,3,3,3]
+    {4, 768, 3, 768, 3, 3}, // 0044: dy[4,768,3,3,3] fmap[4,768,3,3,3] f[768,768,3,3,3]
 };
 } // namespace
 
@@ -101,8 +100,8 @@ bool Conv3DBackpropFilterV2DLoadTiling::CheckDLoadAttrs()
         OP_LOGD(opName_, "DLoad tiling only support 3*3*3 kernel (whitelist)");
         return false;
     }
-    if (runInfo_.stride_d != 1 || runInfo_.stride_h != 1 || runInfo_.stride_w != 1 ||
-        runInfo_.dilation_d != 1 || runInfo_.dilation_h != 1 || runInfo_.dilation_w != 1) {
+    if (runInfo_.stride_d != 1 || runInfo_.stride_h != 1 || runInfo_.stride_w != 1 || runInfo_.dilation_d != 1 ||
+        runInfo_.dilation_h != 1 || runInfo_.dilation_w != 1) {
         OP_LOGD(opName_, "DLoad tiling only support stride/dilation 1 (whitelist)");
         return false;
     }
@@ -127,8 +126,7 @@ bool Conv3DBackpropFilterV2DLoadTiling::CheckWhitelist()
         // 立方档 dout=ho=wo=di=hi=wi=dhw；filter=(co,ci,3,3,3) 由 co/ci 等值蕴含
         const bool dyEq = runInfo_.batch == c.batch && runInfo_.co == c.co && runInfo_.dout == c.dout &&
                           runInfo_.ho == c.dout && runInfo_.wo == c.dout;
-        const bool fmapEq = runInfo_.ci == c.ci && runInfo_.di == c.di && runInfo_.hi == c.di &&
-                            runInfo_.wi == c.di;
+        const bool fmapEq = runInfo_.ci == c.ci && runInfo_.di == c.di && runInfo_.hi == c.di && runInfo_.wi == c.di;
         if (dyEq && fmapEq) {
             return true;
         }

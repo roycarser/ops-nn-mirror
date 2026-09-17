@@ -1,13 +1,12 @@
 /**
  * Copyright (c) 2025-2026 Huawei Technologies Co., Ltd.
- * This program is free software and/or modify it under the terms and conditions of
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
  * CANN Open Software License Agreement Version 2.0 (the "License").
  * Please refer to the License for details. You may not use this file except in compliance with the License.
  * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
  * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
  * See LICENSE in the root of the software repository for the full text of the License.
  */
-
 /*!
  * \file conv_bp_common_data_blocks.h
  * \brief 卷积反向公共蛇形分核走位层：SwizzleTopology2D / BlockIterDirection /
@@ -93,9 +92,13 @@ public:
         }
     }
 
-    __aicore__ inline SwizzleTopology2D(uint32_t h, uint32_t w, uint16_t blockH, uint16_t blockW,
-                                        uint32_t coreNum)
-        : h_(h), w_(w), blockH_(blockH), blockW_(blockW), fullSuperRows_(h / blockH), totalCnt_(h * w),
+    __aicore__ inline SwizzleTopology2D(uint32_t h, uint32_t w, uint16_t blockH, uint16_t blockW, uint32_t coreNum)
+        : h_(h),
+          w_(w),
+          blockH_(blockH),
+          blockW_(blockW),
+          fullSuperRows_(h / blockH),
+          totalCnt_(h * w),
           coreNum_(coreNum)
     {}
 
