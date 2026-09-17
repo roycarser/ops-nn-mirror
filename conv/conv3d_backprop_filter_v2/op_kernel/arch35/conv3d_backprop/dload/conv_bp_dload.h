@@ -24,7 +24,8 @@ namespace BpDLoad {
 //   1. Init 一次：fmapGm/dyGm 输入 GM 裸地址 + config（shape + tiling）+ blockNum
 //      （生产路径 0 = GetBlockNum()；kernel 直调/UT 场景 <<<blockNum>>> 上下文可能未按
 //       aclnn 语义填充该寄存器，显式传入更稳），类内部构造 GlobalTensor 并预置事件链
-//   2. Process 一次：yGm 输出 GM 裸地址（生产布局 [cout][cin][dhwK] 全局 ND），内部
+//   2. Process 一次：yGm 输出 GM 裸地址（生产布局 [cout][cin][dhwK] 全局 ND，恒 fp32
+//      ——与输入 SrcT 解耦，非 fp32 输出由外部通路转换），内部
 //      完成全部块循环、装载、计算与块间同步
 //   3. End 必须调用：消费跨块/跨半区背压残留 Set——漏调则残留 flag 污染同核
 //      后续 kernel 的首块装载（TQue Reset 残留 freeBufEvt 消费先例）
@@ -56,7 +57,8 @@ public:
         if ASCEND_IS_AIV {
             return; // 纯 Cube 模板：AIV 核进入直接跳出
         }
-        y_.SetGlobalBuffer(reinterpret_cast<__gm__ SrcT*>(yGm));
+        // y 输出恒 fp32（L0C fp32 累加直出——与输入 SrcT 解耦，非 fp32 输出由外部通路转换）
+        y_.SetGlobalBuffer(reinterpret_cast<__gm__ float*>(yGm));
         // 分核蛇形走位（不绑 cin）：每块每 batch 必装 fmap，无需 cin 绑核驻留复用——
         // util 蛇形 BlockIterator（SwizzleTopology2D 核网格蛇形递进，L2 友好）。
         // IterDir=CIN：cout 块沿拓扑 H、cin 块沿 W（与 cin-major 块序最接近的拓扑方向）。
@@ -88,7 +90,7 @@ private:
 
     DLoadConfig config_ = {};
     uint32_t blockNum_ = 0;
-    AscendC::GlobalTensor<SrcT> y_;
+    AscendC::GlobalTensor<float> y_; // y 输出恒 fp32（与输入 SrcT 解耦）
     DLoadCompute<SrcT> computer_;
 };
 

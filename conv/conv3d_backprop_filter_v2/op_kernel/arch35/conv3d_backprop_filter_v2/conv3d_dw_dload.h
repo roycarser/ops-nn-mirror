@@ -11,7 +11,9 @@
  * \file conv3d_dw_dload.h
  * \brief conv3d dw DLoad 模板（d 轴 MTE2 载入）kernel 入口——Conv2DDwWinograd
  *        （conv2d_dw_winograd.h）同构形态：Init（GM + TilingData 装配）→ Process（整算）
- *        → End（串联类内部收尾）。tiling 映射（dwTiling → DLoadTiling）：
+ *        → End（串联类内部收尾）。模板参 SrcT 仅为输入类型；y 输出恒 fp32
+ *        （与输入 SrcT 解耦，非 fp32 输出由外部通路转换）。tiling 映射（dwTiling →
+ *        DLoadTiling）：
  *        singleShapeAligned16Cin ← baseN/hkwk（baseN = mmad N 轴 = cin×hkwk → 反解）、
  *        singleShapeAligned16Cout ← baseM（cout 块宽/M 侧）、kl0HoWo ← baseK（howo 窗宽/
  *        K 侧）、dout/ho/wo ← dwTiling 直取（howodout 权威值）、hf32Flag ← hf32Flag。
@@ -60,7 +62,7 @@ public:
 
         fmap_ = reinterpret_cast<__gm__ SrcT*>(fmap);
         dy_ = reinterpret_cast<__gm__ SrcT*>(dy);
-        y_ = reinterpret_cast<__gm__ SrcT*>(y);
+        y_ = reinterpret_cast<__gm__ float*>(y); // y 输出恒 fp32（与输入 SrcT 解耦）
     }
 
     __aicore__ inline void Process()
@@ -81,7 +83,7 @@ private:
 
     __gm__ SrcT* fmap_ = nullptr;
     __gm__ SrcT* dy_ = nullptr;
-    __gm__ SrcT* y_ = nullptr;
+    __gm__ float* y_ = nullptr; // y 输出恒 fp32
 };
 
 #endif // CONV3D_DW_DLOAD_H
