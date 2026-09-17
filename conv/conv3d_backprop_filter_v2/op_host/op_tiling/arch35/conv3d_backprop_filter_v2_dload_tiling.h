@@ -48,11 +48,6 @@ protected:
 
     ge::graphStatus DoOpTiling() override;
 
-    // 场景模板为 tiling 唯一权威（原 fmap_resident 先例同款）：base DoLibApiTiling 会以
-    // blockTiling_（本场景未初始化）覆写 DoOpTiling 产物（baseM/baseN/baseK/
-    // singleCore 系列等），必须拦截
-    ge::graphStatus DoLibApiTiling() override { return ge::GRAPH_SUCCESS; }
-
     ge::graphStatus GetWorkspaceSize() override;
 
 private:

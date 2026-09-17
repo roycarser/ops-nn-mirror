@@ -11,8 +11,7 @@
 /*!
  * \file conv_bp_common_data_blocks.h
  * \brief 卷积反向公共蛇形分核走位层：SwizzleTopology2D / BlockIterDirection /
- *        GetBlockFromSwizzle2D / BlockIterator（第二十一轮改名轮自 conv_bp_common_util.h
- *        拆分——第十七轮自 winograd conv_bp_wino_data_blocks 迁入泛化）。
+ *        GetBlockFromSwizzle2D / BlockIterator。
  *        依赖方向单向：本文件 → conv_bp_common_util.h（CoutCinRange/AicCoreId）；
  *        math_util（CeilDiv）与 utils/std/algorithm（AscendC::Std::min/max）随 util 链可见
  */
@@ -23,15 +22,16 @@
 #include "conv_bp_common_util.h"
 
 namespace BpUtils {
-// ==================== 蛇形分核走位（第十七轮自 winograd conv_bp_wino_data_blocks 迁入） ====================
-// 迁移泛化点（winograd 侧逻辑零变化）：
-//   1. BlockIterator 的 SingleShapeCout/Cin 由 TilingT/BlockConfig 模板静态量改为 Create 入参
-//      （winograd 调用点改传 BlockConfig::SingleShapeCout<TilingT>()，运行时取值相同）
-//   2. SwizzleTopology2D/CalBlockGrid/BlockIterator 增加可选 coreNum/blockNum 参数（默认 0 =
-//      GetBlockNum()，winograd 不传时行为原样）——fullload 的直调/UT 场景显式传入更稳
-//      （<<<blockDim>>> 上下文可能未按 aclnn 语义填充该寄存器）
-// 内部 GetBlockNum() 裸调用统一改 coreNum_（归一化后的核数），GetLocalBlock 的核号走
-// BpUtils::AicCoreId()（与迁移前 WinoDetail 内 AicCoreId() 等价）
+// ==================== 蛇形分核走位 ====================
+// 设计要点：
+//   1. BlockIterator 的 SingleShapeCout/Cin 为 Create 入参（不依赖 TilingT/BlockConfig
+//      模板静态量，winograd 调用点传 BlockConfig::SingleShapeCout<TilingT>()，运行时
+//      取值相同）
+//   2. SwizzleTopology2D/CalBlockGrid/BlockIterator 的 coreNum/blockNum 可选参数
+//      （默认 0 = GetBlockNum()，winograd 不传时行为不变）——kernel 直调/UT 场景
+//      显式传入更稳（<<<blockNum>>> 上下文可能未按 aclnn 语义填充该寄存器）
+// 内部核数统一走 coreNum_（归一化后的核数），GetLocalBlock 的核号走
+// BpUtils::AicCoreId()
 
 class SwizzleTopology2D {
 public:
@@ -248,9 +248,9 @@ public:
         return topology_.TotalCnt() > mainBlockNum ? topology_.TotalCnt() - mainBlockNum : 0;
     }
 
-    // singleShapeCout/Cin 由构造入参传入（泛化：不再依赖 TilingT/BlockConfig 模板静态量）；
-    // blockNum：核数来源，0 = GetBlockNum()（★第二十三轮补：Create 内一次兜底赋值——
-    // 构造函数与 CalBlockGrid 直收外层输入，不再各自判 0/内部默认），>0 = 显式指定
+    // singleShapeCout/Cin 由构造入参传入（不依赖模板静态量）；
+    // blockNum：核数来源，0 = GetBlockNum()（Create 内一次兜底赋值——构造函数与
+    // CalBlockGrid 直收归一后输入，不再各自判 0/内部默认），>0 = 显式指定
     static inline __aicore__ BlockIterator Create(bool onlyIterMainBlocks, uint32_t cout, uint32_t cin,
                                                   uint32_t singleShapeCout, uint32_t singleShapeCin,
                                                   uint32_t blockNum = 0)

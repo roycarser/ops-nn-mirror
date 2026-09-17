@@ -33,9 +33,8 @@ public:
     __aicore__ inline void Init(GM_ADDR fmap, GM_ADDR dy, GM_ADDR y, GM_ADDR workspace,
                                 const conv_bp_v2_kernel::Conv3DBackpropFilterV2TilingData* tilingData)
     {
-        // ★第二十三轮补（项 2/3/4）：冗余 shape 成员全删（dwTiling 即用即读）；
-        //   dout/ho/wo 直取上层 tiling（不再 CalcOut 自算）；cin = baseN/hkwk
-        //   （baseN = mmad N 轴 = cin×hkwk → 反解 cin）
+        // dwTiling 即用即读（不设冗余 shape 成员）；cin = baseN/hkwk
+        // （baseN = mmad N 轴 = cin×hkwk → 反解 cin）
         const conv_bp_v2_kernel::TConv3DDwTiling& dw = tilingData->dwTiling;
         config_.shape.hk = static_cast<uint16_t>(dw.hk);
         config_.shape.wk = static_cast<uint16_t>(dw.wk);
@@ -49,13 +48,12 @@ public:
         config_.shape.din = dw.di;
         config_.shape.hin = dw.hi;
         config_.shape.win = dw.wi;
-        // ★howodout 直取（项 3）：上层 dwTiling 的 dout/ho/wo（输出 shape 权威值——
-        //   含 stride≠1 等上层语义，本地 CalcOut 的 stride=1 假设删除）
+        // dout/ho/wo 直取上层 dwTiling（输出 shape 权威值，含 stride≠1 等上层语义）
         config_.shape.dout = dw.dout;
         config_.shape.hout = dw.ho;
         config_.shape.wout = dw.wo;
-        // ★tiling 映射（项 4 修正）：baseM = mmad M 轴（cout 块宽）、baseK = howo 窗宽；
-        //   baseN = mmad N 轴 = cin×hkwk → cin 块宽 = baseN/hkwk（host 侧保证整除）
+        // tiling 映射：baseM = mmad M 轴（cout 块宽）、baseK = howo 窗宽；
+        // baseN = mmad N 轴 = cin×hkwk → cin 块宽 = baseN/hkwk（host 侧保证整除）
         config_.tiling.singleShapeAligned16Cin = static_cast<uint16_t>(dw.baseN / (dw.hk * dw.wk));
         config_.tiling.singleShapeAligned16Cout = static_cast<uint16_t>(dw.baseM);
         config_.tiling.kl0HoWo = static_cast<uint16_t>(dw.baseK);

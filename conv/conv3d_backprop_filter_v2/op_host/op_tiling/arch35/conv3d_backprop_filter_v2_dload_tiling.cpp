@@ -168,29 +168,31 @@ uint64_t Conv3DBackpropFilterV2DLoadTiling::GetTilingKey() const
 
 ge::graphStatus Conv3DBackpropFilterV2DLoadTiling::DoOpTiling()
 {
-    // runInfo_/shape 链继承基类；SetShapeTiling/SetAttrTiling 复用（shape/attr 全量直传——
-    // DLoad 的 Conv3DDwDLoad 入口从 dwTiling 直取 batch/cin/cout/di/hi/wi/hk/wk/dk/pad/stride）
+    // shape/attr 直传（Conv3DDwDLoad 入口从 dwTiling 直取 batch/cin/cout/di/hi/wi/hk/wk/
+    // dk/pad/stride）；块档参数写入 blockTiling_ 工作变量，由基类 DoLibApiTiling 统一
+    // 提交进 dwTiling（含派生量与调试打印——保留基类完整流程，不 override）
     SetShapeTiling(tilingData_.dwTiling);
     SetAttrTiling(tilingData_.dwTiling);
 
-    auto& dwt = tilingData_.dwTiling;
-    // ★固定档 tiling（白名单档）：baseK=16（kl0HoWo）、baseM=128（cout 块宽）、
-    // baseN=144（=16 cin × 3×3 hkwk，mmad N 轴 → 入口反解 cin=baseN/hkwk=16）
-    dwt.baseK = DLOAD_BASE_K;
-    dwt.baseM = DLOAD_BASE_M;
-    dwt.baseN = DLOAD_BASE_N_PER_HKWK * runInfo_.kh * runInfo_.kw; // 144 = 16×9
-    dwt.hf32Flag = runInfo_.hf32Flag;                               // 白名单恒 1（cube_math_type==3）
-    // 引擎兼容字段（stream_k 语义不生效——kernel 侧 TPL_DLOAD 分支不读这些；置安全默认防
-    // 未初始化）：singleShape 系列按固定档对齐、streamkType 显式 0
-    dwt.singleCoreM = DLOAD_BASE_M;
-    dwt.singleCoreN = dwt.baseN;
-    dwt.singleCoreK = DLOAD_BASE_K;
-    dwt.singleCoreCin = DLOAD_BASE_N_PER_HKWK;
-    dwt.singleCoreCout = DLOAD_BASE_M;
-    dwt.singleCoreGroup = 1;
-    dwt.usedCoreNum = platformInfo_.core_num;
-    dwt.streamkType = 0;
-    dwt.splitWo = runInfo_.wo;
+    // 固定档：baseK=16（kl0HoWo howo 窗宽）、baseM=128（cout 块宽）、
+    // baseN=144（=16 cin × hkwk，mmad N 轴——入口反解 cin=baseN/hkwk=16）
+    blockTiling_.blockBaseM = DLOAD_BASE_M;
+    blockTiling_.blockBaseN = DLOAD_BASE_N_PER_HKWK * runInfo_.kh * runInfo_.kw;
+    blockTiling_.blockBaseK = DLOAD_BASE_K;
+    blockTiling_.usedCoreNum = platformInfo_.core_num;
+    blockTiling_.singleCoreM = DLOAD_BASE_M;
+    blockTiling_.singleCoreN = blockTiling_.blockBaseN;
+    blockTiling_.singleCoreK = static_cast<uint64_t>(DLOAD_BASE_K);
+    blockTiling_.singleCoreBatchDout = 1;
+    blockTiling_.streamkType = 0; // 非 streamK 路径（kernel 侧不读，语义占位防默认 1）
+    blockTiling_.splitWo = runInfo_.wo;
+    blockTiling_.splitWi = 1;
+    blockTiling_.tailWo = 0;
+    blockTiling_.tailWi = 0;
+    // hf32Flag 显式写（基类 DoOpTiling 同款 runInfo 直传，本类 override 后须自写；
+    // SetAttrTiling 只覆盖 stride/pad/dilation/realGroup）；singleCoreCin/Ho/Cout 为
+    // DoLibApiTiling 派生量（baseN/hkwk/C0 与 singleCoreK/wo）
+    tilingData_.dwTiling.hf32Flag = runInfo_.hf32Flag; // 白名单恒 1（cube_math_type==3）
     return ge::GRAPH_SUCCESS;
 }
 
