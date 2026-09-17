@@ -12,7 +12,9 @@
  * \file conv3d_backprop_filter_v2_dload_tiling.cpp
  * \brief DLoad host tiling：白名单 6 case（SwinUnetr_net ID4447：0020/0021/0023/0041/0042/0044，
  *        全部 hfloat32_NCDHW fp32）内嵌常量管控 + 固定档 TilingData 填充。
- *        优先级 1（winograd 注册 2——DLoad 优先选路，不命中白名单即 fallthrough）。
+ *        优先级 8（winograd 注册 9——DLoad 优先选路，不命中白名单即 fallthrough；
+ *        ★arch35 侧整体后移至 8/9/10：REGISTER_TILING_TEMPLATE 走全局按 op_type 单桶
+ *        注册表，arch22 侧已占用 0/1，arch35 若取 1 会被 AddTiling 判重复拒收）。
  */
 
 #ifndef CONV3D_BACKPROP_FILTER_V2_DLOAD_TILING_CPP
@@ -85,7 +87,7 @@ bool Conv3DBackpropFilterV2DLoadTiling::CheckDLoadDtype()
         return false;
     }
     if (runInfo_.hf32Flag != 1) {
-        OP_LOGD(opName_, "DLoad tiling only support hf32 (cube_math_type==3 whitelist)");
+        OP_LOGD(opName_, "DLoad tiling only support hf32 (whitelist)");
         return false;
     }
     return true;
@@ -205,8 +207,9 @@ ge::graphStatus Conv3DBackpropFilterV2DLoadTiling::GetWorkspaceSize()
     return ge::GRAPH_SUCCESS;
 }
 
-// ★优先级 1（winograd 注册 2——DLoad 白名单命中优先选路，不命中 fallthrough winograd）
-REGISTER_TILING_TEMPLATE("Conv3DBackpropFilterV2", Conv3DBackpropFilterV2DLoadTiling, 1);
+// ★优先级 8（winograd 注册 9——DLoad 白名单命中优先选路，不命中 fallthrough winograd；
+// arch35 侧整体后移避让 arch22 的 0/1，见文件头注释）
+REGISTER_TILING_TEMPLATE("Conv3DBackpropFilterV2", Conv3DBackpropFilterV2DLoadTiling, 8);
 } // namespace Conv
 } // namespace NN
 } // namespace Ops
