@@ -49,7 +49,7 @@ private:
     bool CheckFormat();
     bool CheckDLoadDtype();
     bool CheckDLoadAttrs();
-    bool CheckWhitelist();
+    bool CheckShape();
 };
 } // namespace Conv
 } // namespace NN

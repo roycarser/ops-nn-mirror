@@ -26,7 +26,7 @@ namespace NN {
 namespace Conv {
 namespace {
 
-struct DLoadWhitelistCase {
+struct DLoadShapeCase {
     int32_t batch;
     int32_t co;   // dy C（= filter co）
     int32_t dout; // dy D
@@ -35,7 +35,7 @@ struct DLoadWhitelistCase {
     int32_t dhw;  // 立方档（3³/6³：fmap dy 同 D/H/W）
 };
 // dout/ho/wo = di/hi/wi 对每 case 恒等（3³ 或 6³ 立方），kd/kh/kw=3
-constexpr DLoadWhitelistCase DLOAD_WHITELIST[6] = {
+constexpr DLoadShapeCase DLOAD_SUPPORT_SHAPE[6] = {
     {8, 384, 6, 384, 6, 6}, // 0020: dy[8,384,6,6,6] fmap[8,384,6,6,6] f[384,384,3,3,3]
     {8, 384, 6, 768, 6, 6}, // 0021: dy[8,384,6,6,6] fmap[8,768,6,6,6] f[384,768,3,3,3]
     {8, 768, 3, 768, 3, 3}, // 0023: dy[8,768,3,3,3] fmap[8,768,3,3,3] f[768,768,3,3,3]
@@ -69,14 +69,14 @@ bool Conv3DBackpropFilterV2DLoadTiling::CheckFormat()
 
 bool Conv3DBackpropFilterV2DLoadTiling::CheckDLoadDtype()
 {
-    // 白名单全 fp32；仅放通 hf32（cube_math_type==3 → runInfo_.hf32Flag==1，common 层已映射）
+    // 仅放通 hf32
     if (runInfo_.a_dtype != ge::DataType::DT_FLOAT || runInfo_.b_dtype != ge::DataType::DT_FLOAT ||
         runInfo_.c_dtype != ge::DataType::DT_FLOAT) {
-        OP_LOGD(opName_, "DLoad tiling only support float (whitelist)");
+        OP_LOGD(opName_, "DLoad tiling only support float");
         return false;
     }
     if (runInfo_.hf32Flag != 1) {
-        OP_LOGD(opName_, "DLoad tiling only support hf32 (whitelist)");
+        OP_LOGD(opName_, "DLoad tiling only support hf32");
         return false;
     }
     return true;
@@ -84,35 +84,35 @@ bool Conv3DBackpropFilterV2DLoadTiling::CheckDLoadDtype()
 
 bool Conv3DBackpropFilterV2DLoadTiling::CheckDLoadAttrs()
 {
-    // 白名单六 case 全同：kernel 3³、stride/dilation dhw 全 1、pad 六值全 1、groups=1
+    // kernel 3³、stride/dilation dhw 全 1、pad 六值全 1、groups=1
     if (runInfo_.kd != DLOAD_KERNEL_SIZE_3 || runInfo_.kh != DLOAD_KERNEL_SIZE_3 ||
         runInfo_.kw != DLOAD_KERNEL_SIZE_3) {
-        OP_LOGD(opName_, "DLoad tiling only support 3*3*3 kernel (whitelist)");
+        OP_LOGD(opName_, "DLoad tiling only support 3*3*3 kernel");
         return false;
     }
     if (runInfo_.stride_d != 1 || runInfo_.stride_h != 1 || runInfo_.stride_w != 1 || runInfo_.dilation_d != 1 ||
         runInfo_.dilation_h != 1 || runInfo_.dilation_w != 1) {
-        OP_LOGD(opName_, "DLoad tiling only support stride/dilation 1 (whitelist)");
+        OP_LOGD(opName_, "DLoad tiling only support stride/dilation 1");
         return false;
     }
     if (runInfo_.pad_f != 1 || runInfo_.pad_b != 1 || runInfo_.pad_u != 1 || runInfo_.pad_d != 1 ||
         runInfo_.pad_l != 1 || runInfo_.pad_r != 1) {
-        OP_LOGD(opName_, "DLoad tiling only support pad 1 (whitelist)");
+        OP_LOGD(opName_, "DLoad tiling only support pad 1");
         return false;
     }
     if (runInfo_.groups != 1) {
-        OP_LOGD(opName_, "DLoad tiling only support groups 1 (whitelist)");
+        OP_LOGD(opName_, "DLoad tiling only support groups 1");
         return false;
     }
     return true;
 }
 
-bool Conv3DBackpropFilterV2DLoadTiling::CheckWhitelist()
+bool Conv3DBackpropFilterV2DLoadTiling::CheckShape()
 {
     // shape 全等比对（fmap=(batch,ci,di,hi,wi)、dy=(batch,co,dout,ho,wo)、filter=(co,ci,kd,kh,kw)——
-    // 白名单 case 均立方（hi=wi=di、ho=wo=dout），dout 与 di 同值表内给）
-    for (const auto& c : DLOAD_WHITELIST) {
-        // dy=(batch,co,dout,ho,wo)（白名单第 1 列）、fmap=(batch,ci,di,hi,wi)（第 2 列），
+    // 表内 case 均立方（hi=wi=di、ho=wo=dout），dout 与 di 同值表内给）
+    for (const auto& c : DLOAD_SUPPORT_SHAPE) {
+        // dy=(batch,co,dout,ho,wo)（表第 1 列）、fmap=(batch,ci,di,hi,wi)（第 2 列），
         // 立方档 dout=ho=wo=di=hi=wi=dhw；filter=(co,ci,3,3,3) 由 co/ci 等值蕴含
         const bool dyEq = runInfo_.batch == c.batch && runInfo_.co == c.co && runInfo_.dout == c.dout &&
                           runInfo_.ho == c.dout && runInfo_.wo == c.dout;
@@ -121,7 +121,7 @@ bool Conv3DBackpropFilterV2DLoadTiling::CheckWhitelist()
             return true;
         }
     }
-    OP_LOGD(opName_, "DLoad tiling whitelist miss (shape mismatch)");
+    OP_LOGD(opName_, "DLoad tiling shape mismatch");
     return false;
 }
 
@@ -140,7 +140,7 @@ bool Conv3DBackpropFilterV2DLoadTiling::IsCapable()
     if (!CheckDLoadAttrs()) {
         return false;
     }
-    if (!CheckWhitelist()) {
+    if (!CheckShape()) {
         return false;
     }
     return true;
@@ -178,7 +178,7 @@ ge::graphStatus Conv3DBackpropFilterV2DLoadTiling::DoOpTiling()
     // hf32Flag 显式写（基类 DoOpTiling 同款 runInfo 直传，本类 override 后须自写；
     // SetAttrTiling 只覆盖 stride/pad/dilation/realGroup）；singleCoreCin/Ho/Cout 为
     // DoLibApiTiling 派生量（baseN/hkwk/C0 与 singleCoreK/wo）
-    tilingData_.dwTiling.hf32Flag = runInfo_.hf32Flag; // 白名单恒 1（cube_math_type==3）
+    tilingData_.dwTiling.hf32Flag = runInfo_.hf32Flag; // 支持场景恒 1（cube_math_type==3）
     return ge::GRAPH_SUCCESS;
 }
 
@@ -191,8 +191,6 @@ ge::graphStatus Conv3DBackpropFilterV2DLoadTiling::GetWorkspaceSize()
     return ge::GRAPH_SUCCESS;
 }
 
-// ★优先级 8（winograd 注册 9——DLoad 白名单命中优先选路，不命中 fallthrough winograd；
-// arch35 侧整体后移避让 arch22 的 0/1，见文件头注释）
 REGISTER_TILING_TEMPLATE("Conv3DBackpropFilterV2", Conv3DBackpropFilterV2DLoadTiling, 8);
 } // namespace Conv
 } // namespace NN
