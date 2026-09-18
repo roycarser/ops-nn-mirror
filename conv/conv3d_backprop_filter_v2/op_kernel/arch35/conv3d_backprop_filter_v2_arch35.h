@@ -24,7 +24,7 @@
 
 using namespace AscendC;
 
-#define CONV3D_DX_INPUT_RUN_OP(...)                      \
+#define CONV3D_DW_INPUT_RUN_OP(...)                      \
     do {                                                 \
         __VA_ARGS__ op;                                  \
         op.Init(x, out_backprop, y, user1, &tilingData); \
@@ -63,13 +63,13 @@ __global__ __aicore__ void conv3d_backprop_filter_v2_arch35(GM_ADDR x, GM_ADDR f
 
     if constexpr (winogradTilingFlag != TPL_WINOGRAD_DISABLE) {
         TPipe pipe;
-        CONV3D_DX_INPUT_RUN_OP(Conv2dDwWinograd<DTYPE_X, DTYPE_Y, winogradTilingFlag, winogradResidentFlag>);
+        CONV3D_DW_INPUT_RUN_OP(Conv2dDwWinograd<DTYPE_X, DTYPE_Y, winogradTilingFlag, winogradResidentFlag>);
         return;
     }
     // DLoad 模板（原 fmap_resident 槽位退役改名）：全覆写直出（kNeedInitOutput=false）——
     // DLoad 的 dk 全 pad 空段语义依赖 y 预清零，InitOutput 沿用豁免（真机复核项）
     if constexpr (conv3DDWTemplateId == TPL_DLOAD) {
-        CONV3D_DX_INPUT_RUN_OP(Conv3DDwDLoad<DTYPE_X>);
+        CONV3D_DW_INPUT_RUN_OP(Conv3DDwDLoad<DTYPE_X>);
         return;
     }
     Conv3dDwInitOutput<DTYPE_Y> opInitOutput;
@@ -78,10 +78,10 @@ __global__ __aicore__ void conv3d_backprop_filter_v2_arch35(GM_ADDR x, GM_ADDR f
     opInitOutput.Destroy();
 
     if constexpr (conv3DDWTemplateId == TPL_STREAM_K) {
-        CONV3D_DX_INPUT_RUN_OP(Conv3dDwBasicBlockStreamK<DTYPE_X, FORMAT_X, DTYPE_OUT_BACKPROP, FORMAT_OUT_BACKPROP,
+        CONV3D_DW_INPUT_RUN_OP(Conv3dDwBasicBlockStreamK<DTYPE_X, FORMAT_X, DTYPE_OUT_BACKPROP, FORMAT_OUT_BACKPROP,
                                                          DTYPE_Y, FORMAT_Y, isSplitKernelHW, groupEnlarge>);
     } else if constexpr (conv3DDWTemplateId == TPL_MN_STREAM_K) {
-        CONV3D_DX_INPUT_RUN_OP(Conv3dDwBasicBlockMNStreamK<DTYPE_X, FORMAT_X, DTYPE_OUT_BACKPROP, FORMAT_OUT_BACKPROP,
+        CONV3D_DW_INPUT_RUN_OP(Conv3dDwBasicBlockMNStreamK<DTYPE_X, FORMAT_X, DTYPE_OUT_BACKPROP, FORMAT_OUT_BACKPROP,
                                                            DTYPE_Y, FORMAT_Y, isSplitKernelHW, groupEnlarge>);
     }
 }

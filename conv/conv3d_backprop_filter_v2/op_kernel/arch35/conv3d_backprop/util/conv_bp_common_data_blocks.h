@@ -22,22 +22,13 @@
 
 namespace BpUtils {
 // ==================== 蛇形分核走位 ====================
-// 设计要点：
-//   1. BlockIterator 的 SingleShapeCout/Cin 为 Create 入参（不依赖 TilingT/BlockConfig
-//      模板静态量，winograd 调用点传 BlockConfig::SingleShapeCout<TilingT>()，运行时
-//      取值相同）
-//   2. SwizzleTopology2D/CalBlockGrid/BlockIterator 的 coreNum/blockNum 可选参数
-//      （默认 0 = GetBlockNum()，winograd 不传时行为不变）——kernel 直调/UT 场景
-//      显式传入更稳（<<<blockNum>>> 上下文可能未按 aclnn 语义填充该寄存器）
-// 内部核数统一走 coreNum_（归一化后的核数），GetLocalBlock 的核号走
-// BpUtils::AicCoreId()
+// SingleShapeCout/Cin 与 coreNum/blockNum 均为 Create 入参（blockNum 默认 0 =
+// GetBlockNum()；直调/UT 场景显式传入更稳）；核号走 BpUtils::AicCoreId()
 
 class SwizzleTopology2D {
 public:
-    // 实现简单的Tile和蛇形走位，所有核构成一个blockHW块进行递进，提升L2cache的命中率
-    // 尾轮自适应，仅最后一轮才会产生空转
-    //                          blockW(4)
-    //                    |-----------------------|
+    // 所有核构成一个 blockHW 块蛇形递进（提升 L2 命中率），尾轮自适应仅末轮空转：
+    //                    |-----------------------| blockW(4)
     //                 -  +-----+-----+-----+-----+-----+-----+-----+
     //                 |  |core0|core2|core4|core6|core0|core2|core4|
     //       blockH(2)-|  +-----+-----+-----+-----+-----+-----+-----+
@@ -171,10 +162,10 @@ private:
         const uint32_t superRowH = superIdx * blockH_;
         const uint32_t localBlockH = AscendC::Std::min(blockH_, h_ - superRowH);
         // 每个BlockHW里面按H方向优先递进,也就是连续核的范围为(H0,W0),(H1,W0),(H2,W0)
-        // 列H方向优先按当前实现起来较为简单
+        // 列内 H 方向优先
         outH = superRowH + localIdx % localBlockH;
         const uint32_t forwardW = localIdx / localBlockH;
-        // 蛇形走位，先从头走到尾，在从尾走到头
+        // 蛇形走位：奇偶行反向
         outW = (superIdx % SNAKE_PATTERN_PERIOD == 0) ? forwardW : (w_ - 1 - forwardW);
         outSuperIdx = superIdx;
     }
@@ -251,9 +242,7 @@ public:
         return topology_.TotalCnt() > mainBlockNum ? topology_.TotalCnt() - mainBlockNum : 0;
     }
 
-    // singleShapeCout/Cin 由构造入参传入（不依赖模板静态量）；
-    // blockNum：核数来源，0 = GetBlockNum()（Create 内一次兜底赋值——构造函数与
-    // CalBlockGrid 直收归一后输入，不再各自判 0/内部默认），>0 = 显式指定
+    // blockNum：核数来源，0 = GetBlockNum()（Create 内一次兜底），>0 = 显式指定
     static inline __aicore__ BlockIterator Create(bool onlyIterMainBlocks, uint32_t cout, uint32_t cin,
                                                   uint32_t singleShapeCout, uint32_t singleShapeCin,
                                                   uint32_t blockNum = 0)
@@ -290,7 +279,7 @@ private:
         uint32_t tailBlocks = totalBlocks - mainIterCnt * coreNum;
 
         if (onlyIterMainBlocks) {
-            // 尾轮空闲核超过一半时，将这些block留到后续切k处理
+            // 尾轮空闲核超过半数时留到后续切 k
             return tailBlocks > (coreNum / 2) ? mainIterCnt + 1 : mainIterCnt;
         } else {
             return mainIterCnt + (tailBlocks > 0 ? 1 : 0);

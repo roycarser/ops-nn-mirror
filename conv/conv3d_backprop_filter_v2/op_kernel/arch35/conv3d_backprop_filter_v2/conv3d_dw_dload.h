@@ -9,15 +9,11 @@
  */
 /*!
  * \file conv3d_dw_dload.h
- * \brief conv3d dw DLoad 模板（d 轴 MTE2 载入）kernel 入口——Conv2DDwWinograd
- *        （conv2d_dw_winograd.h）同构形态：Init（GM + TilingData 装配）→ Process（整算）
- *        → End（串联类内部收尾）。模板参 SrcT 仅为输入类型；y 输出恒 fp32
- *        （与输入 SrcT 解耦，非 fp32 输出由外部通路转换）。tiling 映射（dwTiling →
- *        DLoadTiling）：
- *        singleShapeAligned16Cin ← baseN/hkwk（baseN = mmad N 轴 = cin×hkwk → 反解）、
- *        singleShapeAligned16Cout ← baseM（cout 块宽/M 侧）、kl0HoWo ← baseK（howo 窗宽/
- *        K 侧）、dout/ho/wo ← dwTiling 直取（howodout 权威值）、hf32Flag ← hf32Flag。
- *        blockNum 生产路径 0 = GetBlockNum()（串联类内部处理，AIV 侧 Process 直接跳出）
+ * \brief conv3d dw DLoad 模板 kernel 入口：Init（GM + TilingData 装配）→ Process
+ *        （整算）→ End。模板参 SrcT 仅为输入类型，y 输出恒 fp32。tiling 映射
+ *        （dwTiling → DLoadTiling）：singleShapeAligned16Cin ← baseN/hkwk（baseN =
+ *        mmad N 轴 = cin×hkwk）、singleShapeAligned16Cout ← baseM、kl0HoWo ← baseK、
+ *        dout/ho/wo ← dwTiling 直取
  */
 
 #ifndef CONV3D_DW_DLOAD_H
@@ -34,8 +30,7 @@ public:
     __aicore__ inline void Init(GM_ADDR fmap, GM_ADDR dy, GM_ADDR y, GM_ADDR workspace,
                                 const conv_bp_v2_kernel::Conv3DBackpropFilterV2TilingData* tilingData)
     {
-        // dwTiling 即用即读（不设冗余 shape 成员）；cin = baseN/hkwk
-        // （baseN = mmad N 轴 = cin×hkwk → 反解 cin）
+        // dwTiling 即用即读；cin 块宽 = baseN/hkwk（baseN = mmad N 轴 = cin×hkwk，host 保证整除）
         const conv_bp_v2_kernel::TConv3DDwTiling& dw = tilingData->dwTiling;
         config_.shape.hk = static_cast<uint16_t>(dw.hk);
         config_.shape.wk = static_cast<uint16_t>(dw.wk);
@@ -49,26 +44,23 @@ public:
         config_.shape.din = dw.di;
         config_.shape.hin = dw.hi;
         config_.shape.win = dw.wi;
-        // dout/ho/wo 直取上层 dwTiling（输出 shape 权威值，含 stride≠1 等上层语义）
+        // dout/ho/wo 直取上层（输出 shape 权威值，含 stride≠1 等上层语义）
         config_.shape.dout = dw.dout;
         config_.shape.hout = dw.ho;
         config_.shape.wout = dw.wo;
-        // tiling 映射：baseM = mmad M 轴（cout 块宽）、baseK = howo 窗宽；
-        // baseN = mmad N 轴 = cin×hkwk → cin 块宽 = baseN/hkwk（host 侧保证整除）
         config_.tiling.singleShapeAligned16Cin = static_cast<uint16_t>(dw.baseN / (dw.hk * dw.wk));
         config_.tiling.singleShapeAligned16Cout = static_cast<uint16_t>(dw.baseM);
         config_.tiling.kl0HoWo = static_cast<uint16_t>(dw.baseK);
-        config_.tiling.hf32Flag = dw.hf32Flag != 0;
+        config_.tiling.hf32Flag = dw.hf32Flag;
 
         fmap_ = reinterpret_cast<__gm__ SrcT*>(fmap);
         dy_ = reinterpret_cast<__gm__ SrcT*>(dy);
-        y_ = reinterpret_cast<__gm__ float*>(y); // y 输出恒 fp32（与输入 SrcT 解耦）
+        y_ = reinterpret_cast<__gm__ float*>(y);
     }
 
     __aicore__ inline void Process()
     {
-        // 纯 Cube 模板：AIV 核直接跳出（引擎 if ASCEND_IS_AIV 先例形态——与串联类
-        // Process 内判别同款双保险）
+        // 纯 Cube 模板：AIV 核直接跳出（与串联类内判别双保险）
         if ASCEND_IS_AIV {
             return;
         }
@@ -83,7 +75,7 @@ private:
 
     __gm__ SrcT* fmap_ = nullptr;
     __gm__ SrcT* dy_ = nullptr;
-    __gm__ float* y_ = nullptr; // y 输出恒 fp32
+    __gm__ float* y_ = nullptr;
 };
 
 #endif // CONV3D_DW_DLOAD_H

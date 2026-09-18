@@ -25,13 +25,7 @@ namespace Ops {
 namespace NN {
 namespace Conv {
 namespace {
-// ==================== 白名单（编译期内嵌 6 case 常量表，第二十五轮用户裁决卡严档） ====================
-// 来源：dload_whitelist（SwinUnetr_net ID4447，全部 hfloat32_NCDHW）——shape+attribute 全等
-// 才放通；比对字段：fmap=(batch,ci,di,hi,wi)、dy=(batch,co,dout,ho,wo)、filter=(co,ci,kd,kh,kw)、
-// stride_dhw/pad 六值/dilation_dhw（六 case 全同：stride=1、pad=1、dilation=1、kernel 3³）
-// ★白名单列序实证（UT case1/4 交错档钉死）：dload_whitelist 三列 = [dy(out_backprop),
-//   fmap(input), filter]，非直觉的 [fmap, dy, filter]——0021 按此序 filter[384,768]=
-//   [co,ci] 与 dy C=384(co)/fmap C=768(ci) 完全自洽（反序则 co/ci 冲突）
+
 struct DLoadWhitelistCase {
     int32_t batch;
     int32_t co;   // dy C（= filter co）
@@ -133,7 +127,6 @@ bool Conv3DBackpropFilterV2DLoadTiling::CheckWhitelist()
 
 bool Conv3DBackpropFilterV2DLoadTiling::IsCapable()
 {
-    // ★SoC a5 限定（用户裁决"只有 a5"）：DAV_3510（winograd IsSocVersion91095 同款判定）
     if (!IsSocVersion91095()) {
         return false;
     }
@@ -155,8 +148,6 @@ bool Conv3DBackpropFilterV2DLoadTiling::IsCapable()
 
 uint64_t Conv3DBackpropFilterV2DLoadTiling::GetTilingKey() const
 {
-    // ★第一参传模板参数值（原 fmap_resident 先例同款——GET_TPL_TILING_KEY(TPL_FMAP_RESIDENT=3,...)
-    // → key=2）；TPL_DLOAD=3 值沿用 → key=2 二进制兼容。winograd 的 (1,..) 是 TPL_STREAM_K 值
     const uint64_t tilingKey = GET_TPL_TILING_KEY(TPL_DLOAD, 0, 0, TPL_WINOGRAD_DISABLE, 0);
     OP_LOGD(context_->GetNodeName(), "tilingKey is: [%lu] , use DLoad tiling", tilingKey);
     return tilingKey;
@@ -164,9 +155,8 @@ uint64_t Conv3DBackpropFilterV2DLoadTiling::GetTilingKey() const
 
 ge::graphStatus Conv3DBackpropFilterV2DLoadTiling::DoOpTiling()
 {
-    // shape/attr 直传（Conv3DDwDLoad 入口从 dwTiling 直取 batch/cin/cout/di/hi/wi/hk/wk/
-    // dk/pad/stride）；块档参数写入 blockTiling_ 工作变量，由基类 DoLibApiTiling 统一
-    // 提交进 dwTiling（含派生量与调试打印——保留基类完整流程，不 override）
+    // shape/attr 直传；块档参数写 blockTiling_ 工作变量，由基类 DoLibApiTiling 统一
+    // 提交 dwTiling（含派生与打印）
     SetShapeTiling(tilingData_.dwTiling);
     SetAttrTiling(tilingData_.dwTiling);
 

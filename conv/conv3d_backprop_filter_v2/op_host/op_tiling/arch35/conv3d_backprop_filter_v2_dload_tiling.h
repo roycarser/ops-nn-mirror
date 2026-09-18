@@ -22,7 +22,7 @@ namespace NN {
 namespace Conv {
 class Conv3DBackpropFilterV2DLoadTiling : public Conv3DDWV2BasicBlockTilingArch35 {
 public:
-    // 固定档 tiling（用户裁决白名单档）：baseK=16（kl0HoWo howo 窗宽，16 倍数）、
+    // 固定档 tiling：baseK=16（kl0HoWo howo 窗宽，16 倍数）、
     // baseM=128（cout 块宽）、baseN=144（=16 cin × 3×3 hkwk，mmad N 轴）
     static constexpr uint32_t DLOAD_BASE_K = 16;
     static constexpr uint32_t DLOAD_BASE_M = 128;
