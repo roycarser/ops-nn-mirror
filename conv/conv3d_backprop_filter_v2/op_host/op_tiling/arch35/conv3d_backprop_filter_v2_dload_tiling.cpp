@@ -9,11 +9,7 @@
  */
 /*!
  * \file conv3d_backprop_filter_v2_dload_tiling.cpp
- * \brief DLoad host tiling：白名单 6 case（SwinUnetr_net ID4447：0020/0021/0023/0041/0042/0044，
- *        全部 hfloat32_NCDHW fp32）内嵌常量管控 + 固定档 TilingData 填充。
- *        优先级 8（winograd 注册 9——DLoad 优先选路，不命中白名单即 fallthrough；
- *        ★arch35 侧整体后移至 8/9/10：REGISTER_TILING_TEMPLATE 走全局按 op_type 单桶
- *        注册表，arch22 侧已占用 0/1，arch35 若取 1 会被 AddTiling 判重复拒收）。
+ * \brief
  */
 
 #ifndef CONV3D_BACKPROP_FILTER_V2_DLOAD_TILING_CPP

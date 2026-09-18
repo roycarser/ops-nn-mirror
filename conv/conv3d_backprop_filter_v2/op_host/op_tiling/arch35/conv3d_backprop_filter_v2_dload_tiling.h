@@ -9,10 +9,7 @@
  */
 /*!
  * \file conv3d_backprop_filter_v2_dload_tiling.h
- * \brief DLoad 模板（d 轴 MTE2 载入）host tiling：白名单管控（SwinUnetr_net ID4447 六 case
- *        内嵌常量表）+ 固定档 tiling（baseK=16/baseM=128/baseN=16×3×3=144）。
- *        ★卡严策略（第二十五轮用户裁决）：shape+attribute 全等 + NCDHW + fp32 + 仅 hf32
- *        （cube_math_type==3）+ SoC a5（DAV_3510）；不命中 → 不支持（fallthrough winograd）
+ * \brief
  */
 
 #ifndef CONV3D_BACKPROP_FILTER_V2_DLOAD_TILING_H
