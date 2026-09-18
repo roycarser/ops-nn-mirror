@@ -457,7 +457,8 @@ private:
         const ShapeAttribute& shape = config.shape;
         const uint32_t alignedCout = config.tiling.singleShapeAligned16Cout;
         const uint32_t dhowo = shape.dout * shape.hout * shape.wout;
-        const uint32_t paddedDhowo = Ops::Base::CeilAlign<uint32_t>(dhowo, BLOCK_CUBE); // A1 行距 16 对齐（见 IterateK 注释）
+        const uint32_t paddedDhowo = Ops::Base::CeilAlign<uint32_t>(dhowo,
+                                                                    BLOCK_CUBE); // A1 行距 16 对齐（见 IterateK 注释）
         Dn2NzParams dn2nz;
         dn2nz.dnNum = 1;                   // ★单 batch 搬运（半区承载 batch 维）
         dn2nz.dValue = cRange.coutLength;  // 真实 co 段长（B1 同构取真实段长）
@@ -533,10 +534,12 @@ private:
         LoadData3DParamsV2<SrcT> load3d;
         load3d.l1H = shape.hin;
         load3d.l1W = shape.win;
-        load3d.padList[0] = shape.wPad;              // left
-        load3d.padList[1] = shape.wPad;              // right
-        load3d.padList[2] = shape.hPad;              // top（引擎 bL1PadUp）
-        load3d.padList[3] = shape.hPad;              // bottom
+        // pad 序 [left,right,top,bottom]（引擎 conv_util PAD_IDX_L/R/T/B 同序）：left/right=wPad、top/bottom=hPad
+        const uint8_t padList[PAD_SIZE] = {static_cast<uint8_t>(shape.wPad), static_cast<uint8_t>(shape.wPad),
+                                           static_cast<uint8_t>(shape.hPad), static_cast<uint8_t>(shape.hPad)};
+        for (int32_t i = 0; i < PAD_SIZE; ++i) {
+            load3d.padList[i] = padList[i];
+        }
         load3d.channelSize = shape.din * cinAlign16; // 合轴通道视图 [c1g][d]（本块 16 对齐宽）
         load3d.kExtension = C0<SrcT>();              // 单 tap 窗（kExt 多 tap 的 k 轴序
                                                      // [c1][tap][c0] 与 FZ 16 槽不兼容）
@@ -621,8 +624,7 @@ private:
         // ★L0C 块序 B = cin16G*tap + g（tap 外层，LoadL0Fmap 配对连续落位）。
         // 块序公式 B = (CS*tap + SS*g)/M → CS = M*cin16G（tap 步进 cin16G 块）、SS = M（g 步进 1 块）。
         // y 生产布局不变（DM/DS/nSize/mSize 不动）
-        fp.params.srcNzC0Stride =
-            static_cast<uint16_t>(alignedCout * (cinAlign16 / BLOCK_CUBE)); // tap 步进
+        fp.params.srcNzC0Stride = static_cast<uint16_t>(alignedCout * (cinAlign16 / BLOCK_CUBE)); // tap 步进
         fp.srcStride = static_cast<uint16_t>(alignedCout); // cin16 组步进（C0 单位）
         fp.dstStride = dhwk;                               // 元素：DN 行长
         fp.params.dstDnMatrixStride = cinTotal * dhwk;     // 元素：相邻 co 的 DN 步进
