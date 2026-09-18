@@ -66,7 +66,7 @@ __global__ __aicore__ void conv3d_backprop_filter_v2_arch35(GM_ADDR x, GM_ADDR f
         CONV3D_DW_INPUT_RUN_OP(Conv2dDwWinograd<DTYPE_X, DTYPE_Y, winogradTilingFlag, winogradResidentFlag>);
         return;
     }
-    
+
     if constexpr (conv3DDWTemplateId == TPL_DLOAD) {
         CONV3D_DW_INPUT_RUN_OP(Conv3DDwDLoad<DTYPE_X>);
         return;
